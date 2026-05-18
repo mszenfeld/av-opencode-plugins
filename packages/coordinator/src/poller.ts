@@ -1,5 +1,5 @@
 export interface PollerMessage {
-  role: "user" | "assistant" | "system" | string
+  role: string
   content: string
   finish_reason?: string | null | undefined
 }

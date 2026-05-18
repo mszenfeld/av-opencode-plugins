@@ -60,7 +60,6 @@ describe("pollUntilIdle", () => {
 
     await vi.advanceTimersByTimeAsync(pollIntervalMs)
     await vi.advanceTimersByTimeAsync(pollIntervalMs)
-    await vi.advanceTimersByTimeAsync(pollIntervalMs)
 
     const result = await promise
 
@@ -100,7 +99,6 @@ describe("pollUntilIdle", () => {
     })
 
     await vi.advanceTimersByTimeAsync(pollIntervalMs)
-    await vi.advanceTimersByTimeAsync(pollIntervalMs)
 
     const result = await promise
 
@@ -125,7 +123,6 @@ describe("pollUntilIdle", () => {
       pollIntervalMs,
     })
 
-    await vi.advanceTimersByTimeAsync(pollIntervalMs)
     await vi.advanceTimersByTimeAsync(pollIntervalMs)
 
     const result = await promise
