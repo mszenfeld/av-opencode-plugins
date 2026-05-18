@@ -10,6 +10,17 @@ export interface PollUntilIdleOptions {
   pollIntervalMs: number
 }
 
+export class PollerTimeoutError extends Error {
+  readonly kind = "timeout" as const
+  readonly elapsedMs: number
+
+  constructor(elapsedMs: number) {
+    super(`pollUntilIdle: timeout after ${elapsedMs}ms`)
+    this.name = "PollerTimeoutError"
+    this.elapsedMs = elapsedMs
+  }
+}
+
 export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<string> {
   const { fetchMessages, timeoutMs, pollIntervalMs } = options
   const startTime = Date.now()
@@ -17,7 +28,7 @@ export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<stri
   while (true) {
     const elapsed = Date.now() - startTime
     if (elapsed >= timeoutMs) {
-      throw new Error(`pollUntilIdle: timeout after ${elapsed}ms`)
+      throw new PollerTimeoutError(elapsed)
     }
 
     const messages = await fetchMessages()
@@ -29,8 +40,7 @@ export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<stri
 
     const remaining = timeoutMs - (Date.now() - startTime)
     if (remaining <= 0) {
-      const elapsedNow = Date.now() - startTime
-      throw new Error(`pollUntilIdle: timeout after ${elapsedNow}ms`)
+      throw new PollerTimeoutError(Date.now() - startTime)
     }
 
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)))

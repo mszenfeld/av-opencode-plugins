@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   dispatchParallel,
   DEFAULT_RESULT_MAX_BYTES,
@@ -8,19 +8,12 @@ import {
 } from "../src/dispatch.js"
 import type { PollerMessage } from "../src/poller.js"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function finishedMessage(content: string): PollerMessage {
   return { role: "assistant", content, finish_reason: "end_turn" }
 }
 
 function makeSpecialist(
-  sessionMap: Record<
-    string,
-    { messages: PollerMessage[]; createError?: Error }
-  >,
+  sessionMap: Record<string, { messages: PollerMessage[]; createError?: Error }>,
   sessionIdSequence: string[],
 ): DispatchSpecialist {
   let callIndex = 0
@@ -33,7 +26,7 @@ function makeSpecialist(
       }
       return id
     }),
-    sendPrompt: vi.fn(async (_sessionId: string, _prompt: string) => {
+    sendPrompt: vi.fn(async (): Promise<void> => {
       /* no-op */
     }),
     fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
@@ -47,16 +40,11 @@ const defaultRegistry: Record<string, AgentInfo> = {
   "qa-be-tester": { mode: "subagent" },
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("dispatchParallel", () => {
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  // 1. Unknown agent pre-flight
   it("throws on unknown agent before creating any session", async () => {
     const specialist: DispatchSpecialist = {
       createSession: vi.fn(),
@@ -73,7 +61,6 @@ describe("dispatchParallel", () => {
     expect(specialist.createSession).not.toHaveBeenCalled()
   })
 
-  // 2. Primary-mode agent anti-recursion
   it("throws on primary-mode agent before creating any session", async () => {
     const specialist: DispatchSpecialist = {
       createSession: vi.fn(),
@@ -94,7 +81,6 @@ describe("dispatchParallel", () => {
     expect(specialist.createSession).not.toHaveBeenCalled()
   })
 
-  // 3. Single task happy path
   it("returns success result for a single completed task", async () => {
     const sessionMap = {
       s1: { messages: [finishedMessage("task output")] },
@@ -117,25 +103,42 @@ describe("dispatchParallel", () => {
     expect(results[0]?.duration_ms).toBeGreaterThanOrEqual(0)
   })
 
-  // 4. Results returned in input order
-  it("returns results in input order regardless of completion order", async () => {
-    const sessionMap = {
-      fe: { messages: [finishedMessage("frontend result")] },
-      be: { messages: [finishedMessage("backend result")] },
+  it("returns results in input order even when later tasks complete first", async () => {
+    let unblockFe: (() => void) | undefined
+    const feGate = new Promise<void>((resolve) => {
+      unblockFe = resolve
+    })
+
+    const specialist: DispatchSpecialist = {
+      createSession: vi.fn(async (agentName: string): Promise<string> => agentName),
+      sendPrompt: vi.fn(async () => {
+        /* no-op */
+      }),
+      fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
+        if (sessionId === "qa-fe-tester") {
+          await feGate
+          return [finishedMessage("frontend result")]
+        }
+        return [finishedMessage("backend result")]
+      }),
     }
-    const specialist = makeSpecialist(sessionMap, ["fe", "be"])
 
     const tasks: DispatchTask[] = [
       { name: "qa-fe-tester", prompt: "fe" },
       { name: "qa-be-tester", prompt: "be" },
     ]
 
-    const results = await dispatchParallel({
+    const promise = dispatchParallel({
       tasks,
       agentRegistry: defaultRegistry,
       specialist,
       pollIntervalMs: 10,
     })
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    unblockFe?.()
+
+    const results = await promise
 
     expect(results).toHaveLength(2)
     expect(results[0]?.name).toBe("qa-fe-tester")
@@ -144,7 +147,6 @@ describe("dispatchParallel", () => {
     expect(results[1]?.result).toBe("backend result")
   })
 
-  // 5. Truncates large results
   it("truncates results larger than resultMaxBytes", async () => {
     const bigContent = "x".repeat(150 * 1024)
     const sessionMap = {
@@ -168,7 +170,6 @@ describe("dispatchParallel", () => {
     expect(results[0]?.result.endsWith("[…truncated…]")).toBe(true)
   })
 
-  // 6. Context appended to prompt
   it("includes context in the prompt when provided", async () => {
     const sessionMap = {
       s1: { messages: [finishedMessage("ok")] },
@@ -196,14 +197,13 @@ describe("dispatchParallel", () => {
     )
   })
 
-  // 7. Per-task error isolation
   it("isolates per-task errors — task 2 succeeds even when task 1 throws in createSession", async () => {
     const sessionMap: Record<string, { messages: PollerMessage[] }> = {
       s2: { messages: [finishedMessage("be success")] },
     }
     let callIndex = 0
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(async (agentName: string): Promise<string> => {
+      createSession: vi.fn(async (): Promise<string> => {
         const index = callIndex++
         if (index === 0) {
           throw new Error("session creation failed")
@@ -233,12 +233,12 @@ describe("dispatchParallel", () => {
     expect(results).toHaveLength(2)
     expect(results[0]?.status).toBe("error")
     expect(results[0]?.error).toBeTruthy()
+    expect(results[0]?.duration_ms).toBeGreaterThanOrEqual(0)
     expect(results[1]?.status).toBe("success")
     expect(results[1]?.result).toBe("be success")
   })
 
-  // 8. Per-task timeout via fake timers
-  it("classifies timeout errors correctly using fake timers", async () => {
+  it("classifies timeout errors correctly and records non-zero duration", async () => {
     vi.useFakeTimers()
 
     const specialist: DispatchSpecialist = {
@@ -266,32 +266,23 @@ describe("dispatchParallel", () => {
     expect(results).toHaveLength(1)
     expect(results[0]?.status).toBe("timeout")
     expect(results[0]?.error).toMatch(/timeout/i)
+    expect(results[0]?.duration_ms).toBeGreaterThan(0)
   })
 
-  // 9. Parallel execution — both createSession calls fire before any fetchMessages resolves
-  it("fires all createSession calls before awaiting any poll completion", async () => {
-    const createOrder: string[] = []
-
-    // fetchMessages resolves immediately with a finished message so there's no real delay
-    const sessionMap: Record<string, PollerMessage[]> = {
-      fe: [finishedMessage("fe done")],
-      be: [finishedMessage("be done")],
-    }
-
-    let createCallCount = 0
-    const ids = ["fe", "be"]
+  it("fires all createSession calls before any fetchMessages call (parallel launch)", async () => {
+    const opLog: string[] = []
 
     const specialist: DispatchSpecialist = {
       createSession: vi.fn(async (agentName: string): Promise<string> => {
-        const id = ids[createCallCount++] ?? agentName
-        createOrder.push(id)
-        return id
+        opLog.push(`create:${agentName}`)
+        return agentName
       }),
       sendPrompt: vi.fn(async () => {
         /* no-op */
       }),
       fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
-        return sessionMap[sessionId] ?? []
+        opLog.push(`fetch:${sessionId}`)
+        return [finishedMessage(`${sessionId} done`)]
       }),
     }
 
@@ -300,23 +291,22 @@ describe("dispatchParallel", () => {
       { name: "qa-be-tester", prompt: "be" },
     ]
 
-    const results = await dispatchParallel({
+    await dispatchParallel({
       tasks,
       agentRegistry: defaultRegistry,
       specialist,
       pollIntervalMs: 10,
     })
 
-    // Both sessions must have been created
-    expect(createOrder).toContain("fe")
-    expect(createOrder).toContain("be")
-    expect(createOrder).toHaveLength(2)
-
-    // Both tasks must have succeeded
-    expect(results[0]?.status).toBe("success")
-    expect(results[1]?.status).toBe("success")
-
-    // Both createSession calls must have been made (parallel, not sequential-and-bail)
+    let lastCreateIndex = -1
+    for (let i = opLog.length - 1; i >= 0; i--) {
+      if (opLog[i]?.startsWith("create:") === true) {
+        lastCreateIndex = i
+        break
+      }
+    }
+    const firstFetchIndex = opLog.findIndex((op) => op.startsWith("fetch:"))
+    expect(lastCreateIndex).toBeLessThan(firstFetchIndex)
     expect(specialist.createSession).toHaveBeenCalledTimes(2)
   })
 })
