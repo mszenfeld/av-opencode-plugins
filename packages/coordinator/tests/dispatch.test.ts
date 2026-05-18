@@ -13,21 +13,18 @@ function finishedMessage(content: string): PollerMessage {
 }
 
 function makeSpecialist(
-  sessionMap: Record<string, { messages: PollerMessage[]; createError?: Error }>,
+  sessionMap: Record<string, { messages: PollerMessage[]; startError?: Error }>,
   sessionIdSequence: string[],
 ): DispatchSpecialist {
   let callIndex = 0
   return {
-    createSession: vi.fn(async (agentName: string): Promise<string> => {
+    startTask: vi.fn(async (agentName: string): Promise<string> => {
       const id = sessionIdSequence[callIndex++] ?? agentName
       const cfg = sessionMap[id]
-      if (cfg?.createError !== undefined) {
-        throw cfg.createError
+      if (cfg?.startError !== undefined) {
+        throw cfg.startError
       }
       return id
-    }),
-    sendPrompt: vi.fn(async (): Promise<void> => {
-      /* no-op */
     }),
     fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
       return sessionMap[sessionId]?.messages ?? []
@@ -47,8 +44,7 @@ describe("dispatchParallel", () => {
 
   it("throws on unknown agent before creating any session", async () => {
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(),
-      sendPrompt: vi.fn(),
+      startTask: vi.fn(),
       fetchMessages: vi.fn(),
     }
 
@@ -58,13 +54,12 @@ describe("dispatchParallel", () => {
       dispatchParallel({ tasks, agentRegistry: defaultRegistry, specialist }),
     ).rejects.toThrow("Unknown agent: unknown-agent")
 
-    expect(specialist.createSession).not.toHaveBeenCalled()
+    expect(specialist.startTask).not.toHaveBeenCalled()
   })
 
   it("throws on primary-mode agent before creating any session", async () => {
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(),
-      sendPrompt: vi.fn(),
+      startTask: vi.fn(),
       fetchMessages: vi.fn(),
     }
 
@@ -78,7 +73,7 @@ describe("dispatchParallel", () => {
       dispatchParallel({ tasks, agentRegistry: registry, specialist }),
     ).rejects.toThrow("Cannot dispatch primary agent: perun")
 
-    expect(specialist.createSession).not.toHaveBeenCalled()
+    expect(specialist.startTask).not.toHaveBeenCalled()
   })
 
   it("returns success result for a single completed task", async () => {
@@ -110,10 +105,7 @@ describe("dispatchParallel", () => {
     })
 
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(async (agentName: string): Promise<string> => agentName),
-      sendPrompt: vi.fn(async () => {
-        /* no-op */
-      }),
+      startTask: vi.fn(async (agentName: string): Promise<string> => agentName),
       fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
         if (sessionId === "qa-fe-tester") {
           await feGate
@@ -187,31 +179,28 @@ describe("dispatchParallel", () => {
       pollIntervalMs: 10,
     })
 
-    expect(specialist.sendPrompt).toHaveBeenCalledWith(
+    expect(specialist.startTask).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining("base"),
     )
-    expect(specialist.sendPrompt).toHaveBeenCalledWith(
+    expect(specialist.startTask).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining("extra"),
     )
   })
 
-  it("isolates per-task errors — task 2 succeeds even when task 1 throws in createSession", async () => {
+  it("isolates per-task errors — task 2 succeeds even when task 1 throws in startTask", async () => {
     const sessionMap: Record<string, { messages: PollerMessage[] }> = {
       s2: { messages: [finishedMessage("be success")] },
     }
     let callIndex = 0
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(async (): Promise<string> => {
+      startTask: vi.fn(async (): Promise<string> => {
         const index = callIndex++
         if (index === 0) {
           throw new Error("session creation failed")
         }
         return "s2"
-      }),
-      sendPrompt: vi.fn(async () => {
-        /* no-op */
       }),
       fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
         return sessionMap[sessionId]?.messages ?? []
@@ -242,10 +231,7 @@ describe("dispatchParallel", () => {
     vi.useFakeTimers()
 
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(async () => "s-timeout"),
-      sendPrompt: vi.fn(async () => {
-        /* no-op */
-      }),
+      startTask: vi.fn(async () => "s-timeout"),
       fetchMessages: vi.fn(async (): Promise<PollerMessage[]> => []),
     }
 
@@ -269,16 +255,13 @@ describe("dispatchParallel", () => {
     expect(results[0]?.duration_ms).toBeGreaterThan(0)
   })
 
-  it("fires all createSession calls before any fetchMessages call (parallel launch)", async () => {
+  it("fires all startTask calls before any fetchMessages call (parallel launch)", async () => {
     const opLog: string[] = []
 
     const specialist: DispatchSpecialist = {
-      createSession: vi.fn(async (agentName: string): Promise<string> => {
-        opLog.push(`create:${agentName}`)
+      startTask: vi.fn(async (agentName: string): Promise<string> => {
+        opLog.push(`start:${agentName}`)
         return agentName
-      }),
-      sendPrompt: vi.fn(async () => {
-        /* no-op */
       }),
       fetchMessages: vi.fn(async (sessionId: string): Promise<PollerMessage[]> => {
         opLog.push(`fetch:${sessionId}`)
@@ -298,15 +281,15 @@ describe("dispatchParallel", () => {
       pollIntervalMs: 10,
     })
 
-    let lastCreateIndex = -1
+    let lastStartIndex = -1
     for (let i = opLog.length - 1; i >= 0; i--) {
-      if (opLog[i]?.startsWith("create:") === true) {
-        lastCreateIndex = i
+      if (opLog[i]?.startsWith("start:") === true) {
+        lastStartIndex = i
         break
       }
     }
     const firstFetchIndex = opLog.findIndex((op) => op.startsWith("fetch:"))
-    expect(lastCreateIndex).toBeLessThan(firstFetchIndex)
-    expect(specialist.createSession).toHaveBeenCalledTimes(2)
+    expect(lastStartIndex).toBeLessThan(firstFetchIndex)
+    expect(specialist.startTask).toHaveBeenCalledTimes(2)
   })
 })

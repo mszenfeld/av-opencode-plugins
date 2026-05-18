@@ -15,8 +15,7 @@ export interface DispatchResult {
 }
 
 export interface DispatchSpecialist {
-  createSession(agentName: string): Promise<string>
-  sendPrompt(sessionId: string, prompt: string): Promise<void>
+  startTask(agentName: string, prompt: string): Promise<string>
   fetchMessages(sessionId: string): Promise<PollerMessage[]>
 }
 
@@ -73,9 +72,8 @@ async function runTask(
   const startTime = Date.now()
 
   try {
-    const sessionId = await specialist.createSession(task.name)
     const fullPrompt = task.context ? `${task.prompt}\n\n${task.context}` : task.prompt
-    await specialist.sendPrompt(sessionId, fullPrompt)
+    const sessionId = await specialist.startTask(task.name, fullPrompt)
 
     let result = await pollUntilIdle({
       fetchMessages: () => specialist.fetchMessages(sessionId),
