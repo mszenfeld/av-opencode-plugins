@@ -6,6 +6,7 @@ import { AppVerkFrontendDeveloperPlugin } from "../packages/frontend-developer/d
 import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/index.js"
 import { AppVerkQAPlugin } from "../packages/qa/dist/index.js"
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js"
+import { AppVerkCoordinatorPlugin } from "../packages/coordinator/dist/index.js"
 type PluginHooks = Awaited<ReturnType<Plugin>>
 type HookKey = Exclude<keyof PluginHooks, "config" | "tool">
 type MergedHook = (...args: unknown[]) => Promise<void>
@@ -21,6 +22,7 @@ const defaultPluginFactories: Plugin[] = [
   AppVerkSkillRegistryPlugin,
   AppVerkQAPlugin,
   AppVerkSwiftDeveloperPlugin,
+  AppVerkCoordinatorPlugin,
 ]
 
 function mergeTools(plugins: PluginHooks[]): PluginHooks["tool"] {
