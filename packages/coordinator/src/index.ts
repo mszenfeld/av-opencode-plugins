@@ -48,6 +48,9 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         .describe("Array of tasks to dispatch in parallel"),
     },
     async execute(args, context) {
+      if (context.sessionID.length === 0) {
+        throw new Error("dispatch_parallel: missing context.sessionID — cannot parent child sessions")
+      }
       const specialist = createSDKSpecialist(client, context.sessionID)
       const agentRegistry = await loadAgentRegistry(client)
       const results = await dispatchParallel({
@@ -110,6 +113,8 @@ type SDKClient = ReturnType<typeof createOpencodeClient>
 function createSDKSpecialist(client: SDKClient, parentSessionID: string): DispatchSpecialist {
   return {
     async startTask(agentName: string, prompt: string): Promise<string> {
+      // OpenCode's session.create body accepts only parentID/title — the target
+      // agent is bound on the subsequent session.prompt call. Two-step is required.
       const created = await client.session.create({
         body: {
           parentID: parentSessionID,
@@ -157,19 +162,24 @@ function toPollerMessage(raw: {
 }
 
 async function loadAgentRegistry(client: SDKClient): Promise<Record<string, AgentInfo>> {
+  let list: Array<{ name: string; mode: string }>
   try {
     const result = await client.app.agents()
-    const list = result.data ?? []
-    const registry: Record<string, AgentInfo> = {}
-    for (const agent of list) {
-      const name = agent.name
-      const mode = agent.mode === "primary" ? "primary" : "subagent"
-      if (name.length > 0) {
-        registry[name] = { mode }
-      }
-    }
-    return registry
-  } catch {
-    return {}
+    list = result.data ?? []
+  } catch (err) {
+    throw new Error(
+      `dispatch_parallel: failed to load agent registry from SDK: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
   }
+  const registry: Record<string, AgentInfo> = {}
+  for (const agent of list) {
+    const name = agent.name
+    const mode = agent.mode === "primary" ? "primary" : "subagent"
+    if (name.length > 0) {
+      registry[name] = { mode }
+    }
+  }
+  return registry
 }

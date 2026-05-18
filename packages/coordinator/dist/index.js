@@ -136,6 +136,9 @@ var AppVerkCoordinatorPlugin = async (input) => {
       ).describe("Array of tasks to dispatch in parallel")
     },
     async execute(args, context) {
+      if (context.sessionID.length === 0) {
+        throw new Error("dispatch_parallel: missing context.sessionID \u2014 cannot parent child sessions");
+      }
       const specialist = createSDKSpecialist(client, context.sessionID);
       const agentRegistry = await loadAgentRegistry(client);
       const results = await dispatchParallel({
@@ -224,21 +227,24 @@ function toPollerMessage(raw) {
   };
 }
 async function loadAgentRegistry(client) {
+  let list;
   try {
     const result = await client.app.agents();
-    const list = result.data ?? [];
-    const registry = {};
-    for (const agent of list) {
-      const name = agent.name;
-      const mode = agent.mode === "primary" ? "primary" : "subagent";
-      if (name.length > 0) {
-        registry[name] = { mode };
-      }
-    }
-    return registry;
-  } catch {
-    return {};
+    list = result.data ?? [];
+  } catch (err) {
+    throw new Error(
+      `dispatch_parallel: failed to load agent registry from SDK: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
+  const registry = {};
+  for (const agent of list) {
+    const name = agent.name;
+    const mode = agent.mode === "primary" ? "primary" : "subagent";
+    if (name.length > 0) {
+      registry[name] = { mode };
+    }
+  }
+  return registry;
 }
 export {
   AppVerkCoordinatorPlugin
