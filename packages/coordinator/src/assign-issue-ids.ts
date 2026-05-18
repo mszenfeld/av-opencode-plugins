@@ -1,10 +1,10 @@
-interface Finding {
+export interface Finding {
   severity: string
   title: string
   [k: string]: unknown
 }
 
-interface FindingWithId extends Finding {
+export interface FindingWithId extends Finding {
   id: string
 }
 
