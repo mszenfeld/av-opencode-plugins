@@ -64,6 +64,22 @@ describe("AppVerkPlugins", () => {
     expect(plugin.tool?.load_appverk_skill).toBeDefined()
   })
 
+  it("registers @perun agent and coordinator tools", async () => {
+    const { AppVerkPlugins } = await loadRootModule()
+    const plugin = await AppVerkPlugins({} as never)
+    const config = {} as {
+      agent?: Record<string, { description?: string; prompt: string; mode?: string }>
+    }
+
+    await plugin.config?.(config as never)
+
+    expect(config.agent?.["perun"]?.description).toContain("Pantheon")
+    expect(config.agent?.["perun"]?.mode).toBe("primary")
+    expect(config.agent?.["perun"]?.prompt).toContain("Perun")
+    expect(plugin.tool?.dispatch_parallel).toBeDefined()
+    expect(plugin.tool?.assign_issue_ids).toBeDefined()
+  })
+
   it("registers the /frontend command and frontend-developer agent", async () => {
     const { AppVerkPlugins } = await loadRootModule()
     const plugin = await AppVerkPlugins({} as never)
@@ -131,6 +147,9 @@ describe("AppVerkPlugins", () => {
         "packages/swift-developer/dist/commands/swift.md",
         "packages/swift-developer/dist/agent-prompt.md",
         "packages/swift-developer/dist/skills/swift-coding-standards/SKILL.md",
+        "packages/coordinator/dist/index.js",
+        "packages/coordinator/dist/index.d.ts",
+        "packages/coordinator/dist/agents/perun.md",
       ]),
     )
   })
