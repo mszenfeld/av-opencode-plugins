@@ -77,7 +77,7 @@ describe("IdleScheduler", () => {
   })
 
   it("awaits async onFire without rethrowing", async () => {
-    const onFire = vi.fn(async (_id: string) => {
+    const onFire = vi.fn(async () => {
       throw new Error("boom")
     })
     const s = new IdleScheduler(100, onFire)
