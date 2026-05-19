@@ -17,19 +17,7 @@ const CONFIG: SessionNotificationConfig = {
   soundPath: "/Sound.aiff",
 }
 
-interface Harness {
-  handler: ReturnType<typeof createSessionNotification>
-  tracker: SessionTracker
-  scheduler: IdleScheduler
-  sender: NotificationSender
-  sendSpy: ReturnType<typeof vi.spyOn>
-  playSpy: ReturnType<typeof vi.spyOn>
-  scheduleSpy: ReturnType<typeof vi.spyOn>
-  markActivitySpy: ReturnType<typeof vi.spyOn>
-  cancelSpy: ReturnType<typeof vi.spyOn>
-}
-
-function buildHarness(config: SessionNotificationConfig = CONFIG): Harness {
+function buildHarness(config: SessionNotificationConfig = CONFIG) {
   const tracker = new SessionTracker()
   const sender = new NotificationSender({})
   const sendSpy = vi.spyOn(sender, "send").mockResolvedValue(undefined)

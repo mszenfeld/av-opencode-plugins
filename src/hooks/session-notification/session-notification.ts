@@ -126,6 +126,7 @@ export function createSessionNotification(
           await sender.send({ title: config.title, message: config.permissionMessage })
           if (config.playSound) await sender.playSound(config.soundPath)
         }
+        return
       }
     } catch (err) {
       console.error("[pantheon/session-notification]", err)
