@@ -6,6 +6,7 @@ import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/inde
 import { AppVerkQAPlugin } from "../packages/qa/dist/index.js";
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js";
 import { AppVerkCoordinatorPlugin } from "../packages/coordinator/dist/index.js";
+import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js";
 const defaultPluginFactories = [
     AppVerkCommitPlugin,
     AppVerkPythonDeveloperPlugin,
@@ -15,6 +16,7 @@ const defaultPluginFactories = [
     AppVerkQAPlugin,
     AppVerkSwiftDeveloperPlugin,
     AppVerkCoordinatorPlugin,
+    AppVerkPantheonPlugin,
 ];
 function mergeTools(plugins) {
     const merged = {};

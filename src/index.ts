@@ -7,6 +7,7 @@ import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/inde
 import { AppVerkQAPlugin } from "../packages/qa/dist/index.js"
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js"
 import { AppVerkCoordinatorPlugin } from "../packages/coordinator/dist/index.js"
+import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
 type PluginHooks = Awaited<ReturnType<Plugin>>
 type HookKey = Exclude<keyof PluginHooks, "config" | "tool">
 type MergedHook = (...args: unknown[]) => Promise<void>
@@ -23,6 +24,7 @@ const defaultPluginFactories: Plugin[] = [
   AppVerkQAPlugin,
   AppVerkSwiftDeveloperPlugin,
   AppVerkCoordinatorPlugin,
+  AppVerkPantheonPlugin,
 ]
 
 function mergeTools(plugins: PluginHooks[]): PluginHooks["tool"] {
