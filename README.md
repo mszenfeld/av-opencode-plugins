@@ -244,6 +244,7 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 | `load_appverk_skill`     | Load any AppVerk development skill by name. Available to all agents globally.                                                     | —          | [Guide](docs/plugins/skill-registry.md)     |
 | `dispatch_parallel`      | Global tool — deterministic parallel dispatch of specialist subagents (QA, fix, audit).                                           | —          | [Guide](docs/plugins/coordinator.md)        |
 | `assign_issue_ids`       | Global tool — deterministic issue ID assignment across aggregated specialist results.                                             | —          | [Guide](docs/plugins/coordinator.md)        |
+| Pantheon                 | Session-notification hook — surfaces agent idle, questions, and permission events as native macOS banners.                       | —          | [Guide](docs/plugins/pantheon.md)           |
 | `@perun`                 | Pantheon coordinator — primary agent that delegates to QA/fix/review specialists via `dispatch_parallel` and `assign_issue_ids`.  | `primary`  | [Guide](docs/plugins/coordinator.md)        |
 | `@python-developer`      | Direct agent invocation for Python tasks outside of `/python`.                                                                    | `primary`  | [Guide](docs/plugins/python-developer.md)   |
 | `@frontend-developer`    | Direct agent invocation for TypeScript + React tasks outside of `/frontend`.                                                      | `primary`  | [Guide](docs/plugins/frontend-developer.md) |
@@ -307,6 +308,7 @@ npm run check
 - [Skill Registry Plugin Guide](docs/plugins/skill-registry.md)
 - [QA Plugin Guide](docs/plugins/qa.md)
 - [Swift Developer Plugin Guide](docs/plugins/swift-developer.md)
+- [Pantheon Plugin Guide](docs/plugins/pantheon.md)
 - [Coordinator Plugin Guide](docs/plugins/coordinator.md)
 
 ## License
