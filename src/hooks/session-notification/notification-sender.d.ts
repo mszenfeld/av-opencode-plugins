@@ -16,6 +16,7 @@ export declare function escapeAppleScriptText(input: string): string;
 export declare class NotificationSender {
     private readonly ctx;
     private probeCache;
+    /** Per-instance one-shot guard for the "ctx.$ unavailable" warning. */
     private warnedNoShell;
     constructor(ctx: NotificationSenderContext);
     send(args: {

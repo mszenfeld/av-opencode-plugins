@@ -80,11 +80,30 @@ describe("IdleScheduler", () => {
     const onFire = vi.fn(async () => {
       throw new Error("boom")
     })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const s = new IdleScheduler(100, onFire)
     s.schedule("ses_a")
     await vi.advanceTimersByTimeAsync(100)
     // Allow the swallowed promise rejection to settle.
     await Promise.resolve()
     expect(onFire).toHaveBeenCalledTimes(1)
+    errorSpy.mockRestore()
+  })
+
+  it("logs rejected onFire errors via console.error with the pantheon prefix", async () => {
+    const boom = new Error("boom")
+    const onFire = vi.fn(async () => {
+      throw boom
+    })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const s = new IdleScheduler(100, onFire)
+    s.schedule("ses_a")
+    await vi.advanceTimersByTimeAsync(100)
+    // Drain the swallowed rejection so the .catch handler runs before assertions.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalledWith("[pantheon/idle-scheduler] onFire rejected", boom)
+    errorSpy.mockRestore()
   })
 })

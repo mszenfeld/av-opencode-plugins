@@ -11,6 +11,11 @@ export class SessionTracker {
     this.subagents.add(id)
   }
 
+  /**
+   * @internal
+   * Reserved for v2: flips the role of a previously-registered session to "subagent"
+   * when parentSessionID becomes available. See TODO in session-notification.ts.
+   */
   markAsSubagent(id: string): void {
     if (this.mainSessionId === id) {
       this.mainSessionId = undefined

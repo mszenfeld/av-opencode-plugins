@@ -12,7 +12,9 @@ export class IdleScheduler {
             this.timers.delete(sessionId);
             // Swallow rejections from async onFire so the timer callback never
             // surfaces unhandled-rejection noise to OpenCode's event loop.
-            void Promise.resolve(this.onFire(sessionId)).catch(() => undefined);
+            // Log via console.error to match the orchestrator's diagnostic convention
+            // and avoid silently dropping failures.
+            void Promise.resolve(this.onFire(sessionId)).catch((err) => console.error("[pantheon/idle-scheduler] onFire rejected", err));
         }, this.delayMs);
         this.timers.set(sessionId, timer);
     }

@@ -91,7 +91,8 @@ OpenCode emits event (session.idle, tool.execute.before, permission.ask, …)
 
 | Concern | Module | Form |
 |---|---|---|
-| Plugin factory + ENV reading | `src/hooks/session-notification/plugin.ts` | `Plugin` async factory returning `{ event: handler }` |
+| Plugin factory wiring | `src/hooks/session-notification/plugin.ts` | `Plugin` async factory returning `{ event: handler }` |
+| ENV → config parsing | `env-config.ts` | Parses `AV_PANTHEON_NOTIFY_*` environment variables into a `SessionNotificationConfig`; exports `readConfigFromEnv(env)` and `DEFAULT_SESSION_NOTIFICATION_CONFIG` |
 | Routing events to the right action | `session-notification.ts` | Pure switch over `event.type` |
 | Tracking which session is the user's main one | `session-tracker.ts` | In-memory state machine |
 | Anti-flicker: delay-and-cancel for `session.idle` | `idle-scheduler.ts` | Timer map keyed by sessionID |
@@ -106,7 +107,8 @@ src/
   index.d.ts                              # rebuilt
   hooks/
     session-notification/
-      plugin.ts                           # AppVerkPantheonPlugin factory + ENV read
+      plugin.ts                           # AppVerkPantheonPlugin factory wiring
+      env-config.ts                       # readConfigFromEnv + DEFAULT_SESSION_NOTIFICATION_CONFIG
       session-notification.ts             # orchestrator
       idle-scheduler.ts
       notification-sender.ts
@@ -195,26 +197,61 @@ export class IdleScheduler {
 
 **Public surface:**
 ```ts
-export async function sendMacOSNotification(
-  ctx: PluginInput,
-  args: { title: string; message: string }
-): Promise<void>
+// Shell-protocol types — describe the tagged-template `$` we depend on.
+export interface ShellOutput {
+  readonly exitCode: number
+  readonly stdout: string | { toString(): string }
+}
 
-export async function playMacOSSound(
-  ctx: PluginInput,
-  soundPath: string
-): Promise<void>
+export type ShellChain = Promise<ShellOutput> & {
+  quiet(): ShellChain
+  nothrow(): ShellChain
+}
+
+export type ShellTag = (parts: TemplateStringsArray, ...values: unknown[]) => ShellChain
+
+// Structural context the sender needs. Intentionally narrower than
+// `@opencode-ai/plugin`'s `PluginInput` so the module stays testable
+// without importing the full plugin type.
+export interface NotificationSenderContext {
+  readonly $?: ShellTag
+}
+
+// AppleScript-safe escaper. Order matters: backslashes first, then quotes.
+export function escapeAppleScriptText(input: string): string
+
+export class NotificationSender {
+  constructor(ctx: NotificationSenderContext)
+
+  // Display a macOS notification banner. No-op if `ctx.$` is unavailable
+  // or no supported notifier (`terminal-notifier` / `osascript`) is on PATH.
+  send(args: { title: string; message: string }): Promise<void>
+
+  // Play a sound file via `afplay`. No-op if `ctx.$` is unavailable.
+  playSound(soundPath: string): Promise<void>
+}
 ```
 
+> **Note on the `PluginInput` cast at `plugin.ts:14`.**
+> `NotificationSenderContext` is a structural subset of
+> `@opencode-ai/plugin`'s `PluginInput` — it only requires the `$`
+> tagged-template. OpenCode's `PluginInput.$` is Bun's `$`, whose
+> parameter type is tighter than our structural `ShellTag`. The two
+> shapes are runtime-compatible (same tagged-template shell with
+> `.quiet()` / `.nothrow()`), but TypeScript cannot prove the variance,
+> so `plugin.ts` performs `ctx as unknown as NotificationSenderContext`
+> to bridge the gap without leaking the wider `PluginInput` into this
+> module.
+
 **Logic:**
-1. Cache platform detection on first call (avoid `which` on every event).
-2. `sendMacOSNotification`:
+1. Cache platform detection on first `send()` call per instance (avoid `which` on every event); cached as `{ osascriptPath, terminalNotifierPath }`.
+2. `send()`:
    - Try `terminal-notifier` (if `which terminal-notifier` succeeded once) — preferred because it focuses the originating terminal on click.
    - Fallback `osascript -e 'display notification "<escaped>" with title "<escaped>"'`.
-   - Escape function: `s => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')`.
-3. `playMacOSSound`: `afplay <path>` via `ctx.$`.
+   - Use `escapeAppleScriptText` for the message and title interpolated into the AppleScript string.
+3. `playSound()`: `afplay <path>` via `ctx.$`.
 4. All commands run with `.nothrow().quiet()` — failures are swallowed (notification is best-effort).
-5. If `typeof ctx.$ !== "function"` or `which osascript` returned nothing: log once on first call, then return early (no-op).
+5. If `typeof ctx.$ !== "function"`: log once per instance, then return early (no-op). If neither `terminal-notifier` nor `osascript` is on PATH, `send()` silently no-ops after the probe.
 
 ### 4.4 `session-notification.ts`
 
@@ -223,20 +260,22 @@ export async function playMacOSSound(
 **Public surface:**
 ```ts
 export interface SessionNotificationConfig {
-  title?: string
-  idleMessage?: string
-  questionMessage?: string
-  permissionMessage?: string
-  idleConfirmationDelayMs?: number
-  playSound?: boolean
-  soundPath?: string
+  title: string
+  idleMessage: string
+  questionMessage: string
+  permissionMessage: string
+  idleConfirmationDelayMs: number
+  playSound: boolean
+  soundPath: string
 }
 
 export function createSessionNotification(
   ctx: PluginInput,
-  config?: SessionNotificationConfig,
+  config: SessionNotificationConfig,
 ): (input: { event: { type: string; properties?: unknown } }) => Promise<void>
 ```
+
+Defaults live in `env-config.ts`; callers must pass a fully-populated config (typically the return value of `readConfigFromEnv(process.env)`).
 
 **Routing table:**
 
@@ -246,27 +285,29 @@ export function createSessionNotification(
 | `session.deleted` | `tracker.deleteSession(id)` + `scheduler.cancel(id)` |
 | `session.idle` | if `tracker.isMain(id)` → `scheduler.schedule(id)` |
 | `message.updated`, `message.part.updated`, `message.part.delta` | `scheduler.markActivity(id)` |
-| `tool.execute.before` with toolName matching `/^(question|ask_user_question|askuserquestion)$/i` | immediate `sender.sendMacOSNotification({title, message: questionMessage})` + optional sound, **only if** `tracker.isMain(id)` |
+| `tool.execute.before` with toolName matching `/^(question|ask_user_question|askuserquestion)$/i` | immediate `sender.send({title, message: questionMessage})` + optional sound, **only if** `tracker.isMain(id)` |
 | `tool.execute.before` / `tool.execute.after` (other tools) | `scheduler.markActivity(id)` |
 | `permission.ask`, `permission.asked`, `permission.requested`, `permission.updated` | immediate notify with `permissionMessage`, only if `tracker.isMain(id)` |
 
-`onFire` passed to `IdleScheduler` invokes `sender.sendMacOSNotification({title, message: idleMessage})` + optional sound.
+`onFire` passed to `IdleScheduler` invokes `sender.send({title, message: idleMessage})` + optional sound.
 
 ### 4.5 `plugin.ts`
 
-**Responsibility:** read ENV, construct config, wire `createSessionNotification` into a `Plugin` factory.
+**Responsibility:** check the master on/off ENV, delegate config parsing to `env-config.ts`, and wire `createSessionNotification` into a `Plugin` factory.
 
 **Public surface:**
 ```ts
+import { readConfigFromEnv } from "./env-config.js"
+
 export const AppVerkPantheonPlugin: Plugin = async (ctx) => {
   if (process.env.AV_PANTHEON_NOTIFY === "0") return {}    // hard off
-  const config = readConfigFromEnv()
+  const config = readConfigFromEnv(process.env)
   const handler = createSessionNotification(ctx, config)
   return { event: handler }
 }
 ```
 
-`readConfigFromEnv` parses the ENV table from §6 with default fallbacks and validation (`Number.isFinite` for numeric values; on invalid, log warning + use default).
+`readConfigFromEnv` lives in `env-config.ts` (alongside `DEFAULT_SESSION_NOTIFICATION_CONFIG`) and parses the ENV table from §6 with default fallbacks and validation (`Number.isFinite` for numeric values; on invalid, log warning + use default). Extracting it from `plugin.ts` keeps the factory thin and makes the ENV-parsing logic independently testable.
 
 ---
 
@@ -280,7 +321,7 @@ LLM completes a tool sequence → OpenCode emits session.idle
   → idleScheduler.schedule(id)
   → [no activity for 1.5s]
   → timer fires → onFire(id)
-  → sender.sendMacOSNotification({title: "AppVerk", message: "Agent is ready for input"})
+  → sender.send({title: "AppVerk", message: "Agent is ready for input"})
   → osascript displays banner
 ```
 
@@ -299,8 +340,8 @@ session.idle → idleScheduler.schedule(id, 1.5s)
 LLM invokes AskUserQuestion → tool.execute.before with toolName="AskUserQuestion"
   → orchestrator: matches QUESTION_TOOLS regex
   → tracker.isMain(id) === true
-  → sender.sendMacOSNotification({title: "AppVerk", message: "Agent is asking a question"})
-  → (playMacOSSound if playSound: true)
+  → sender.send({title: "AppVerk", message: "Agent is asking a question"})
+  → (sender.playSound(soundPath) if playSound: true)
 ```
 
 ### 5.4 Permission path (immediate)
@@ -309,7 +350,7 @@ LLM invokes AskUserQuestion → tool.execute.before with toolName="AskUserQuesti
 OpenCode permission system prompts user → emits permission.ask
   → orchestrator: matches permission events
   → tracker.isMain(id) === true
-  → sender.sendMacOSNotification({title: "AppVerk", message: "Agent needs permission"})
+  → sender.send({title: "AppVerk", message: "Agent needs permission"})
   → (sound if enabled)
 ```
 
@@ -358,7 +399,7 @@ ENV reading happens once at factory construction (`plugin.ts`). Subsequent ENV c
 | Failure | Behaviour |
 |---|---|
 | `typeof ctx.$ !== "function"` | log once, no-op thereafter |
-| `which osascript` returns nothing | log once, set platform=unsupported, no-op all sender calls |
+| `which osascript` and `which terminal-notifier` both return nothing | silently no-op all sender calls (no log) |
 | Shell command failure (osascript fails, afplay fails) | swallow via `.nothrow().quiet()` |
 | AppleScript-special characters in title/message | escape `\` and `"` before interpolation; test verifies no shell-injection path |
 | `event.properties` missing or malformed | early return for that event only |
@@ -366,7 +407,9 @@ ENV reading happens once at factory construction (`plugin.ts`). Subsequent ENV c
 | Subagent state corrupt (e.g. `session.deleted` for unknown ID) | silently ignore |
 | Invalid ENV value | fall back to default, one-time log warning |
 
-**Specific test:** feed `title = '"; do shell script "rm -rf /"; "'` through `sendMacOSNotification` and assert the resulting `ctx.$` invocation receives the escaped literal, not interpolated shell.
+**Unsupported-platform behaviour:** when neither `osascript` nor `terminal-notifier` is available (e.g. Linux, Windows), the sender simply skips the notification call and returns. No log line is emitted — there is no operator action to take, and `docs/plugins/pantheon.md` already documents the macOS-only contract ("The hook is a no-op on other platforms").
+
+**Specific test:** feed `title = '"; do shell script "rm -rf /"; "'` through `NotificationSender#send` and assert the resulting `ctx.$` invocation receives the escaped literal, not interpolated shell.
 
 ---
 
@@ -380,6 +423,9 @@ ENV reading happens once at factory construction (`plugin.ts`). Subsequent ENV c
 | `tests/hooks/session-notification/idle-scheduler.test.ts` | (vi.useFakeTimers) schedule fires onFire after delay; markActivity cancels before fire; cancel after fire is a no-op; multiple sessions tracked independently; rapid re-schedule resets timer |
 | `tests/hooks/session-notification/notification-sender.test.ts` | osascript invoked with escaped args; AppleScript-injection payload escaped not executed; terminal-notifier preferred when available; afplay invoked for sound; ctx.$ undefined → no-op + one log; osascript missing → no-op + one log; shell error swallowed |
 | `tests/hooks/session-notification/session-notification.test.ts` | full event routing matrix: idle schedules, activity events cancel, AskUserQuestion immediate, permission immediate, subagent sessions filtered, session.deleted cleans up; ENV `AV_PANTHEON_NOTIFY=0` causes factory to return empty config |
+| `tests/hooks/session-notification/env-config.test.ts` | `readConfigFromEnv` parses each ENV var: defaults on empty env; title/idle/question/permission message overrides; `AV_PANTHEON_NOTIFY_DELAY_MS` accepts non-negative integers (including `0`) and falls back to default + emits one `console.warn` for non-numeric, negative, unit-suffixed, or fractional inputs; `AV_PANTHEON_NOTIFY_SOUND=1` enables sound, any other value leaves it disabled; `AV_PANTHEON_NOTIFY_SOUND_PATH` override |
+
+**Total unit-test files:** 5 (covering 4 production modules in §4 plus the `env-config` helper).
 
 ### 8.2 Packaging test
 

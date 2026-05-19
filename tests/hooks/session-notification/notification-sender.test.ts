@@ -50,6 +50,45 @@ describe("escapeAppleScriptText", () => {
   it("leaves benign text unchanged", () => {
     expect(escapeAppleScriptText("Hello world")).toBe("Hello world")
   })
+
+  it("strips ASCII control characters (NUL, BEL, others in the C0 range plus DEL)", () => {
+    // NUL (0x00), BEL (0x07), VT (0x0B), ESC (0x1B), DEL (0x7F) — TAB (0x09) and LF (0x0A) handled separately.
+    const evil = "ok\x00\x07\x0B\x1B\x7Fend"
+    expect(escapeAppleScriptText(evil)).toBe("okend")
+  })
+
+  it("preserves TAB (0x09) because it is outside the stripped control range", () => {
+    expect(escapeAppleScriptText("a\tb")).toBe("a\tb")
+  })
+
+  it("collapses LF and CRLF runs to a single space", () => {
+    // LF survives the control-strip step (0x0A is in the 0x09-0x0A gap),
+    // so multi-line input collapses to a single space.
+    expect(escapeAppleScriptText("line1\nline2")).toBe("line1 line2")
+    expect(escapeAppleScriptText("line1\r\nline2")).toBe("line1 line2")
+    expect(escapeAppleScriptText("line1\n\n\nline2")).toBe("line1 line2")
+  })
+
+  it("strips bare CR runs (CR is treated as a control char and removed)", () => {
+    // CR (0x0D) falls inside the stripped 0x0B-0x1F range, so bare CR without
+    // a following LF is removed outright — there is nothing left for the
+    // CR/LF collapse step to turn into a space.
+    expect(escapeAppleScriptText("line1\rline2")).toBe("line1line2")
+    expect(escapeAppleScriptText("line1\r\rline2")).toBe("line1line2")
+  })
+
+  it("strips Unicode BiDi override characters that could spoof the banner", () => {
+    // U+202E is RIGHT-TO-LEFT OVERRIDE — the canonical BiDi-spoofing codepoint.
+    // U+2066 is LEFT-TO-RIGHT ISOLATE.
+    const spoofed = `safe‮evil⁦more`
+    expect(escapeAppleScriptText(spoofed)).toBe("safeevilmore")
+  })
+
+  it("still escapes backslash and double-quote after sanitization", () => {
+    // Sanitization must not bypass the existing AppleScript escape contract.
+    const evil = `pre\x00‮\\mid"post`
+    expect(escapeAppleScriptText(evil)).toBe('pre\\\\mid\\"post')
+  })
 })
 
 describe("NotificationSender", () => {
@@ -148,6 +187,12 @@ describe("NotificationSender", () => {
     const sender = new NotificationSender({})
     await sender.send({ title: "T", message: "M" })
     await sender.send({ title: "T", message: "M" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    // Anchor the shared-flag invariant: interleaving send/playSound must not re-emit.
+    // If a refactor split the flag into per-method flags, playSound would warn again here.
+    await sender.playSound("/x")
+    await sender.send({ title: "T", message: "M" })
+    await sender.playSound("/x")
     expect(warn).toHaveBeenCalledTimes(1)
     warn.mockRestore()
   })

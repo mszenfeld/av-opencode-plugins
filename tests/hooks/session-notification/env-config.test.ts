@@ -48,13 +48,60 @@ describe("readConfigFromEnv", () => {
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
-  it("enables sound when AV_PANTHEON_NOTIFY_SOUND=1", () => {
-    expect(readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "1" }).playSound).toBe(true)
+  it("falls back to the default and warns on a numeric value with a unit suffix", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "1500ms" })
+    expect(c.idleConfirmationDelayMs).toBe(DEFAULT_SESSION_NOTIFICATION_CONFIG.idleConfirmationDelayMs)
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 
-  it("leaves sound disabled for any other value", () => {
-    expect(readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "true" }).playSound).toBe(false)
-    expect(readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "" }).playSound).toBe(false)
+  it("falls back to the default and warns on a fractional delay", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "1.5" })
+    expect(c.idleConfirmationDelayMs).toBe(DEFAULT_SESSION_NOTIFICATION_CONFIG.idleConfirmationDelayMs)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("accepts zero as a valid non-negative delay without warning", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "0" })
+    expect(c.idleConfirmationDelayMs).toBe(0)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("enables sound when AV_PANTHEON_NOTIFY_SOUND=1", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "1" })
+    expect(c.playSound).toBe(true)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("leaves sound disabled and silent for AV_PANTHEON_NOTIFY_SOUND=0", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "0" })
+    expect(c.playSound).toBe(false)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("uses the default and stays silent for an empty AV_PANTHEON_NOTIFY_SOUND", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "" })
+    expect(c.playSound).toBe(DEFAULT_SESSION_NOTIFICATION_CONFIG.playSound)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("warns and leaves sound disabled when AV_PANTHEON_NOTIFY_SOUND is 'true'", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "true" })
+    expect(c.playSound).toBe(false)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("warns and leaves sound disabled when AV_PANTHEON_NOTIFY_SOUND is 'yes'", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "yes" })
+    expect(c.playSound).toBe(false)
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 
   it("applies a sound path override", () => {

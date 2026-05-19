@@ -54,6 +54,7 @@ export function createSessionNotification(ctx, config, deps = {}) {
         try {
             const sessionId = readSessionId(event.properties);
             if (event.type === "session.created") {
+                // TODO(pantheon-v2): wire parentSessionID detection through markAsSubagent
                 if (sessionId !== undefined)
                     tracker.registerSession(sessionId);
                 return;

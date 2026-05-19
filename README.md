@@ -1,8 +1,10 @@
 # AppVerk OpenCode Plugins
 
-[![Package](https://img.shields.io/badge/package-9-blue.svg)](#available-packages)
+[![Plugins](https://img.shields.io/badge/plugins-9-blue.svg)](#repository-structure)
 
 OpenCode plugin packages for AppVerk. The root plugin loads the AppVerk plugin bundle from this repository, which currently provides:
+
+> **Plugin count:** The badge above reflects every plugin registered in `defaultPluginFactories` (`src/index.ts`). This includes both `packages/*` workspaces and harness-resident plugins under `src/hooks/` (e.g. Pantheon). Keep it in sync whenever a new plugin is added or removed there.
 
 - A **controlled commit workflow** (`/commit`) that enforces AppVerk git policies.
 - A **Python development workflow** (`/python`) with TDD, coding standards, and stack-specific patterns (FastAPI, Django, Celery, SQLAlchemy, Pydantic).
@@ -244,7 +246,7 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 | `load_appverk_skill`     | Load any AppVerk development skill by name. Available to all agents globally.                                                     | —          | [Guide](docs/plugins/skill-registry.md)     |
 | `dispatch_parallel`      | Global tool — deterministic parallel dispatch of specialist subagents (QA, fix, audit).                                           | —          | [Guide](docs/plugins/coordinator.md)        |
 | `assign_issue_ids`       | Global tool — deterministic issue ID assignment across aggregated specialist results.                                             | —          | [Guide](docs/plugins/coordinator.md)        |
-| Pantheon                 | Session-notification hook — surfaces agent idle, questions, and permission events as native macOS banners.                       | —          | [Guide](docs/plugins/pantheon.md)           |
+| Pantheon                 | Session-notification hook (macOS only) — surfaces agent idle, questions, and permission events as native macOS banners.          | —          | [Guide](docs/plugins/pantheon.md)           |
 | `@perun`                 | Pantheon coordinator — primary agent that delegates to QA/fix/review specialists via `dispatch_parallel` and `assign_issue_ids`.  | `primary`  | [Guide](docs/plugins/coordinator.md)        |
 | `@python-developer`      | Direct agent invocation for Python tasks outside of `/python`.                                                                    | `primary`  | [Guide](docs/plugins/python-developer.md)   |
 | `@frontend-developer`    | Direct agent invocation for TypeScript + React tasks outside of `/frontend`.                                                      | `primary`  | [Guide](docs/plugins/frontend-developer.md) |
@@ -280,6 +282,8 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 - `docs/plugins/swift-developer.md` - package-level behavior and usage guide.
 - `packages/coordinator` - Pantheon coordinator source, tests, `@perun` agent prompt, and build scripts for the `dispatch_parallel` and `assign_issue_ids` global tools.
 - `docs/plugins/coordinator.md` - package-level behavior and usage guide.
+- `src/hooks/session-notification` - harness-resident Pantheon plugin (session-notification hook) wired in directly from `src/index.ts` rather than as a `packages/*` workspace.
+- `docs/plugins/pantheon.md` - plugin-level behavior and configuration guide.
 - `package.json` - workspace definition and shared validation commands.
 
 ## Local Development

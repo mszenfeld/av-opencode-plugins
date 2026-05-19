@@ -1,10 +1,20 @@
 export function escapeAppleScriptText(input) {
+    // Defense-in-depth: strip ASCII control chars (NUL, BEL, etc., excluding TAB)
+    // and Unicode BiDi override codepoints (U+202A-U+202E, U+2066-U+2069) that
+    // could spoof or truncate notification banners if hostile model output reaches
+    // osascript. Collapse CR/LF runs to a single space so multi-line payloads do
+    // not break the AppleScript string literal.
+    const sanitized = input
+        .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "")
+        .replace(/[\r\n]+/g, " ")
+        .replace(/[\u202A-\u202E\u2066-\u2069]/g, "");
     // Order matters: escape backslashes first, then double quotes.
-    return input.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return sanitized.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 export class NotificationSender {
     ctx;
     probeCache;
+    /** Per-instance one-shot guard for the "ctx.$ unavailable" warning. */
     warnedNoShell = false;
     constructor(ctx) {
         this.ctx = ctx;

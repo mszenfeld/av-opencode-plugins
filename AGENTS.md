@@ -16,6 +16,7 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins:
 | `packages/qa` | QA plugin — end-to-end testing workflow. Registers `/create-qa-plan` and `/run-qa` commands, plus `qa-fe-tester` and `qa-be-tester` subagents. Ships with test-plan-format, report-format, fe-testing, and be-testing skills. Output shipped at `packages/qa/dist/`. |
 | `packages/swift-developer` | Swift-developer plugin source, tests, skills, build scripts. Output shipped at `packages/swift-developer/dist/`. |
 | `packages/coordinator` | Coordinator plugin source — Pantheon `@perun` primary agent, `dispatch_parallel` and `assign_issue_ids` tools. Output shipped at `packages/coordinator/dist/`. |
+| `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
 | `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
 **Important:** `dist/` is usually ignored, but `packages/*/dist/` is **committed and published** (see `.gitignore`). Do not delete those `dist/` trees.
@@ -47,7 +48,7 @@ npm run test  --workspace @appverk/opencode-commit
 - **Package builds:** `tsup src/index.ts --format esm --dts`.
 - **Post-build asset copying:** Each package runs a Node script to copy markdown templates/skills into `dist/` (e.g., `dist/commands/commit.md`, `dist/skills/*.md`).
 - **Root entrypoint:** `src/index.js` is the runtime file consumed by tests and published consumers; `src/index.ts` is the typed source. When changing merge logic, update both `src/index.ts` and `src/index.js`, then run `npm run build` so the package-level tests still pass.
-- **Published files:** Only `src/index.js`, `src/index.d.ts`, and the nine `packages/*/dist/` directories (see root `package.json` `files`).
+- **Published files:** The entire `src/` tree (built `.js`/`.d.ts` artifacts colocated with their `.ts` sources, including harness-resident plugins under `src/hooks/`) plus the nine `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
 
 ## TypeScript Configuration
 
@@ -93,6 +94,21 @@ const defaultPluginFactories = [
 ```
 
 **Critical:** After adding to `src/index.ts`, mirror the exact same change in `src/index.js`. The JS file is the runtime entrypoint consumed by tests and published consumers; the TS file provides types.
+
+### Harness-resident plugins (`src/hooks/<name>/`)
+
+Plugins that live inside the root `src/` tree (rather than as a workspace package under `packages/`) are imported using a **relative path** to their colocated build artifact. Use this pattern when a plugin only needs to ship hooks (no separate build pipeline, tests can live alongside the source):
+
+```typescript
+import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
+
+const defaultPluginFactories: Plugin[] = [
+  // ...workspace plugins (imported from ../packages/<name>/dist/)...
+  AppVerkPantheonPlugin,
+]
+```
+
+Because the entire `src/` tree is published (see [Build & Packaging Details](#build--packaging-details)), the built `plugin.js`/`plugin.d.ts` siblings of `plugin.ts` ship automatically — no `packages/*/dist/` entry is required in root `package.json` `files`. Mirror the import in `src/index.js` exactly as with workspace plugins.
 
 ## Agent Visibility (`mode`)
 
