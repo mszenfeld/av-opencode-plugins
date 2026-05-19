@@ -64,7 +64,7 @@ describe("AppVerkPlugins", () => {
     expect(plugin.tool?.load_appverk_skill).toBeDefined()
   })
 
-  it("registers @perun agent and coordinator tools", async () => {
+  it("registers Perun coordinator agent and coordinator tools", async () => {
     const { AppVerkPlugins } = await loadRootModule()
     const plugin = await AppVerkPlugins({} as never)
     const config = {} as {
@@ -73,9 +73,10 @@ describe("AppVerkPlugins", () => {
 
     await plugin.config?.(config as never)
 
-    expect(config.agent?.["perun"]?.description).toContain("Pantheon")
-    expect(config.agent?.["perun"]?.mode).toBe("primary")
-    expect(config.agent?.["perun"]?.prompt).toContain("Perun")
+    const perun = config.agent?.["Perun - Coordinator"]
+    expect(perun?.description).toContain("Delegates work to specialists")
+    expect(perun?.mode).toBe("primary")
+    expect(perun?.prompt).toContain("Perun")
     expect(plugin.tool?.dispatch_parallel).toBeDefined()
     expect(plugin.tool?.assign_issue_ids).toBeDefined()
   })

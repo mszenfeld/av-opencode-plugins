@@ -54,7 +54,7 @@
 2. The sanitized FE scenario blocks verbatim (all `### FE-XX: ...` sections).
 
 No additional wrapper is required. The agent infers everything else from the prompt and its
-own skill. This is already the pattern shown in `perun.md:60-65`.
+own skill. This is already the pattern shown in `coordinator.md:60-65`.
 
 **Recommended follow-up (if any):**
 
@@ -106,7 +106,7 @@ own skill. This is already the pattern shown in `perun.md:60-65`.
 3. Optionally `"DB connection: <connection string or credentials>"` if known from the test
    plan frontmatter or project config. If omitted, the agent self-discovers.
 
-This matches the pattern in `perun.md:66-70`. The optional DB connection field is a quality
+This matches the pattern in `coordinator.md:66-70`. The optional DB connection field is a quality
 improvement, not a correctness requirement.
 
 **Recommended follow-up (if any):**
@@ -141,7 +141,7 @@ improvement, not a correctness requirement.
   `question` to ask the user. In a `dispatch_parallel` subagent context there is no
   interactive user; a blocking `question` call would stall the task. **This is the only
   real risk.** However, `@perun` always passes the full issue block including all required
-  fields (`perun.md:183-188`), so this branch should never be triggered in normal operation.
+  fields (`coordinator.md:183-188`), so this branch should never be triggered in normal operation.
 
 - **`load_appverk_skill` tool** (`fix-auto.md:118`). Phase 2 Step 2.5 calls
   `load_appverk_skill` to load developer skill patterns. The agent handles unavailability
@@ -155,12 +155,12 @@ improvement, not a correctness requirement.
   registration, not `@perun`'s allowed-tools. No impact on the coordinator.
 
 - **Report output is inline, not file-based** (`fix-auto.md:311-367`). The Fix Report is
-  presented as a markdown block in the response. `@perun`'s Workflow 2 (`perun.md:193-196`)
+  presented as a markdown block in the response. `@perun`'s Workflow 2 (`coordinator.md:193-196`)
   reads the result text to determine status ("Fixed", "Partially Fixed", "Failed") and then
   edits the report file itself. This is compatible — no shared temp file is involved.
 
 - **Calling convention:** designed for one issue at a time. `@perun` already enforces
-  sequential single-issue dispatch (`perun.md:178-181`, `perun.md:212-214`). Compatible.
+  sequential single-issue dispatch (`coordinator.md:178-181`, `coordinator.md:212-214`). Compatible.
 
 **Coordinator prompt strategy:**
 
@@ -175,7 +175,7 @@ improvement, not a correctness requirement.
 
 2. All required fields must be present to avoid triggering the `question` fallback.
 
-This is already specified in `perun.md:183-188`: `"<full issue block including ID, severity,
+This is already specified in `coordinator.md:183-188`: `"<full issue block including ID, severity,
 location, problem, remediation>"`.
 
 **Recommended follow-up (if any):**

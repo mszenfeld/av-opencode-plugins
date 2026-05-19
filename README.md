@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins
 
-[![Package](https://img.shields.io/badge/package-8-blue.svg)](#available-packages)
+[![Package](https://img.shields.io/badge/package-9-blue.svg)](#available-packages)
 
 OpenCode plugin packages for AppVerk. The root plugin loads the AppVerk plugin bundle from this repository, which currently provides:
 
@@ -10,6 +10,7 @@ OpenCode plugin packages for AppVerk. The root plugin loads the AppVerk plugin b
 - A **code review workflow** (`/review`) with parallel security and quality audits, verification agents, fix commands, feedback analysis, and skill-agent integration.
 - A **QA workflow** (`/create-qa-plan`, `/run-qa`) for end-to-end testing — generates test plans from PR descriptions and executes them via Playwright (frontend) or HTTP + DB (backend).
 - A **Swift development workflow** (`/swift`) with TDD, coding standards, and modern Apple stack patterns (SwiftUI, `@Observable`, SPM, SwiftData).
+- A **Pantheon coordinator** (`@perun`) — primary agent that delegates QA and fix work to specialist subagents via the deterministic `dispatch_parallel` and `assign_issue_ids` tools.
 - A **global skill registry** that makes all AppVerk development skills available to every OpenCode agent via a single `load_appverk_skill` tool, with mandatory activation rules injected into every agent's system prompt.
 
 ## Installation
@@ -19,7 +20,9 @@ Add the root plugin package to your OpenCode config:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.2.16"]
+  "plugin": [
+    "av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.2.16"
+  ]
 }
 ```
 
@@ -106,6 +109,23 @@ You can also invoke the agent directly:
 opencode agent swift-developer "Refactor networking layer to use async/await"
 ```
 
+### @perun — Pantheon coordinator
+
+Delegate QA, review, and fix workflows to specialist subagents through the Pantheon coordinator:
+
+```text
+@perun uruchom QA dla docs/testing/plans/2026-05-18-feature-auth-test-plan.md
+```
+
+The `@perun` agent:
+
+1. Parses the referenced plan, review report, or QA report
+2. Dispatches specialist subagents in parallel via the global `dispatch_parallel` tool (e.g., `@qa-fe-tester` + `@qa-be-tester`, or `@fix-auto` workers)
+3. Assigns deterministic issue IDs across aggregated results via the global `assign_issue_ids` tool
+4. Synthesizes a unified report and returns control to the user
+
+`dispatch_parallel` and `assign_issue_ids` are exposed globally to every agent, so other primaries (`@python-developer`, `@frontend-developer`, etc.) can use them directly when coordination is needed.
+
 ### Global Skill Registry
 
 All AppVerk development skills are automatically available to every OpenCode agent (built-in and custom) through the `load_appverk_skill` tool. When any agent starts a chat session, mandatory activation rules are injected into its system prompt.
@@ -117,6 +137,7 @@ Use the load_appverk_skill tool with name "python-coding-standards"
 ```
 
 Available skills include:
+
 - `python-coding-standards`, `python-tdd-workflow`, `fastapi-patterns`, `sqlalchemy-patterns`, `pydantic-patterns`, `async-python-patterns`, `uv-package-manager`, `django-web-patterns`, `django-orm-patterns`, `celery-patterns`
 - `frontend-coding-standards`, `frontend-tdd-workflow`, `tailwind-patterns`, `zustand-patterns`, `tanstack-query-patterns`, `form-patterns`, `tanstack-router-patterns`, `pnpm-package-manager`
 - `standards-discovery` (code review)
@@ -208,32 +229,35 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 
 ## Available Commands & Agents
 
-| Command / Agent | Description | Mode | Docs |
-|-----------------|-------------|------|------|
-| `/commit` | Controlled commit workflow — Conventional Commit messages, bash-level blocking for direct `git commit`/`git push`. | — | [Guide](docs/plugins/commit.md) |
-| `/python` | Python development workflow — TDD, coding standards, and stack-specific patterns (FastAPI, Django, Celery, SQLAlchemy). | — | [Guide](docs/plugins/python-developer.md) |
-| `/frontend` | TypeScript + React development workflow — TDD, coding standards, and stack-specific patterns (Tailwind, Zustand, TanStack Query). | — | [Guide](docs/plugins/frontend-developer.md) |
-| `/swift` | Swift development workflow — TDD, coding standards, and modern Apple stack patterns (SwiftUI, `@Observable`, SPM). | — | [Guide](docs/plugins/swift-developer.md) |
-| `/review` | Code review workflow — parallel security, quality, and documentation audits with verification and structured reports. | — | [Guide](docs/plugins/code-review.md) |
-| `/fix` | Fix a single issue by ID or pasted issue block from a saved review or QA report. | — | [Guide](docs/plugins/code-review.md) |
-| `/fix-report` | Batch-fix issues from a saved review or QA report with interactive selection. | — | [Guide](docs/plugins/code-review.md) |
-| `/analyze-feedback` | Analyze PR feedback comments, classify validity, and generate response drafts. | — | [Guide](docs/plugins/code-review.md) |
-| `/create-qa-plan` | Generate a structured QA test plan from a PR description or ticket. | — | [Guide](docs/plugins/qa.md) |
-| `/run-qa` | Execute a saved test plan or ad-hoc QA check via Playwright or HTTP + DB. | — | [Guide](docs/plugins/qa.md) |
-| `load_appverk_skill` | Load any AppVerk development skill by name. Available to all agents globally. | — | [Guide](docs/plugins/skill-registry.md) |
-| `@python-developer` | Direct agent invocation for Python tasks outside of `/python`. | `primary` | [Guide](docs/plugins/python-developer.md) |
-| `@frontend-developer` | Direct agent invocation for TypeScript + React tasks outside of `/frontend`. | `primary` | [Guide](docs/plugins/frontend-developer.md) |
-| `@swift-developer` | Direct agent invocation for Swift tasks outside of `/swift`. | `primary` | [Guide](docs/plugins/swift-developer.md) |
-| `@security-auditor` | Direct agent invocation for security audits with skill-agent delegation. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@code-quality-auditor` | Direct agent invocation for code quality audits with skill-agent delegation. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@documentation-auditor` | Documentation audit agent — verifies code changes are reflected in docs. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@cross-verifier` | Cross-domain correlation agent — finds intersections between findings. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@challenger` | Adversarial review agent — challenges findings for false positives. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@synthesis-agent` | **Planned** — deduplicates and groups findings into actionable PRs. Not yet implemented. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@qa-fe-tester` | Frontend testing subagent — runs Playwright tests, accessibility checks, and visual regression. | `subagent` | [Guide](docs/plugins/qa.md) |
-| `@qa-be-tester` | Backend testing subagent — tests API endpoints and validates database state via HTTP + DB CLI. | `subagent` | [Guide](docs/plugins/qa.md) |
-| `@feedback-analyzer` | Per-comment classification agent for PR feedback analysis. | `subagent` | [Guide](docs/plugins/code-review.md) |
-| `@fix-auto` | Auto-fix subagent — performs fixes without user confirmation. | `subagent` | [Guide](docs/plugins/code-review.md) |
+| Command / Agent          | Description                                                                                                                       | Mode       | Docs                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------- |
+| `/commit`                | Controlled commit workflow — Conventional Commit messages, bash-level blocking for direct `git commit`/`git push`.                | —          | [Guide](docs/plugins/commit.md)             |
+| `/python`                | Python development workflow — TDD, coding standards, and stack-specific patterns (FastAPI, Django, Celery, SQLAlchemy).           | —          | [Guide](docs/plugins/python-developer.md)   |
+| `/frontend`              | TypeScript + React development workflow — TDD, coding standards, and stack-specific patterns (Tailwind, Zustand, TanStack Query). | —          | [Guide](docs/plugins/frontend-developer.md) |
+| `/swift`                 | Swift development workflow — TDD, coding standards, and modern Apple stack patterns (SwiftUI, `@Observable`, SPM).                | —          | [Guide](docs/plugins/swift-developer.md)    |
+| `/review`                | Code review workflow — parallel security, quality, and documentation audits with verification and structured reports.             | —          | [Guide](docs/plugins/code-review.md)        |
+| `/fix`                   | Fix a single issue by ID or pasted issue block from a saved review or QA report.                                                  | —          | [Guide](docs/plugins/code-review.md)        |
+| `/fix-report`            | Batch-fix issues from a saved review or QA report with interactive selection.                                                     | —          | [Guide](docs/plugins/code-review.md)        |
+| `/analyze-feedback`      | Analyze PR feedback comments, classify validity, and generate response drafts.                                                    | —          | [Guide](docs/plugins/code-review.md)        |
+| `/create-qa-plan`        | Generate a structured QA test plan from a PR description or ticket.                                                               | —          | [Guide](docs/plugins/qa.md)                 |
+| `/run-qa`                | Execute a saved test plan or ad-hoc QA check via Playwright or HTTP + DB.                                                         | —          | [Guide](docs/plugins/qa.md)                 |
+| `load_appverk_skill`     | Load any AppVerk development skill by name. Available to all agents globally.                                                     | —          | [Guide](docs/plugins/skill-registry.md)     |
+| `dispatch_parallel`      | Global tool — deterministic parallel dispatch of specialist subagents (QA, fix, audit).                                           | —          | [Guide](docs/plugins/coordinator.md)        |
+| `assign_issue_ids`       | Global tool — deterministic issue ID assignment across aggregated specialist results.                                             | —          | [Guide](docs/plugins/coordinator.md)        |
+| `@perun`                 | Pantheon coordinator — primary agent that delegates to QA/fix/review specialists via `dispatch_parallel` and `assign_issue_ids`.  | `primary`  | [Guide](docs/plugins/coordinator.md)        |
+| `@python-developer`      | Direct agent invocation for Python tasks outside of `/python`.                                                                    | `primary`  | [Guide](docs/plugins/python-developer.md)   |
+| `@frontend-developer`    | Direct agent invocation for TypeScript + React tasks outside of `/frontend`.                                                      | `primary`  | [Guide](docs/plugins/frontend-developer.md) |
+| `@swift-developer`       | Direct agent invocation for Swift tasks outside of `/swift`.                                                                      | `primary`  | [Guide](docs/plugins/swift-developer.md)    |
+| `@security-auditor`      | Direct agent invocation for security audits with skill-agent delegation.                                                          | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@code-quality-auditor`  | Direct agent invocation for code quality audits with skill-agent delegation.                                                      | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@documentation-auditor` | Documentation audit agent — verifies code changes are reflected in docs.                                                          | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@cross-verifier`        | Cross-domain correlation agent — finds intersections between findings.                                                            | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@challenger`            | Adversarial review agent — challenges findings for false positives.                                                               | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@synthesis-agent`       | **Planned** — deduplicates and groups findings into actionable PRs. Not yet implemented.                                          | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@qa-fe-tester`          | Frontend testing subagent — runs Playwright tests, accessibility checks, and visual regression.                                   | `subagent` | [Guide](docs/plugins/qa.md)                 |
+| `@qa-be-tester`          | Backend testing subagent — tests API endpoints and validates database state via HTTP + DB CLI.                                    | `subagent` | [Guide](docs/plugins/qa.md)                 |
+| `@feedback-analyzer`     | Per-comment classification agent for PR feedback analysis.                                                                        | `subagent` | [Guide](docs/plugins/code-review.md)        |
+| `@fix-auto`              | Auto-fix subagent — performs fixes without user confirmation.                                                                     | `subagent` | [Guide](docs/plugins/code-review.md)        |
 
 > **Note on Mode:** Commands always appear in tab-completion. Agents marked `primary` also appear in tab-completion, while `subagent` agents are hidden and must be invoked explicitly (e.g., `@fix-auto`).
 
@@ -253,6 +277,8 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 - `docs/plugins/qa.md` - package-level behavior and usage guide.
 - `packages/swift-developer` - plugin source, tests, skill files, and build scripts for the Swift development workflow.
 - `docs/plugins/swift-developer.md` - package-level behavior and usage guide.
+- `packages/coordinator` - Pantheon coordinator source, tests, `@perun` agent prompt, and build scripts for the `dispatch_parallel` and `assign_issue_ids` global tools.
+- `docs/plugins/coordinator.md` - package-level behavior and usage guide.
 - `package.json` - workspace definition and shared validation commands.
 
 ## Local Development
@@ -281,6 +307,7 @@ npm run check
 - [Skill Registry Plugin Guide](docs/plugins/skill-registry.md)
 - [QA Plugin Guide](docs/plugins/qa.md)
 - [Swift Developer Plugin Guide](docs/plugins/swift-developer.md)
+- [Coordinator Plugin Guide](docs/plugins/coordinator.md)
 
 ## License
 

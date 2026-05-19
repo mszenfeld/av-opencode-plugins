@@ -2,10 +2,20 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { tool, type Plugin } from "@opencode-ai/plugin"
-import type { createOpencodeClient } from "@opencode-ai/sdk"
-import { dispatchParallel, type DispatchSpecialist, type AgentInfo } from "./dispatch.js"
+import { dispatchParallel } from "./dispatch.js"
 import { assignIssueIds } from "./assign-issue-ids.js"
-import type { PollerMessage } from "./poller.js"
+import { neutralizeUntrustedOutput, deriveReportPath } from "./sanitize.js"
+import {
+  createSDKSpecialist,
+  loadAgentRegistry,
+  toPollerMessage,
+} from "./sdk-specialist.js"
+
+// Re-export the SDK adapter surface for backward compatibility with existing
+// imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
+// from `../src/index.js`).
+export { createSDKSpecialist, loadAgentRegistry, toPollerMessage }
+export { neutralizeUntrustedOutput, deriveReportPath }
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -32,7 +42,18 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
 
   const dispatchParallelTool = tool({
     description:
-      "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
+      [
+        "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
+        "",
+        "Guarantees and limits:",
+        "- Maximum 10 tasks per call (over-limit calls are rejected before any session is created).",
+        "- Each task has a 5-minute hard timeout; on expiry the task is returned with status \"timeout\" and the partial result is discarded.",
+        "- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker \"[…truncated…]\" — synthesize what is present, do not retry.",
+        "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent, a `mode: primary` agent, or a `mode: all` agent are rejected with a thrown error and no work is dispatched.",
+        "- Specialist output is treated as untrusted data: ANSI/control characters are stripped and HTML-like substrings are escaped before the result is returned.",
+        "- Honors `ToolContext.abort`: when the parent session aborts, in-flight tasks terminate within ~one poll-interval with status \"aborted\" and the child session is cancelled server-side (best-effort).",
+        "- Result shape: each entry has `{ name, status: \"success\" | \"error\" | \"timeout\" | \"aborted\", result, duration_ms, error? }`, in the same order as the input `tasks` array.",
+      ].join("\n"),
     args: {
       tasks: tool.schema
         .array(
@@ -57,6 +78,10 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         tasks: args.tasks,
         agentRegistry,
         specialist,
+        // Thread the harness abort signal end-to-end: poller checks it at each
+        // iteration and during the inter-poll sleep, and child sessions are
+        // cancelled server-side when it fires (COMPOSITE-3 / ARCH-001).
+        signal: context.abort,
       })
       return JSON.stringify(results, null, 2)
     },
@@ -64,7 +89,15 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
 
   const assignIssueIdsTool = tool({
     description:
-      "Assign deterministic zero-padded IDs to a list of findings (QA-001, QA-002, ...). Use this instead of mentally tracking issue counters.",
+      [
+        "Assign deterministic zero-padded IDs to a list of findings (QA-001, QA-002, ...). Use this instead of mentally tracking issue counters.",
+        "",
+        "Guarantees:",
+        "- IDs are zero-padded to a minimum of 3 digits (e.g. `<PREFIX>-001`, `<PREFIX>-042`, `<PREFIX>-123`). Counters above 999 widen automatically (`<PREFIX>-1000`).",
+        "- IDs are assigned in the order findings appear in the input array — the caller is responsible for sorting (e.g. by severity) BEFORE calling this tool.",
+        "- Output preserves every input field and adds an `id` property; findings are not deduplicated, reordered, or filtered.",
+        "- `startAt` (default 1) lets you continue numbering across multiple reports without collisions.",
+      ].join("\n"),
     args: {
       findings: tool.schema
         .array(
@@ -92,9 +125,12 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
   return {
     config: async (config) => {
       config.agent = config.agent ?? {}
-      config.agent["perun"] = {
-        description:
-          "Pantheon coordinator — delegates work to specialists, synthesizes results, proposes next steps",
+      // Register under the display name (OMO convention: "Name - Role" with
+      // space-dash-space — never parentheses, which break the x-opencode-agent-name
+      // HTTP header). The display name is what OpenCode's TUI shows in the status
+      // bar, /agents picker, and session label.
+      config.agent["Perun - Coordinator"] = {
+        description: "Delegates work to specialists, synthesizes results, proposes next steps",
         mode: "primary",
         get prompt() {
           return getPerunPrompt()
@@ -108,78 +144,3 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
   }
 }
 
-type SDKClient = ReturnType<typeof createOpencodeClient>
-
-function createSDKSpecialist(client: SDKClient, parentSessionID: string): DispatchSpecialist {
-  return {
-    async startTask(agentName: string, prompt: string): Promise<string> {
-      // OpenCode's session.create body accepts only parentID/title — the target
-      // agent is bound on the subsequent session.prompt call. Two-step is required.
-      const created = await client.session.create({
-        body: {
-          parentID: parentSessionID,
-          title: `[perun] dispatch to ${agentName}`,
-        },
-      })
-      const sessionId: string = created.data?.id ?? ""
-      if (sessionId.length === 0) {
-        throw new Error(`createSession returned no session id for agent ${agentName}`)
-      }
-
-      await client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          agent: agentName,
-          parts: [{ type: "text", text: prompt }],
-        },
-      })
-
-      return sessionId
-    },
-    async fetchMessages(sessionId: string): Promise<PollerMessage[]> {
-      const result = await client.session.messages({ path: { id: sessionId } })
-      const list = result.data ?? []
-      return list.map(toPollerMessage)
-    },
-  }
-}
-
-function toPollerMessage(raw: {
-  info: { role: string; finishReason?: string | null }
-  parts: Array<{ type: string; text?: string }>
-}): PollerMessage {
-  const role: string = raw.info.role
-  const text = raw.parts
-    .filter((p) => p.type === "text")
-    .map((p) => p.text ?? "")
-    .join("")
-  const finishReason: string | null | undefined = raw.info.finishReason
-  return {
-    role,
-    content: text,
-    finish_reason: finishReason,
-  }
-}
-
-async function loadAgentRegistry(client: SDKClient): Promise<Record<string, AgentInfo>> {
-  let list: Array<{ name: string; mode: string }>
-  try {
-    const result = await client.app.agents()
-    list = result.data ?? []
-  } catch (err) {
-    throw new Error(
-      `dispatch_parallel: failed to load agent registry from SDK: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    )
-  }
-  const registry: Record<string, AgentInfo> = {}
-  for (const agent of list) {
-    const name = agent.name
-    const mode = agent.mode === "primary" ? "primary" : "subagent"
-    if (name.length > 0) {
-      registry[name] = { mode }
-    }
-  }
-  return registry
-}
