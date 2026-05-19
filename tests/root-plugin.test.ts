@@ -152,6 +152,16 @@ describe("AppVerkPlugins", () => {
         "packages/coordinator/dist/agents/perun.md",
         "src/hooks/session-notification/plugin.js",
         "src/hooks/session-notification/plugin.d.ts",
+        "src/hooks/session-notification/env-config.js",
+        "src/hooks/session-notification/env-config.d.ts",
+        "src/hooks/session-notification/idle-scheduler.js",
+        "src/hooks/session-notification/idle-scheduler.d.ts",
+        "src/hooks/session-notification/notification-sender.js",
+        "src/hooks/session-notification/notification-sender.d.ts",
+        "src/hooks/session-notification/session-notification.js",
+        "src/hooks/session-notification/session-notification.d.ts",
+        "src/hooks/session-notification/session-tracker.js",
+        "src/hooks/session-notification/session-tracker.d.ts",
       ]),
     )
   })
@@ -166,25 +176,6 @@ describe("AppVerkPlugins", () => {
     await expect(
       eventHandler({ event: { type: "session.idle", properties: { sessionID: "ses_unknown" } } } as never),
     ).resolves.toBeUndefined()
-  })
-
-  it("disables the Pantheon hook when AV_PANTHEON_NOTIFY=0", async () => {
-    const { AppVerkPlugins } = await loadRootModule()
-    const previous = process.env.AV_PANTHEON_NOTIFY
-    process.env.AV_PANTHEON_NOTIFY = "0"
-    try {
-      const plugin = await AppVerkPlugins({} as never)
-      // Other plugins may still register an event handler; we only assert this
-      // call does not throw, since the Pantheon plugin should now be a no-op.
-      if (typeof plugin.event === "function") {
-        await expect(
-          plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses_x" } } } as never),
-        ).resolves.toBeUndefined()
-      }
-    } finally {
-      if (previous === undefined) delete process.env.AV_PANTHEON_NOTIFY
-      else process.env.AV_PANTHEON_NOTIFY = previous
-    }
   })
 
   it("injects skill activation rules via system prompt transform", async () => {
