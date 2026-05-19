@@ -1,3 +1,6 @@
+// For the markdown-sink variant see
+// `packages/coordinator/src/sanitize.ts::neutralizeUntrustedOutput`.
+// Different rules — different sinks.
 export function escapeAppleScriptText(input) {
     // Defense-in-depth: strip ASCII control chars (NUL, BEL, etc., excluding TAB)
     // and Unicode BiDi override codepoints (U+202A-U+202E, U+2066-U+2069) that
@@ -10,6 +13,30 @@ export function escapeAppleScriptText(input) {
         .replace(/[\u202A-\u202E\u2066-\u2069]/g, "");
     // Order matters: escape backslashes first, then double quotes.
     return sanitized.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+/**
+ * Returns the input as a fully-quoted AppleScript string literal (including
+ * the surrounding `"`), branded as {@link AppleScriptLiteral}. Use this for
+ * every value interpolated into an osascript template so that the type system
+ * blocks raw-string interpolation paths.
+ */
+export function appleQuote(input) {
+    return `"${escapeAppleScriptText(input)}"`;
+}
+/**
+ * Type-safe osascript template builder. Accepts only {@link AppleScriptLiteral}
+ * values for interpolation, so any caller that tries to splice an unescaped
+ * string in fails at compile time. The static parts come from the developer-
+ * authored template literal and never carry user input.
+ */
+export function appleScript(parts, ...values) {
+    let out = "";
+    for (let i = 0; i < parts.length; i += 1) {
+        out += parts[i];
+        if (i < values.length)
+            out += values[i];
+    }
+    return out;
 }
 export class NotificationSender {
     ctx;
@@ -32,8 +59,11 @@ export class NotificationSender {
                 return;
             }
             if (probe.osascriptPath !== null) {
-                const script = `display notification "${escapeAppleScriptText(args.message)}" ` +
-                    `with title "${escapeAppleScriptText(args.title)}"`;
+                // Every interpolated value must be an AppleScriptLiteral (produced by
+                // appleQuote, which forces escapeAppleScriptText). Adding a new field
+                // like `subtitle` to the template without going through appleQuote is
+                // a TypeScript error — defense-in-depth against forgetting the escape.
+                const script = appleScript `display notification ${appleQuote(args.message)} with title ${appleQuote(args.title)}`;
                 await $ `${probe.osascriptPath} -e ${script}`.nothrow().quiet();
             }
         }
@@ -57,8 +87,10 @@ export class NotificationSender {
     async probe($) {
         if (this.probeCache !== undefined)
             return this.probeCache;
-        const terminalNotifierPath = await whichOrNull($, "terminal-notifier");
-        const osascriptPath = await whichOrNull($, "osascript");
+        const [terminalNotifierPath, osascriptPath] = await Promise.all([
+            whichOrNull($, "terminal-notifier"),
+            whichOrNull($, "osascript"),
+        ]);
         this.probeCache = { osascriptPath, terminalNotifierPath };
         return this.probeCache;
     }

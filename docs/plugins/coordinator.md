@@ -62,6 +62,8 @@ Already-fixed issues (those carrying `**Status:** ✅ Fixed`) are skipped automa
 opencode agent perun "uruchom QA dla docs/testing/plans/2026-05-18-example-auth-test-plan.md"
 ```
 
+> The agent is registered under the display name `"Perun - Coordinator"` (see `packages/coordinator/src/index.ts`). OpenCode's CLI typically accepts the kebab-case slug `perun-coordinator` or the lowercase first word `perun` for `opencode agent <name>`. If the short form above fails, run `opencode agent list` to confirm the exact invocation slug for your OpenCode version.
+
 ## What it does
 
 The coordinator implements two workflows, both encoded in `packages/coordinator/src/agents/perun.md`.
@@ -94,6 +96,8 @@ opencode agent perun "uruchom QA dla docs/testing/plans/2026-05-18-example-auth-
 opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-example-auth-report.md"
 ```
 
+> The agent is registered under the display name `"Perun - Coordinator"` (see `packages/coordinator/src/index.ts`). OpenCode's CLI typically accepts the kebab-case slug `perun-coordinator` or the lowercase first word `perun`. If invocation fails, run `opencode agent list` to confirm the exact slug for your OpenCode version.
+
 ## Architecture
 
 ### Registered elements
@@ -101,7 +105,7 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 | Element | Type | Mode | Purpose |
 |---|---|---|---|
 | `@perun` | Agent | `primary` | Coordinator — delegates, synthesizes, proposes next steps. System prompt at `packages/coordinator/src/agents/perun.md`. |
-| `dispatch_parallel` | Tool | n/a | Parallel session dispatch. Default 2 s poll interval, 5 min per-task timeout, 100 KB result cap, max 10 tasks per call. |
+| `dispatch_parallel` | Tool | n/a | Parallel session dispatch. Default 1 s poll interval, 5 min per-task timeout, 100 KB result cap, max 10 tasks per call. |
 | `assign_issue_ids` | Tool | n/a | Pure function — deterministic, zero-padded 3-digit IDs (e.g. `QA-001`). |
 
 ### `@perun` allowed tools
@@ -109,7 +113,7 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 `@perun` is intentionally locked down. Its `allowed-tools` frontmatter lists only:
 
 - `Read`, `Write`, `Edit`, `Glob`, `Grep`
-- `Bash(mkdir:*)`, `Bash(ls:*)`, `Bash(git:*)` — no general `Bash(*)`
+- `Bash(mkdir:*)`, `Bash(ls:*)` — no general `Bash(*)`, no `git`
 - `todowrite`, `question`
 - `dispatch_parallel`, `assign_issue_ids`
 
@@ -129,7 +133,7 @@ Each of these was audited against the coordinator's calling convention. See [`pa
 
 | Parameter | Default | Constant in `src/dispatch.ts` |
 |---|---|---|
-| Poll interval | 2000 ms | `DEFAULT_POLL_INTERVAL_MS` |
+| Poll interval | 1000 ms | `DEFAULT_POLL_INTERVAL_MS` |
 | Per-task timeout | 5 min (300 000 ms) | `DEFAULT_TASK_TIMEOUT_MS` |
 | Result max bytes | 100 KB (102 400 B) | `DEFAULT_RESULT_MAX_BYTES` |
 | Max tasks per call | 10 | enforced pre-flight |
@@ -166,7 +170,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **Sequential fixes only.** `@perun` dispatches `fix-auto` one issue at a time and waits for completion. Parallel fixes are deferred to avoid conflicting edits to the same file.
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
-- **Polling instead of event-driven.** `dispatch_parallel` polls every 2 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
+- **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
 - **Pre-built specialist set.** `@perun` only knows three specialists (`qa-fe-tester`, `qa-be-tester`, `fix-auto`). Adding more requires updating `perun.md`.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
@@ -183,7 +187,7 @@ packages/coordinator/
 │   ├── assign-issue-ids.ts     # Deterministic zero-padded ID assignment (pure function)
 │   ├── sanitize.ts             # neutralizeUntrustedOutput() + deriveReportPath()
 │   └── agents/
-│       └── coordinator.md            # @perun system prompt (workflows, sanitization, safety)
+│       └── perun.md                  # @perun system prompt (workflows, sanitization, safety)
 ├── tests/                      # Vitest unit + integration tests
 ├── scripts/
 │   └── copy-assets.js          # Copies src/agents/*.md into dist/agents/ after tsup build

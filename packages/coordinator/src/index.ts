@@ -55,6 +55,19 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "- Result shape: each entry has `{ name, status: \"success\" | \"error\" | \"timeout\" | \"aborted\", result, duration_ms, error? }`, in the same order as the input `tasks` array.",
       ].join("\n"),
     args: {
+      // Required. The OpenCode TUI's GenericTool renderer (the path used for
+      // every plugin-supplied tool) shows `{tool} {input(input)}`, where the
+      // `input()` helper formats only primitive top-level args. `tasks` is an
+      // array, so without `summary` the call line collapses to a bare
+      // `dispatch_parallel`. `summary` is the one knob we have to make the
+      // batch self-describing inline.
+      summary: tool.schema
+        .string()
+        .min(1)
+        .max(120)
+        .describe(
+          "REQUIRED. One-line label for this dispatch batch — comma-joined agent names plus a short goal (e.g. \"qa-fe-tester, qa-be-tester — run login plan\"). Rendered inline in the OpenCode UI so reviewers can see at a glance who you are dispatching and why. Keep under ~80 chars (hard cap 120); do not include prompts or PII.",
+        ),
       tasks: tool.schema
         .array(
           tool.schema.object({
@@ -69,6 +82,19 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         .describe("Array of tasks to dispatch in parallel"),
     },
     async execute(args, context) {
+      // Mirror `summary` into the tool-part metadata so richer UIs (desktop,
+      // web) that consume `state.title` get the same label. The current TUI
+      // renderer ignores `state.title` for plugin tools and instead shows
+      // top-level primitive args — so `summary` carries the inline label
+      // there. Set BEFORE any validation so the label survives downstream
+      // failures.
+      context.metadata({
+        title: args.summary,
+        metadata: {
+          tasks: args.tasks.map((t) => ({ name: t.name, prompt: t.prompt })),
+        },
+      })
+
       if (context.sessionID.length === 0) {
         throw new Error("dispatch_parallel: missing context.sessionID — cannot parent child sessions")
       }
@@ -137,6 +163,9 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         },
       }
     },
+    // IMPORTANT: Tool names "dispatch_parallel" and "assign_issue_ids" must exactly match
+    // the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename either tool,
+    // update both places. There is no programmatic linking — keep them in sync manually.
     tool: {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,

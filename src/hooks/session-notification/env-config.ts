@@ -5,6 +5,7 @@ export const DEFAULT_SESSION_NOTIFICATION_CONFIG: SessionNotificationConfig = {
   idleMessage: "Agent is ready for input",
   questionMessage: "Agent is asking a question",
   permissionMessage: "Agent needs permission",
+  // 1.5 s: long enough to skip between-tool-call quiet, short enough to feel responsive.
   idleConfirmationDelayMs: 1500,
   playSound: false,
   soundPath: "/System/Library/Sounds/Glass.aiff",

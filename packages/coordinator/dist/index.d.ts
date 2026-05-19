@@ -16,8 +16,16 @@ import { createOpencodeClient, Message } from '@opencode-ai/sdk';
  *
  *   - ANSI escape sequences (CSI `\x1b[...m` style) that can hide content in
  *     terminals or in some markdown renderers.
- *   - ASCII control characters (except whitespace `\n`, `\r`, `\t`) that can
- *     hide or distort text.
+ *   - OSC sequences (`\x1b]...\x07` or `\x1b]...\x1b\\`) which can set window
+ *     titles, hyperlinks, or other terminal state.
+ *   - 8-bit C1 control byte equivalents (`\x9B` CSI, `\x9D` OSC) interpreted
+ *     by xterm-class terminals as the same control sequences.
+ *   - ASCII control characters (except whitespace `\n`, `\r`, `\t`) and the
+ *     remaining C1 control range (0x80–0x9F) that can hide or distort text.
+ *   - Unicode bidirectional override characters (U+202A–U+202E, U+2066–U+2069)
+ *     that allow visual spoofing of payloads in markdown reports.
+ *   - Unicode zero-width characters (U+200B–U+200D, U+FEFF) that can hide
+ *     prompt-injection markers between visible characters.
  *   - Angle-bracketed substrings that look like HTML or pseudo tags
  *     (`<script>`, `<system>`, etc.) — escaped so they render verbatim instead
  *     of being interpreted as instructions or tags.

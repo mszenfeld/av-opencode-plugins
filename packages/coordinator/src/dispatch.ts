@@ -5,6 +5,7 @@ import {
   type PollerMessage,
 } from "./poller.js"
 import { neutralizeUntrustedOutput } from "./sanitize.js"
+import { truncateBytes } from "./truncate-bytes.js"
 
 export interface DispatchTask {
   name: string
@@ -53,28 +54,13 @@ export interface DispatchParallelInput {
   signal?: AbortSignal
 }
 
-export const DEFAULT_POLL_INTERVAL_MS = 2000
+// 1 s tail-latency budget on completion observation. `session.prompt` in the
+// OpenCode SDK already blocks for the full LLM turn, so polling is mostly
+// confirmatory — 1 s is a sensible compromise between server-load and tail.
+export const DEFAULT_POLL_INTERVAL_MS = 1000
 export const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
 export const DEFAULT_RESULT_MAX_BYTES = 100 * 1024
 export const MAX_PARALLEL_TASKS = 10
-const TRUNCATION_MARKER = "\n[…truncated…]"
-
-/**
- * UTF-8-safe byte-bounded truncation. Slices the underlying bytes at the cap
- * and decodes with `fatal: false` so a partial trailing multi-byte sequence
- * is dropped rather than rendered as a replacement character (SEC-009 /
- * MAINT-006: prior implementation truncated by UTF-16 code units, which both
- * over-counts ASCII and silently corrupts multi-byte characters at the cut).
- */
-function truncateBytes(input: string, maxBytes: number): string {
-  const buf = Buffer.from(input, "utf8")
-  if (buf.byteLength <= maxBytes) {
-    return input
-  }
-  const sliced = buf.subarray(0, maxBytes)
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced)
-  return decoded + TRUNCATION_MARKER
-}
 
 export async function dispatchParallel(
   input: DispatchParallelInput,
@@ -116,6 +102,41 @@ export async function dispatchParallel(
   )
 }
 
+/**
+ * Discriminates a `runTask` failure by error class. Kept as a pure helper so
+ * the happy-path in `runTask` stays focused (MAINT-008). New poller error
+ * types should be added here, not in the caller.
+ */
+function classifyError(err: unknown): "timeout" | "error" | "aborted" {
+  if (err instanceof PollerAbortError) {
+    return "aborted"
+  }
+  if (err instanceof PollerTimeoutError) {
+    return "timeout"
+  }
+  return "error"
+}
+
+/**
+ * Best-effort server-side cancellation of a dispatched child session. Called
+ * from the abort path so the specialist stops doing work and resources are
+ * released. Errors are swallowed — the caller is already returning an
+ * "aborted" result and we must not mask it (see COMPOSITE-3 / ARCH-001).
+ */
+async function cleanupOnAbort(
+  specialist: DispatchSpecialist,
+  sessionId: string | undefined,
+): Promise<void> {
+  if (sessionId === undefined) {
+    return
+  }
+  try {
+    await specialist.abortTask(sessionId)
+  } catch {
+    /* swallow: best-effort cleanup */
+  }
+}
+
 async function runTask(
   task: DispatchTask,
   specialist: DispatchSpecialist,
@@ -131,10 +152,13 @@ async function runTask(
 
   try {
     const fullPrompt = task.context ? `${task.prompt}\n\n${task.context}` : task.prompt
-    sessionId = await specialist.startTask(task.name, fullPrompt)
+    const id = await specialist.startTask(task.name, fullPrompt)
+    // Mirror into the outer `let` so the catch block's abort-path cleanup can
+    // see the session id even when failure occurs after `startTask` resolves.
+    sessionId = id
 
     const rawResult = await pollUntilIdle({
-      fetchMessages: () => specialist.fetchMessages(sessionId as string),
+      fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
       pollIntervalMs: options.pollIntervalMs,
       signal: options.signal,
@@ -144,18 +168,9 @@ async function runTask(
       maxBytes: options.resultMaxBytes,
     })
 
-    // Treat specialist output as untrusted: strip ANSI/control characters and
-    // escape HTML-like substrings before the string flows back into the
-    // coordinator's prompt context. See SEC-001 / sanitize.ts.
-    let result = neutralizeUntrustedOutput(rawResult)
-
-    // SEC-009 / MAINT-006: truncate by UTF-8 byte length, not UTF-16 code
-    // units. The `result.length` check was wrong on two axes — it over-counts
-    // ASCII (1 char == 1 byte but `length` counted both equally fine, so
-    // ASCII payloads under the cap were never truncated incorrectly here,
-    // but) it severely under-bounds payloads containing 2-byte UTF-8 chars
-    // (Polish/CJK/emoji) and could even split a surrogate pair mid-character.
-    result = truncateBytes(result, options.resultMaxBytes)
+    // Treat specialist output as untrusted (SEC-001), then truncate by UTF-8
+    // byte length, not UTF-16 code units (SEC-009 / MAINT-006).
+    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes)
 
     return {
       name: task.name,
@@ -164,23 +179,9 @@ async function runTask(
       duration_ms: Date.now() - startTime,
     }
   } catch (err) {
-    let status: "timeout" | "error" | "aborted"
-    if (err instanceof PollerAbortError) {
-      status = "aborted"
-      // Best-effort cleanup: cancel the child session server-side so the
-      // dispatched agent stops doing work and resources are released. Errors
-      // here are swallowed — we are already on the abort path.
-      if (sessionId !== undefined) {
-        try {
-          await specialist.abortTask(sessionId)
-        } catch {
-          /* swallow: best-effort cleanup */
-        }
-      }
-    } else if (err instanceof PollerTimeoutError) {
-      status = "timeout"
-    } else {
-      status = "error"
+    const status = classifyError(err)
+    if (status === "aborted") {
+      await cleanupOnAbort(specialist, sessionId)
     }
     return {
       name: task.name,

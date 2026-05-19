@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins: a controlled `/commit` workflow, a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers. The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins: a controlled `/commit` workflow, a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers, plus a Pantheon session-notification hook (`src/hooks/session-notification/`) that lives in the root `src/` tree rather than as a workspace package. The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -136,7 +136,7 @@ When adding a new plugin, you MUST update both top-level and per-plugin document
 
 Update these sections:
 
-1. **Package count badge** — increment the number: `[![Package](https://img.shields.io/badge/package-N-blue.svg)]`
+1. **Plugin count badge** — increment the number: `[![Plugins](https://img.shields.io/badge/plugins-N-blue.svg)]`
 2. **Introduction paragraph** — add a one-line description of the new plugin
 3. **Usage section** — add a subsection with `/command` example and what it does
 4. **Available Commands & Agents table** — add rows for the new command and

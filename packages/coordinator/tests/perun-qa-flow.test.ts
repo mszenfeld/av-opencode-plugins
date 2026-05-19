@@ -162,7 +162,10 @@ async function invokePlugin(
   client: SDKClient,
 ): Promise<{
   dispatchParallel: (
-    args: { tasks: Array<{ name: string; prompt: string; context?: string }> },
+    args: {
+      summary: string
+      tasks: Array<{ name: string; prompt: string; context?: string }>
+    },
     context: ToolContext,
   ) => Promise<string>
   assignIssueIds: (
@@ -262,6 +265,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
+        summary: "qa-fe-tester, qa-be-tester — integration test plan",
         tasks: [
           { name: "qa-fe-tester", prompt: "<FE scenarios>" },
           { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -352,6 +356,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
+        summary: "qa-fe-tester, qa-be-tester — partial failure path",
         tasks: [
           { name: "qa-fe-tester", prompt: "<FE scenarios>" },
           { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -394,6 +399,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const rawResults = await plugin.dispatchParallel(
         {
+          summary: "qa-fe-tester, qa-be-tester — determinism check",
           tasks: [
             { name: "qa-fe-tester", prompt: "<FE scenarios>" },
             { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -433,7 +439,10 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     await expect(
       plugin.dispatchParallel(
-        { tasks: [{ name: "ghost-agent", prompt: "noop" }] },
+        {
+          summary: "ghost-agent — anti-recursion negative test",
+          tasks: [{ name: "ghost-agent", prompt: "noop" }],
+        },
         ctx,
       ),
     ).rejects.toThrow("Unknown agent: ghost-agent")
@@ -457,7 +466,10 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     await expect(
       plugin.dispatchParallel(
-        { tasks: [{ name: "perun", prompt: "recurse" }] },
+        {
+          summary: "perun — primary-mode rejection",
+          tasks: [{ name: "perun", prompt: "recurse" }],
+        },
         ctx,
       ),
     ).rejects.toThrow("Cannot dispatch primary agent: perun")

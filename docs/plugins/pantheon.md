@@ -15,6 +15,10 @@ as native macOS banners:
 
 Subagents spawned via `dispatch_parallel` (`@perun` coordinator) do **not**
 trigger notifications — the user cannot interact with them directly.
+Subagent detection in v1 uses a **first-session-wins heuristic**: the first
+session registered after the hook starts is treated as the user-facing
+"main", and every subsequent `session.created` is classified as a subagent.
+Proper `parentSessionID` plumbing (via `markAsSubagent`) is deferred to v2.
 
 ## How the confirmation delay works
 
@@ -43,7 +47,11 @@ user-wait states rather than transient idle gaps.
 
 Notifications only fire for the user-facing **main** session. Idle, question,
 and permission events emitted by `dispatch_parallel` subagents are tracked
-but never produce banners.
+but never produce banners. "Main" is currently determined by the
+first-session-wins heuristic described above — if the original main session
+disappears and OpenCode creates a replacement while a cached older session
+arrives first in the event stream, the new main may be misclassified as a
+subagent until v2 wires `parentSessionID` detection.
 
 ## Requirements
 
@@ -81,5 +89,8 @@ Invalid numeric values fall back to the default and emit a one-time warning.
 - Notifications for `dispatch_parallel` task timeouts or errors
 - Per-event sound files
 - A config file (`opencode.json` or otherwise)
+- `parentSessionID`-based subagent detection (v2; today the hook uses a
+  first-session-wins heuristic and `SessionTracker.markAsSubagent` is
+  reserved for that future wiring)
 
 See `docs/superpowers/specs/2026-05-19-session-notification-hook-design.md` for the design and `docs/superpowers/plans/2026-05-19-session-notification-hook.md` for the implementation plan.

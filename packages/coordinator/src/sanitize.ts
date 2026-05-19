@@ -15,24 +15,55 @@ import path from "node:path"
  *
  *   - ANSI escape sequences (CSI `\x1b[...m` style) that can hide content in
  *     terminals or in some markdown renderers.
- *   - ASCII control characters (except whitespace `\n`, `\r`, `\t`) that can
- *     hide or distort text.
+ *   - OSC sequences (`\x1b]...\x07` or `\x1b]...\x1b\\`) which can set window
+ *     titles, hyperlinks, or other terminal state.
+ *   - 8-bit C1 control byte equivalents (`\x9B` CSI, `\x9D` OSC) interpreted
+ *     by xterm-class terminals as the same control sequences.
+ *   - ASCII control characters (except whitespace `\n`, `\r`, `\t`) and the
+ *     remaining C1 control range (0x80–0x9F) that can hide or distort text.
+ *   - Unicode bidirectional override characters (U+202A–U+202E, U+2066–U+2069)
+ *     that allow visual spoofing of payloads in markdown reports.
+ *   - Unicode zero-width characters (U+200B–U+200D, U+FEFF) that can hide
+ *     prompt-injection markers between visible characters.
  *   - Angle-bracketed substrings that look like HTML or pseudo tags
  *     (`<script>`, `<system>`, etc.) — escaped so they render verbatim instead
  *     of being interpreted as instructions or tags.
  */
+// For the AppleScript-literal variant see
+// `src/hooks/session-notification/notification-sender.ts::escapeAppleScriptText`.
+// Different rules — different sinks.
 export function neutralizeUntrustedOutput(s: string): string {
   if (s.length === 0) {
     return s
   }
 
-  // Strip ANSI control sequences (CSI: ESC [ ... letter)
+  // Strip OSC (Operating System Command) sequences first, since their payload
+  // may itself contain ESC bytes that would survive a later CSI-only pass.
+  // 7-bit form: ESC ] ... BEL  |  ESC ] ... ESC \
+  // 8-bit form: 0x9D ... BEL   |  0x9D ... ESC \
+  let out = s.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "")
+  out = out.replace(/\x9D[\s\S]*?(?:\x07|\x1b\\)/g, "")
+
+  // Strip ANSI CSI control sequences (7-bit: ESC [ ... letter; 8-bit: 0x9B ... letter).
   // Covers SGR (colors), cursor movement, and other CSI codes.
-  let out = s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+  out = out.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+  out = out.replace(/\x9B[0-9;?]*[a-zA-Z]/g, "")
 
   // Strip remaining ASCII control characters (0x00–0x08, 0x0B, 0x0C, 0x0E–0x1F, 0x7F)
-  // Preserve common whitespace: \t (0x09), \n (0x0A), \r (0x0D)
-  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+  // and the full C1 control range (0x80–0x9F) — xterm-class terminals interpret
+  // C1 bytes as control codes (e.g. 0x9B = CSI introducer).
+  // Preserve common whitespace: \t (0x09), \n (0x0A), \r (0x0D).
+  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "")
+
+  // Strip Unicode bidirectional override characters that allow visual spoofing
+  // of payloads in markdown viewers (e.g. flipping malicious text to look benign).
+  //   U+202A LRE, U+202B RLE, U+202C PDF, U+202D LRO, U+202E RLO
+  //   U+2066 LRI, U+2067 RLI, U+2068 FSI, U+2069 PDI
+  out = out.replace(/[‪-‮⁦-⁩]/g, "")
+
+  // Strip zero-width characters that can hide prompt-injection markers between
+  // visible glyphs (U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF ZWNBSP/BOM).
+  out = out.replace(/[​-‍﻿]/g, "")
 
   // HTML-escape angle-bracketed substrings so they render as literal text in
   // markdown viewers and never get interpreted as tags or directives.

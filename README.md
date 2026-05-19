@@ -13,6 +13,7 @@ OpenCode plugin packages for AppVerk. The root plugin loads the AppVerk plugin b
 - A **QA workflow** (`/create-qa-plan`, `/run-qa`) for end-to-end testing — generates test plans from PR descriptions and executes them via Playwright (frontend) or HTTP + DB (backend).
 - A **Swift development workflow** (`/swift`) with TDD, coding standards, and modern Apple stack patterns (SwiftUI, `@Observable`, SPM, SwiftData).
 - A **Pantheon coordinator** (`@perun`) — primary agent that delegates QA and fix work to specialist subagents via the deterministic `dispatch_parallel` and `assign_issue_ids` tools.
+- A **Pantheon session-notification hook** (macOS only) that surfaces agent idle, question, and permission events as native banners — see [docs/plugins/pantheon.md](docs/plugins/pantheon.md).
 - A **global skill registry** that makes all AppVerk development skills available to every OpenCode agent via a single `load_appverk_skill` tool, with mandatory activation rules injected into every agent's system prompt.
 
 ## Installation
@@ -28,7 +29,13 @@ Add the root plugin package to your OpenCode config:
 }
 ```
 
-Restart OpenCode after updating the config. The root plugin installs the AppVerk plugin bundle and registers `/commit`, `/python`, `/frontend`, `/swift`, `/review`, `/fix`, `/fix-report`, and `/analyze-feedback` automatically.
+Restart OpenCode after updating the config. The root plugin installs the AppVerk plugin bundle and registers the following automatically:
+
+- **Commands:** `/commit`, `/python`, `/frontend`, `/swift`, `/review`, `/fix`, `/fix-report`, `/analyze-feedback`, `/create-qa-plan`, `/run-qa`.
+- **Agents:** `@perun` (Pantheon coordinator) alongside the per-stack primaries and QA/review subagents.
+- **Global tools:** `load_appverk_skill`, `dispatch_parallel`, `assign_issue_ids`.
+
+See the [Available Commands & Agents](#available-commands--agents) table below for the full inventory.
 
 ## Usage
 

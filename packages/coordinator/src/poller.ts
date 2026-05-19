@@ -1,3 +1,5 @@
+import { truncateBytes } from "./truncate-bytes.js"
+
 export interface PollerMessage {
   role: string
   content: string
@@ -17,8 +19,11 @@ export interface PollUntilIdleOptions {
   signal?: AbortSignal
   /**
    * Optional byte-level cap on the polled assistant content (UTF-8 bytes).
-   * When set, `pollUntilIdle` truncates oversized results using a UTF-8-safe
-   * slice before returning, so in-flight memory is bounded — see
+   * When set, `pollUntilIdle` truncates the LAST message's content using a
+   * UTF-8-safe slice before returning it as the result. Scope is limited to
+   * `messages[last].content` — the full transcript array returned by
+   * `fetchMessages` is still allocated in full by the SDK on each poll, so
+   * this is not a true mid-stream / full-transcript memory bound. See
    * COMPOSITE-3 / SEC-010.
    */
   maxBytes?: number
@@ -46,24 +51,6 @@ export class PollerAbortError extends Error {
   }
 }
 
-const TRUNCATION_MARKER = "\n[…truncated…]"
-
-/**
- * UTF-8-safe byte-bounded truncation. Slices the underlying bytes at the cap
- * and decodes with `fatal: false` so a partial trailing multi-byte sequence
- * is dropped rather than rendered as a replacement character — matches the
- * truncation policy used in `dispatch.ts`.
- */
-function truncateBytes(input: string, maxBytes: number): string {
-  const buf = Buffer.from(input, "utf8")
-  if (buf.byteLength <= maxBytes) {
-    return input
-  }
-  const sliced = buf.subarray(0, maxBytes)
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced)
-  return decoded + TRUNCATION_MARKER
-}
-
 export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<string> {
   const { fetchMessages, timeoutMs, pollIntervalMs, signal, maxBytes } = options
   const startTime = Date.now()
@@ -85,9 +72,13 @@ export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<stri
       return maxBytes === undefined ? last.content : truncateBytes(last.content, maxBytes)
     }
 
-    // SEC-010: cap in-flight memory mid-stream. If a polled-but-not-yet-finished
-    // assistant message has already grown past the byte cap, drop the excess
-    // now so we never hold an arbitrarily large string before the final return.
+    // SEC-010: bound the size of the LAST assistant message between polls.
+    // NOTE: This is NOT a full mid-stream / transcript-wide cap — `fetchMessages`
+    // still returns the entire `messages` array, which the SDK allocates in
+    // full before we ever see it. The truncation here only prevents the
+    // in-progress assistant turn (the one we will eventually surface as the
+    // result) from growing unboundedly across successive polls; it does not
+    // bound `totalBytes` across earlier transcript entries.
     if (
       maxBytes !== undefined &&
       last !== undefined &&

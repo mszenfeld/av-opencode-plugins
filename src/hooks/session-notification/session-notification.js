@@ -41,6 +41,66 @@ function readToolName(properties) {
         return obj.toolName;
     return undefined;
 }
+const handleSessionCreated = async ({ sessionId, tracker }) => {
+    // TODO(pantheon-v2): wire parentSessionID detection through markAsSubagent
+    if (sessionId !== undefined)
+        tracker.registerSession(sessionId);
+};
+const handleSessionDeleted = async ({ sessionId, tracker, scheduler }) => {
+    if (sessionId === undefined)
+        return;
+    tracker.deleteSession(sessionId);
+    scheduler.cancel(sessionId);
+};
+const handleSessionIdle = async ({ sessionId, tracker, scheduler }) => {
+    if (sessionId === undefined)
+        return;
+    if (tracker.isMain(sessionId))
+        scheduler.schedule(sessionId);
+};
+const handleActivity = async ({ sessionId, scheduler }) => {
+    if (sessionId === undefined)
+        return;
+    scheduler.markActivity(sessionId);
+};
+const handleToolExecuteBefore = async ({ event, sessionId, tracker, scheduler, sender, config }) => {
+    if (sessionId === undefined)
+        return;
+    const toolName = readToolName(event.properties);
+    if (toolName !== undefined && QUESTION_TOOL_PATTERN.test(toolName)) {
+        if (tracker.isMain(sessionId)) {
+            await sender.send({ title: config.title, message: config.questionMessage });
+            if (config.playSound)
+                await sender.playSound(config.soundPath);
+        }
+        return;
+    }
+    scheduler.markActivity(sessionId);
+};
+const handlePermission = async ({ sessionId, tracker, sender, config }) => {
+    if (sessionId === undefined)
+        return;
+    if (tracker.isMain(sessionId)) {
+        await sender.send({ title: config.title, message: config.permissionMessage });
+        if (config.playSound)
+            await sender.playSound(config.soundPath);
+    }
+};
+function buildHandlerTable() {
+    const table = {
+        "session.created": handleSessionCreated,
+        "session.deleted": handleSessionDeleted,
+        "session.idle": handleSessionIdle,
+        "tool.execute.before": handleToolExecuteBefore,
+        "tool.execute.after": handleActivity,
+    };
+    for (const type of ACTIVITY_EVENT_TYPES)
+        table[type] = handleActivity;
+    for (const type of PERMISSION_EVENT_TYPES)
+        table[type] = handlePermission;
+    return table;
+}
+const HANDLERS = buildHandlerTable();
 export function createSessionNotification(ctx, config, deps = {}) {
     const tracker = deps.tracker ?? new SessionTracker();
     const sender = deps.sender ?? new NotificationSender(ctx);
@@ -52,56 +112,11 @@ export function createSessionNotification(ctx, config, deps = {}) {
         });
     return async ({ event }) => {
         try {
+            const handler = HANDLERS[event.type];
+            if (handler === undefined)
+                return;
             const sessionId = readSessionId(event.properties);
-            if (event.type === "session.created") {
-                // TODO(pantheon-v2): wire parentSessionID detection through markAsSubagent
-                if (sessionId !== undefined)
-                    tracker.registerSession(sessionId);
-                return;
-            }
-            if (event.type === "session.deleted") {
-                if (sessionId !== undefined) {
-                    tracker.deleteSession(sessionId);
-                    scheduler.cancel(sessionId);
-                }
-                return;
-            }
-            if (sessionId === undefined)
-                return;
-            if (event.type === "session.idle") {
-                if (tracker.isMain(sessionId))
-                    scheduler.schedule(sessionId);
-                return;
-            }
-            if (ACTIVITY_EVENT_TYPES.has(event.type)) {
-                scheduler.markActivity(sessionId);
-                return;
-            }
-            if (event.type === "tool.execute.before") {
-                const toolName = readToolName(event.properties);
-                if (toolName !== undefined && QUESTION_TOOL_PATTERN.test(toolName)) {
-                    if (tracker.isMain(sessionId)) {
-                        await sender.send({ title: config.title, message: config.questionMessage });
-                        if (config.playSound)
-                            await sender.playSound(config.soundPath);
-                    }
-                    return;
-                }
-                scheduler.markActivity(sessionId);
-                return;
-            }
-            if (event.type === "tool.execute.after") {
-                scheduler.markActivity(sessionId);
-                return;
-            }
-            if (PERMISSION_EVENT_TYPES.has(event.type)) {
-                if (tracker.isMain(sessionId)) {
-                    await sender.send({ title: config.title, message: config.permissionMessage });
-                    if (config.playSound)
-                        await sender.playSound(config.soundPath);
-                }
-                return;
-            }
+            await handler({ event, sessionId, tracker, scheduler, sender, config });
         }
         catch (err) {
             console.error("[pantheon/session-notification]", err);

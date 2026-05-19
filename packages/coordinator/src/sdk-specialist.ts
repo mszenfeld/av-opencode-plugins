@@ -60,6 +60,17 @@ export function createSDKSpecialist(
   }
 }
 
+/**
+ * Type guard that narrows `Message` (UserMessage | AssistantMessage) down to
+ * `AssistantMessage` via the SDK's discriminated `role` field. Using a guard
+ * — instead of `as AssistantMessage` — lets the compiler verify the narrowing
+ * is sound, so any future SDK change to the discriminant surfaces as a type
+ * error here rather than as a silent runtime cast.
+ */
+function isAssistant(message: Message): message is AssistantMessage {
+  return message.role === "assistant"
+}
+
 export function toPollerMessage(raw: {
   info: Message
   parts: Array<{ type: string; text?: string }>
@@ -70,8 +81,8 @@ export function toPollerMessage(raw: {
     .map((p) => p.text ?? "")
     .join("")
   const finishReason: string | null =
-    raw.info.role === "assistant" && typeof (raw.info as AssistantMessage).finish === "string"
-      ? (raw.info as AssistantMessage).finish ?? null
+    isAssistant(raw.info) && typeof raw.info.finish === "string"
+      ? raw.info.finish
       : null
   return {
     role,
@@ -80,7 +91,59 @@ export function toPollerMessage(raw: {
   }
 }
 
+/**
+ * TTL for the agent-registry cache (60 s). The registry only changes when the
+ * OpenCode server reloads plugins, which is rare relative to dispatch volume —
+ * but we keep a TTL (rather than caching forever) so a hot-reloaded plugin's
+ * new agents are picked up within a minute without restarting the coordinator.
+ */
+export const AGENT_REGISTRY_TTL_MS = 60_000
+
+interface RegistryCacheEntry {
+  /**
+   * Stored as a Promise (not the resolved value) so concurrent first-calls
+   * dedupe into a single HTTP request: the second caller observes the
+   * in-flight promise via the cache and awaits it instead of firing again.
+   */
+  promise: Promise<Record<string, AgentInfo>>
+  expiresAt: number
+}
+
+/**
+ * Per-client cache. WeakMap-keyed so the cache is naturally released when an
+ * `SDKClient` goes out of scope — no manual reset hook needed for tests, and
+ * no cross-test pollution. Module-scope state survives `loadAgentRegistry`
+ * calls within the same client identity, which is exactly the use case.
+ */
+const registryCache = new WeakMap<SDKClient, RegistryCacheEntry>()
+
 export async function loadAgentRegistry(
+  client: SDKClient,
+): Promise<Record<string, AgentInfo>> {
+  const now = Date.now()
+  const cached = registryCache.get(client)
+  if (cached !== undefined && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  const promise = fetchAgentRegistry(client)
+  registryCache.set(client, { promise, expiresAt: now + AGENT_REGISTRY_TTL_MS })
+
+  // Invalidate the cache on failure so transient HTTP errors don't pin the
+  // coordinator in a permanently-broken state. Only delete if the entry still
+  // points at THIS promise — a later successful refresh may have replaced it.
+  // `.catch` here returns a new promise we deliberately discard; the original
+  // `promise` rejection still propagates to whoever awaits it below.
+  promise.catch(() => {
+    if (registryCache.get(client)?.promise === promise) {
+      registryCache.delete(client)
+    }
+  })
+
+  return promise
+}
+
+async function fetchAgentRegistry(
   client: SDKClient,
 ): Promise<Record<string, AgentInfo>> {
   let list: Agent[]

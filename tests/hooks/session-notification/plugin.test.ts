@@ -12,4 +12,15 @@ describe("AppVerkPantheonPlugin", () => {
       else process.env.AV_PANTHEON_NOTIFY = previous
     }
   })
+
+  it("registers an event handler when the kill-switch is unset", async () => {
+    const previous = process.env.AV_PANTHEON_NOTIFY
+    delete process.env.AV_PANTHEON_NOTIFY
+    try {
+      const hooks = await AppVerkPantheonPlugin({} as never)
+      expect(typeof hooks.event).toBe("function")
+    } finally {
+      if (previous !== undefined) process.env.AV_PANTHEON_NOTIFY = previous
+    }
+  })
 })

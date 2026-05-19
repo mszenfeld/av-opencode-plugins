@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Agent, AssistantMessage, Message } from "@opencode-ai/sdk"
 import {
+  AGENT_REGISTRY_TTL_MS,
   createSDKSpecialist,
   loadAgentRegistry,
   toPollerMessage,
@@ -330,5 +331,106 @@ describe("loadAgentRegistry", () => {
     await expect(loadAgentRegistry(clientWithThrowingAgents)).rejects.toThrow(
       "dispatch_parallel: failed to load agent registry from SDK: boom",
     )
+  })
+})
+
+/**
+ * Registry cache: `loadAgentRegistry` is called fresh on every `dispatch_parallel`
+ * invocation, but the agent inventory only changes on plugin reload. Caching it
+ * per-client with a short TTL eliminates ~50–150ms (one HTTP round-trip) from
+ * every dispatch without introducing staleness in practice.
+ *
+ * Pinned behaviours:
+ *   - Per-client scope (WeakMap-keyed) — two clients have independent caches.
+ *   - TTL: `AGENT_REGISTRY_TTL_MS` after which a fresh fetch is performed.
+ *   - Concurrent first-calls dedupe into a single HTTP request.
+ *   - Failed fetches are NOT cached — the next call retries.
+ */
+describe("loadAgentRegistry — caching", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("caches the registry within the TTL and serves subsequent calls from memory", async () => {
+    const fake = makeFakeClient({
+      agentsResponse: { data: [makeAgent({ name: "qa-fe-tester", mode: "subagent" })] },
+    })
+
+    const first = await loadAgentRegistry(fake.client)
+    const second = await loadAgentRegistry(fake.client)
+
+    expect(fake.calls.appAgents).toHaveLength(1)
+    expect(first).toEqual({ "qa-fe-tester": { mode: "subagent" } })
+    expect(second).toEqual(first)
+  })
+
+  it("re-fetches after the TTL expires", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-05-19T10:00:00Z"))
+
+    const fake = makeFakeClient({
+      agentsResponse: { data: [makeAgent({ name: "qa-fe-tester", mode: "subagent" })] },
+    })
+
+    await loadAgentRegistry(fake.client)
+    vi.setSystemTime(new Date(Date.now() + AGENT_REGISTRY_TTL_MS + 1))
+    await loadAgentRegistry(fake.client)
+
+    expect(fake.calls.appAgents).toHaveLength(2)
+  })
+
+  it("deduplicates concurrent first-calls into a single HTTP request", async () => {
+    const fake = makeFakeClient({
+      agentsResponse: { data: [makeAgent({ name: "qa-fe-tester", mode: "subagent" })] },
+    })
+
+    const [a, b] = await Promise.all([
+      loadAgentRegistry(fake.client),
+      loadAgentRegistry(fake.client),
+    ])
+
+    expect(fake.calls.appAgents).toHaveLength(1)
+    expect(a).toEqual(b)
+  })
+
+  it("does not cache failures — the next call retries the fetch", async () => {
+    // Custom fake: first `app.agents()` call rejects, the second succeeds.
+    // Mirrors a transient HTTP failure where caching would otherwise pin the
+    // dispatch in a permanently-broken state.
+    const calls: Array<undefined> = []
+    let invocation = 0
+    const client = {
+      app: {
+        async agents(): Promise<{ data: Agent[] }> {
+          calls.push(undefined)
+          invocation += 1
+          if (invocation === 1) throw new Error("transient HTTP 503")
+          return { data: [makeAgent({ name: "qa-fe-tester", mode: "subagent" })] }
+        },
+      },
+    } as unknown as SDKClient
+
+    await expect(loadAgentRegistry(client)).rejects.toThrow("transient HTTP 503")
+    const recovered = await loadAgentRegistry(client)
+
+    expect(calls).toHaveLength(2)
+    expect(recovered).toEqual({ "qa-fe-tester": { mode: "subagent" } })
+  })
+
+  it("caches are scoped per client — two clients fetch independently", async () => {
+    const fakeA = makeFakeClient({
+      agentsResponse: { data: [makeAgent({ name: "qa-fe-tester", mode: "subagent" })] },
+    })
+    const fakeB = makeFakeClient({
+      agentsResponse: { data: [makeAgent({ name: "qa-be-tester", mode: "subagent" })] },
+    })
+
+    const a = await loadAgentRegistry(fakeA.client)
+    const b = await loadAgentRegistry(fakeB.client)
+
+    expect(fakeA.calls.appAgents).toHaveLength(1)
+    expect(fakeB.calls.appAgents).toHaveLength(1)
+    expect(a).toEqual({ "qa-fe-tester": { mode: "subagent" } })
+    expect(b).toEqual({ "qa-be-tester": { mode: "subagent" } })
   })
 })

@@ -4,6 +4,18 @@ import path2 from "path";
 import { fileURLToPath } from "url";
 import { tool } from "@opencode-ai/plugin";
 
+// src/truncate-bytes.ts
+var TRUNCATION_MARKER = "\n[\u2026truncated\u2026]";
+function truncateBytes(input, maxBytes) {
+  const buf = Buffer.from(input, "utf8");
+  if (buf.byteLength <= maxBytes) {
+    return input;
+  }
+  const sliced = buf.subarray(0, maxBytes);
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced);
+  return decoded + TRUNCATION_MARKER;
+}
+
 // src/poller.ts
 var PollerTimeoutError = class extends Error {
   kind = "timeout";
@@ -23,16 +35,6 @@ var PollerAbortError = class extends Error {
     this.elapsedMs = elapsedMs;
   }
 };
-var TRUNCATION_MARKER = "\n[\u2026truncated\u2026]";
-function truncateBytes(input, maxBytes) {
-  const buf = Buffer.from(input, "utf8");
-  if (buf.byteLength <= maxBytes) {
-    return input;
-  }
-  const sliced = buf.subarray(0, maxBytes);
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced);
-  return decoded + TRUNCATION_MARKER;
-}
 async function pollUntilIdle(options) {
   const { fetchMessages, timeoutMs, pollIntervalMs, signal, maxBytes } = options;
   const startTime = Date.now();
@@ -84,8 +86,13 @@ function neutralizeUntrustedOutput(s) {
   if (s.length === 0) {
     return s;
   }
-  let out = s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
-  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  let out = s.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, "");
+  out = out.replace(/\x9D[\s\S]*?(?:\x07|\x1b\\)/g, "");
+  out = out.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
+  out = out.replace(/\x9B[0-9;?]*[a-zA-Z]/g, "");
+  out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "");
+  out = out.replace(/[‪-‮⁦-⁩]/g, "");
+  out = out.replace(/[​-‍﻿]/g, "");
   out = out.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return out;
 }
@@ -111,20 +118,10 @@ function deriveReportPath(planPath, today) {
 }
 
 // src/dispatch.ts
-var DEFAULT_POLL_INTERVAL_MS = 2e3;
+var DEFAULT_POLL_INTERVAL_MS = 1e3;
 var DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
 var DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
 var MAX_PARALLEL_TASKS = 10;
-var TRUNCATION_MARKER2 = "\n[\u2026truncated\u2026]";
-function truncateBytes2(input, maxBytes) {
-  const buf = Buffer.from(input, "utf8");
-  if (buf.byteLength <= maxBytes) {
-    return input;
-  }
-  const sliced = buf.subarray(0, maxBytes);
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced);
-  return decoded + TRUNCATION_MARKER2;
-}
 async function dispatchParallel(input) {
   const {
     tasks,
@@ -155,6 +152,24 @@ async function dispatchParallel(input) {
     )
   );
 }
+function classifyError(err) {
+  if (err instanceof PollerAbortError) {
+    return "aborted";
+  }
+  if (err instanceof PollerTimeoutError) {
+    return "timeout";
+  }
+  return "error";
+}
+async function cleanupOnAbort(specialist, sessionId) {
+  if (sessionId === void 0) {
+    return;
+  }
+  try {
+    await specialist.abortTask(sessionId);
+  } catch {
+  }
+}
 async function runTask(task, specialist, options) {
   const startTime = Date.now();
   let sessionId;
@@ -162,9 +177,10 @@ async function runTask(task, specialist, options) {
     const fullPrompt = task.context ? `${task.prompt}
 
 ${task.context}` : task.prompt;
-    sessionId = await specialist.startTask(task.name, fullPrompt);
+    const id = await specialist.startTask(task.name, fullPrompt);
+    sessionId = id;
     const rawResult = await pollUntilIdle({
-      fetchMessages: () => specialist.fetchMessages(sessionId),
+      fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
       pollIntervalMs: options.pollIntervalMs,
       signal: options.signal,
@@ -173,8 +189,7 @@ ${task.context}` : task.prompt;
       // final truncation pass below.
       maxBytes: options.resultMaxBytes
     });
-    let result = neutralizeUntrustedOutput(rawResult);
-    result = truncateBytes2(result, options.resultMaxBytes);
+    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes);
     return {
       name: task.name,
       status: "success",
@@ -182,19 +197,9 @@ ${task.context}` : task.prompt;
       duration_ms: Date.now() - startTime
     };
   } catch (err) {
-    let status;
-    if (err instanceof PollerAbortError) {
-      status = "aborted";
-      if (sessionId !== void 0) {
-        try {
-          await specialist.abortTask(sessionId);
-        } catch {
-        }
-      }
-    } else if (err instanceof PollerTimeoutError) {
-      status = "timeout";
-    } else {
-      status = "error";
+    const status = classifyError(err);
+    if (status === "aborted") {
+      await cleanupOnAbort(specialist, sessionId);
     }
     return {
       name: task.name,
@@ -248,17 +253,37 @@ function createSDKSpecialist(client, parentSessionID) {
     }
   };
 }
+function isAssistant(message) {
+  return message.role === "assistant";
+}
 function toPollerMessage(raw) {
   const role = raw.info.role;
   const text = raw.parts.filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
-  const finishReason = raw.info.role === "assistant" && typeof raw.info.finish === "string" ? raw.info.finish ?? null : null;
+  const finishReason = isAssistant(raw.info) && typeof raw.info.finish === "string" ? raw.info.finish : null;
   return {
     role,
     content: text,
     finish_reason: finishReason
   };
 }
+var AGENT_REGISTRY_TTL_MS = 6e4;
+var registryCache = /* @__PURE__ */ new WeakMap();
 async function loadAgentRegistry(client) {
+  const now = Date.now();
+  const cached = registryCache.get(client);
+  if (cached !== void 0 && cached.expiresAt > now) {
+    return cached.promise;
+  }
+  const promise = fetchAgentRegistry(client);
+  registryCache.set(client, { promise, expiresAt: now + AGENT_REGISTRY_TTL_MS });
+  promise.catch(() => {
+    if (registryCache.get(client)?.promise === promise) {
+      registryCache.delete(client);
+    }
+  });
+  return promise;
+}
+async function fetchAgentRegistry(client) {
   let list;
   try {
     const result = await client.app.agents();
@@ -312,6 +337,15 @@ var AppVerkCoordinatorPlugin = async (input) => {
       '- Result shape: each entry has `{ name, status: "success" | "error" | "timeout" | "aborted", result, duration_ms, error? }`, in the same order as the input `tasks` array.'
     ].join("\n"),
     args: {
+      // Required. The OpenCode TUI's GenericTool renderer (the path used for
+      // every plugin-supplied tool) shows `{tool} {input(input)}`, where the
+      // `input()` helper formats only primitive top-level args. `tasks` is an
+      // array, so without `summary` the call line collapses to a bare
+      // `dispatch_parallel`. `summary` is the one knob we have to make the
+      // batch self-describing inline.
+      summary: tool.schema.string().min(1).max(120).describe(
+        'REQUIRED. One-line label for this dispatch batch \u2014 comma-joined agent names plus a short goal (e.g. "qa-fe-tester, qa-be-tester \u2014 run login plan"). Rendered inline in the OpenCode UI so reviewers can see at a glance who you are dispatching and why. Keep under ~80 chars (hard cap 120); do not include prompts or PII.'
+      ),
       tasks: tool.schema.array(
         tool.schema.object({
           name: tool.schema.string().describe("Specialist agent name"),
@@ -321,6 +355,12 @@ var AppVerkCoordinatorPlugin = async (input) => {
       ).describe("Array of tasks to dispatch in parallel")
     },
     async execute(args, context) {
+      context.metadata({
+        title: args.summary,
+        metadata: {
+          tasks: args.tasks.map((t) => ({ name: t.name, prompt: t.prompt }))
+        }
+      });
       if (context.sessionID.length === 0) {
         throw new Error("dispatch_parallel: missing context.sessionID \u2014 cannot parent child sessions");
       }
@@ -378,6 +418,9 @@ var AppVerkCoordinatorPlugin = async (input) => {
         }
       };
     },
+    // IMPORTANT: Tool names "dispatch_parallel" and "assign_issue_ids" must exactly match
+    // the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename either tool,
+    // update both places. There is no programmatic linking — keep them in sync manually.
     tool: {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool

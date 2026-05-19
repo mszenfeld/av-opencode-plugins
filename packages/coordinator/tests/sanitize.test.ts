@@ -56,6 +56,56 @@ describe("neutralizeUntrustedOutput", () => {
     const input = "Polskie znaki: ąęłóźż — 🚀"
     expect(neutralizeUntrustedOutput(input)).toBe(input)
   })
+
+  it("strips C1 control bytes including raw CSI introducer 0x9B", () => {
+    // 0x9B is the 8-bit CSI introducer; xterm-class terminals interpret
+    // `\x9B31m...\x9B0m` the same as `\x1b[31m...\x1b[0m`.
+    const input = "\x9B31mERROR\x9B0m: \x80\x85\x9F leak"
+    expect(neutralizeUntrustedOutput(input)).toBe("ERROR:  leak")
+  })
+
+  it("strips Unicode BiDi override characters", () => {
+    // U+202E (RLO) flips the visual order of the following text — classic
+    // visual-spoofing vector inside markdown reports.
+    const input = "safe‮txe.evil‬ tail"
+    const out = neutralizeUntrustedOutput(input)
+    expect(out).toBe("safetxe.evil tail")
+    expect(out).not.toMatch(/[‪-‮⁦-⁩]/)
+  })
+
+  it("strips Unicode isolates U+2066-U+2069", () => {
+    const input = "a⁦b⁧c⁨d⁩e"
+    expect(neutralizeUntrustedOutput(input)).toBe("abcde")
+  })
+
+  it("strips zero-width characters that hide injection markers", () => {
+    const input = "ig​no‌re‍ pre﻿vious"
+    const out = neutralizeUntrustedOutput(input)
+    expect(out).toBe("ignore previous")
+    expect(out).not.toMatch(/[​-‍﻿]/)
+  })
+
+  it("strips OSC sequences terminated by BEL", () => {
+    // OSC 0 sets the window title; previously the ESC byte was removed but
+    // the payload survived as literal text.
+    const input = "before\x1b]0;malicious title\x07after"
+    expect(neutralizeUntrustedOutput(input)).toBe("beforeafter")
+  })
+
+  it("strips OSC sequences terminated by ST (ESC backslash)", () => {
+    const input = "before\x1b]8;;https://evil.example/\x1b\\link after"
+    expect(neutralizeUntrustedOutput(input)).toBe("beforelink after")
+  })
+
+  it("strips 8-bit OSC introducer 0x9D", () => {
+    const input = "before\x9D0;title\x07after"
+    expect(neutralizeUntrustedOutput(input)).toBe("beforeafter")
+  })
+
+  it("strips 8-bit CSI introducer 0x9B", () => {
+    const input = "x\x9B2Ay\x9BHz"
+    expect(neutralizeUntrustedOutput(input)).toBe("xyz")
+  })
 })
 
 describe("deriveReportPath", () => {
