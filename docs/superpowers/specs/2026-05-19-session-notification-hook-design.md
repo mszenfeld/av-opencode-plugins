@@ -15,9 +15,14 @@ Add a macOS desktop notification when an OpenCode session reaches an interactive
 
 Inspired by `code-yeongyu/oh-my-openagent` (OMO), which ships an elaborate `session-notification` hook spanning ~10 files. We are taking the same idea but trimming aggressively for our scale and platform reality.
 
-### 1.2 Why a dedicated package, not `src/hooks/`
+### 1.2 Why root `src/`, not a new workspace package
 
-This is the first cross-cutting harness concern beyond the workflow plugins (`commit`, `qa`, `code-review`, `frontend-developer`, …). We are establishing **Pantheon** as the harness brand — a place that hosts cross-cutting features (notifications, telemetry, lifecycle hooks, monitoring) separate from self-contained workflow plugins. Creating `packages/pantheon` now sets that boundary clearly; future cross-cutting features land alongside without polluting workflow packages or root `src/`.
+This hook is the first **harness-level** concern beyond the workflow plugins (`commit`, `qa`, `code-review`, `frontend-developer`, …). Two structural options were considered:
+
+- **New workspace** (`packages/pantheon/` with its own `package.json`, `tsup`, `dist`) — consistent with current repo convention but adds ceremony (config files, build orchestration, `files` array entry) that pays off only when there are several cross-cutting features to host.
+- **Root `src/hooks/`** — lives next to the existing `src/index.ts`, which is already the harness entry point that merges all workspace plugins. Zero new build infra, just additional files.
+
+We chose **root `src/`** as a deliberate start of a slow migration. Workflow plugins (`commit`, `qa`, etc.) stay in `packages/` for now; new harness code lands in `src/`. Over time the harness identity (Pantheon) accumulates in `src/`, and packages can migrate inward at their own pace.
 
 ### 1.3 Why now
 
@@ -29,8 +34,9 @@ This is the first cross-cutting harness concern beyond the workflow plugins (`co
 - **Not Linux/Windows.** macOS only via `osascript` + optional `terminal-notifier`. AppVerk is a Mac shop; cross-platform parity with OMO is YAGNI for now.
 - **Not a config file.** ENV-driven knobs only — no `~/.config/appverk/pantheon.json`, no opencode.json schema changes.
 - **Not failure/timeout notifications** for long-running `dispatch_parallel` tasks. Limited to idle / question / permission.
-- **Not migrating any existing package into `packages/pantheon`.** `coordinator` and other workspaces stay as they are. Migration is a separate, later decision.
-- **Not changing `dispatch_parallel`.** Subagent filtering uses a first-session-wins heuristic; no cross-package coupling between `coordinator` and `pantheon` for MVP.
+- **Not migrating any existing workspace into `src/`.** `coordinator`, `commit`, `qa`, … stay in `packages/`. Migration is a separate, gradual decision.
+- **Not changing `dispatch_parallel`.** Subagent filtering uses a first-session-wins heuristic; no cross-package coupling between `coordinator` and the new hook for MVP.
+- **Not introducing a bundler for root.** Root keeps `tsc → copy` pattern; we extend the copy to handle subdirectories.
 
 ---
 
@@ -40,13 +46,14 @@ This is the first cross-cutting harness concern beyond the workflow plugins (`co
 |---|---|---|
 | Triggers | **session.idle + AskUserQuestion tool + permission events** | Cover the three places where the user actually needs to know "OpenCode wants you now". Long-running task errors deferred. |
 | Platform | **macOS only** | Whole team on Darwin. Linux/Windows parity is uncommitted scope and triples the test surface per sender. |
-| Packaging | **New `packages/pantheon` workspace** | Establishes harness-hub boundary. Workflow plugins stay separate; cross-cutting concerns live in Pantheon. |
+| Location | **Root `src/hooks/`** | First step of slow migration toward `src/`-centric harness. New workspace would be ceremony for one hook. |
 | Per-trigger messages | **Yes** — distinct title/message per event type | Lets user act without looking at terminal (idle vs question vs permission convey different urgency). |
 | Confirmation delay | **Yes — 1.5s** before sending `session.idle` notification | OMO-proven anti-flicker: prevents spam between tool calls when the LLM resumes within ~1s. |
 | Subagent filter | **Yes — first-session-wins** | User cannot interact with `dispatch_parallel` children directly; notifications for them are pure noise. First `session.created` event in the runtime = main; later sessions = subagents. |
 | Sound | **Optional, off by default** | Glass.aiff via `afplay` when `playSound: true`. Visual banner is always-on; sound is opt-in. |
 | Configuration | **ENV vars only** | OpenCode plugin SDK has no config standard. ENV is zero-plumbing, easy to document, sufficient for 4 knobs. |
 | File granularity | **4 modules** (`session-tracker`, `idle-scheduler`, `notification-sender`, `session-notification`) | Each has one responsibility and is testable in isolation. OMO's ~10-file split is unnecessary at our scope. |
+| Plugin shape | **Standalone `AppVerkPantheonPlugin` factory** | Registered alongside other plugin factories in `defaultPluginFactories` (`src/index.ts`). Mirrors the existing pattern; no special-casing. |
 
 ---
 
@@ -59,9 +66,8 @@ OpenCode emits event (session.idle, tool.execute.before, permission.ask, …)
                             │
                             ▼
               ┌─────────────────────────┐
-              │ AppVerkPantheonPlugin   │  ← root re-export, src/index.ts merges
-              │ packages/pantheon/      │
-              │ src/index.ts            │
+              │ AppVerkPantheonPlugin   │  ← src/hooks/session-notification/plugin.ts
+              │   (factory)             │     wired into src/index.ts defaultPluginFactories
               └────────────┬────────────┘
                            │
                   ctx.event handler
@@ -85,6 +91,7 @@ OpenCode emits event (session.idle, tool.execute.before, permission.ask, …)
 
 | Concern | Module | Form |
 |---|---|---|
+| Plugin factory + ENV reading | `src/hooks/session-notification/plugin.ts` | `Plugin` async factory returning `{ event: handler }` |
 | Routing events to the right action | `session-notification.ts` | Pure switch over `event.type` |
 | Tracking which session is the user's main one | `session-tracker.ts` | In-memory state machine |
 | Anti-flicker: delay-and-cancel for `session.idle` | `idle-scheduler.ts` | Timer map keyed by sessionID |
@@ -93,31 +100,57 @@ OpenCode emits event (session.idle, tool.execute.before, permission.ask, …)
 ### 3.3 File layout
 
 ```
-packages/pantheon/
-  package.json                # @appverk/opencode-pantheon, workspace pkg
-  tsconfig.json
-  tsup.config.ts              # ESM build → dist/
-  src/
-    index.ts                  # AppVerkPantheonPlugin: Plugin
-    hooks/
-      session-notification.ts        # main orchestrator
+src/
+  index.ts                                # MODIFIED: import + register factory
+  index.js                                # rebuilt
+  index.d.ts                              # rebuilt
+  hooks/
+    session-notification/
+      plugin.ts                           # AppVerkPantheonPlugin factory + ENV read
+      session-notification.ts             # orchestrator
       idle-scheduler.ts
       notification-sender.ts
       session-tracker.ts
-  tests/
-    hooks/
+      (compiled .js + .d.ts after build)
+
+tests/
+  root-plugin.test.ts                     # MODIFIED: assert event handler present
+  hooks/
+    session-notification/
       session-notification.test.ts
       idle-scheduler.test.ts
       notification-sender.test.ts
       session-tracker.test.ts
-  dist/                       # built output, committed (repo convention)
 ```
 
-Root wiring:
-- `src/index.ts`: add `import { AppVerkPantheonPlugin } from "../packages/pantheon/dist/index.js"` and append to `defaultPluginFactories`.
-- Root `package.json` `files`: add `packages/pantheon/dist`.
-- Root build scripts: pantheon already covered by `npm run build` workspace recursion; verify `npm run build:root` includes it.
-- `tests/root-plugin.test.ts`: assert pantheon hook is present in the merged plugin's `event` slot.
+### 3.4 Build pipeline change
+
+Current `build:root` only copies the entry file:
+
+```
+tsc -p tsconfig.build.json
+cp .tmp-build/src/index.js src/index.js
+cp .tmp-build/src/index.d.ts src/index.d.ts
+rm -rf .tmp-build
+```
+
+This is incompatible with `src/hooks/`: `tsc` produces `.tmp-build/src/hooks/**/*.js` but they are never copied back, so the runtime `src/index.js` would try to `import "./hooks/session-notification/plugin.js"` from a non-existent path.
+
+**Change:** replace the two single-file `cp`s with a recursive copy of the compiled tree:
+
+```
+tsc -p tsconfig.build.json
+cp -R .tmp-build/src/. src/
+rm -rf .tmp-build
+```
+
+`.tmp-build/src/` contains only compiled outputs (`.js`, `.d.ts`) — `tsc` does not emit source files, so this overlay never overwrites `.ts` sources. New built files land at `src/hooks/session-notification/*.{js,d.ts}` next to their sources.
+
+**Also update:** `tsconfig.build.json` `"include"`. The current value `["src/index.ts"]` works only because TypeScript follows imports transitively; we leave it as-is — the new files are pulled in automatically when `src/index.ts` imports them. No change needed there.
+
+**Root `package.json` `files` array:** currently lists `src/index.js` and `src/index.d.ts` plus `packages/*/dist` entries. Replace `src/index.js` / `src/index.d.ts` with `src` (whole directory) so the published tarball includes hook files.
+
+**`verify-dist-sync.mjs`:** existing script checks that committed `dist/` matches built output. Verify it tolerates the new directory; extend if necessary as part of implementation.
 
 ---
 
@@ -219,6 +252,22 @@ export function createSessionNotification(
 
 `onFire` passed to `IdleScheduler` invokes `sender.sendMacOSNotification({title, message: idleMessage})` + optional sound.
 
+### 4.5 `plugin.ts`
+
+**Responsibility:** read ENV, construct config, wire `createSessionNotification` into a `Plugin` factory.
+
+**Public surface:**
+```ts
+export const AppVerkPantheonPlugin: Plugin = async (ctx) => {
+  if (process.env.AV_PANTHEON_NOTIFY === "0") return {}    // hard off
+  const config = readConfigFromEnv()
+  const handler = createSessionNotification(ctx, config)
+  return { event: handler }
+}
+```
+
+`readConfigFromEnv` parses the ENV table from §6 with default fallbacks and validation (`Number.isFinite` for numeric values; on invalid, log warning + use default).
+
 ---
 
 ## 5. Data Flow
@@ -287,7 +336,7 @@ Environment variables are the sole configuration mechanism for MVP.
 
 | ENV | Default | Effect |
 |---|---|---|
-| `AV_PANTHEON_NOTIFY` | `1` (on) | `0` disables the entire hook — no events processed, immediate return |
+| `AV_PANTHEON_NOTIFY` | `1` (on) | `0` disables the entire hook — factory returns empty `{}` |
 | `AV_PANTHEON_NOTIFY_TITLE` | `"AppVerk"` | Notification banner title |
 | `AV_PANTHEON_NOTIFY_IDLE_MSG` | `"Agent is ready for input"` | Message for `session.idle` |
 | `AV_PANTHEON_NOTIFY_QUESTION_MSG` | `"Agent is asking a question"` | Message for `AskUserQuestion` |
@@ -298,7 +347,7 @@ Environment variables are the sole configuration mechanism for MVP.
 
 Invalid numeric values (e.g. `AV_PANTHEON_NOTIFY_DELAY_MS=abc`) fall back to the default with a one-time log warning.
 
-ENV reading happens once at `createSessionNotification` construction. Subsequent ENV changes within a session are not picked up — by design, behaviour stays stable for the session.
+ENV reading happens once at factory construction (`plugin.ts`). Subsequent ENV changes within a session are not picked up — by design, behaviour stays stable for the session.
 
 ---
 
@@ -325,12 +374,12 @@ ENV reading happens once at `createSessionNotification` construction. Subsequent
 
 ### 8.1 Per-module unit tests
 
-| Module | Coverage |
+| Test file | Coverage |
 |---|---|
-| `session-tracker.test.ts` | first registerSession sets main; subsequent registers mark subagent; markAsSubagent explicit path; deleteSession clears state; isMain/isSubagent return correctly across lifecycle |
-| `idle-scheduler.test.ts` | (vi.useFakeTimers) schedule fires onFire after delay; markActivity cancels before fire; cancel after fire is a no-op; multiple sessions tracked independently; rapid re-schedule resets timer |
-| `notification-sender.test.ts` | osascript invoked with escaped args; AppleScript-injection payload escaped not executed; terminal-notifier preferred when available; afplay invoked for sound; ctx.$ undefined → no-op + one log; osascript missing → no-op + one log; shell error swallowed |
-| `session-notification.test.ts` | full event routing matrix: idle schedules, activity events cancel, AskUserQuestion immediate, permission immediate, subagent sessions filtered, session.deleted cleans up; ENV `AV_PANTHEON_NOTIFY=0` disables everything |
+| `tests/hooks/session-notification/session-tracker.test.ts` | first registerSession sets main; subsequent registers mark subagent; markAsSubagent explicit path; deleteSession clears state; isMain/isSubagent return correctly across lifecycle |
+| `tests/hooks/session-notification/idle-scheduler.test.ts` | (vi.useFakeTimers) schedule fires onFire after delay; markActivity cancels before fire; cancel after fire is a no-op; multiple sessions tracked independently; rapid re-schedule resets timer |
+| `tests/hooks/session-notification/notification-sender.test.ts` | osascript invoked with escaped args; AppleScript-injection payload escaped not executed; terminal-notifier preferred when available; afplay invoked for sound; ctx.$ undefined → no-op + one log; osascript missing → no-op + one log; shell error swallowed |
+| `tests/hooks/session-notification/session-notification.test.ts` | full event routing matrix: idle schedules, activity events cancel, AskUserQuestion immediate, permission immediate, subagent sessions filtered, session.deleted cleans up; ENV `AV_PANTHEON_NOTIFY=0` causes factory to return empty config |
 
 ### 8.2 Packaging test
 
@@ -338,11 +387,11 @@ In `tests/root-plugin.test.ts`: add a case asserting `AppVerkPlugins` registers 
 
 ### 8.3 Coverage target
 
-Match repo convention (≥80% per workspace).
+Match repo convention (≥80%).
 
 ### 8.4 Smoke test (manual)
 
-Before merging the implementation PR: install the built plugin locally, open OpenCode, run a short turn, wait for `session.idle`, confirm a macOS banner appears. Document this step in the PR description.
+Before merging the implementation PR: build root (`npm run build:root`), open OpenCode, run a short turn, wait for `session.idle`, confirm a macOS banner appears. Document this step in the PR description.
 
 ---
 
@@ -356,14 +405,22 @@ Before merging the implementation PR: install the built plugin locally, open Ope
 - Notifications for `dispatch_parallel` task timeouts/failures
 - Telemetry of which notifications fire (would belong to a separate Pantheon module)
 - Localization (English-only strings; user can override per-message via ENV)
+- Migrating existing workspace packages into `src/` (that is a separate long-running project)
+- Replacing the root `tsc` build with `tsup` (the recursive `cp` keeps the existing pipeline intact)
 
 ---
 
 ## 10. Migration / Compatibility
 
-Net-additive change. No existing plugin is modified beyond `src/index.ts` adding the import + factory entry. No tool, command, or agent surface changes. No user-facing breaking changes.
+Net-additive change. Modifications limited to:
 
-Backwards compatibility for downstream `AppVerkPlugins` consumers: identical (still a single `Plugin` factory; the merged plugin gains one more `event` handler in the merge chain).
+- `src/index.ts` — adds one import + appends `AppVerkPantheonPlugin` to `defaultPluginFactories`.
+- `package.json` — `build:root` script (replace single-file `cp`s with recursive `cp -R`); `files` array (`src/index.js` + `src/index.d.ts` → `src`).
+- `tests/root-plugin.test.ts` — one new case.
+
+No tool, command, or agent surface changes. No user-facing breaking changes. Existing workspace plugin builds remain untouched.
+
+Backwards compatibility for downstream `AppVerkPlugins` consumers: identical signature (still a single `Plugin` factory; merged plugin gains one more `event` handler in the merge chain).
 
 ---
 
@@ -371,5 +428,6 @@ Backwards compatibility for downstream `AppVerkPlugins` consumers: identical (st
 
 - Linux/Windows senders if team composition changes
 - Failure notifications for long-running `dispatch_parallel` tasks
-- Lifecycle telemetry (count notifications per session, time-to-attention) — a separate Pantheon module
-- Migration of `packages/coordinator` into `packages/pantheon/agents/perun` (separate decision, not blocked by this MVP)
+- Lifecycle telemetry (count notifications per session, time-to-attention) — a separate harness module under `src/hooks/` or `src/telemetry/`
+- Migration of workspace packages (`coordinator`, `commit`, `qa`, …) into `src/` — driven by need, not on a schedule
+- Replacing root `tsc → cp` with a bundler (`tsup` or `esbuild`) once `src/` has enough modules to justify the dependency
