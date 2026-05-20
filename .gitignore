@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!dist/
+!dist/**
 !packages/commit/dist/
 !packages/commit/dist/**
 !packages/python-developer/dist/

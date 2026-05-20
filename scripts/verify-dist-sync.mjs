@@ -7,9 +7,7 @@ import { execSync } from "node:child_process"
 import process from "node:process"
 
 const trackedDistPaths = [
-  "src/index.js",
-  "src/index.d.ts",
-  "src/hooks",
+  "dist",
   "packages/commit/dist",
   "packages/python-developer/dist",
   "packages/code-review/dist",

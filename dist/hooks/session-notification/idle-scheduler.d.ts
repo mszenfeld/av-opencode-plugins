@@ -1,5 +1,5 @@
-export type IdleSchedulerFire = (sessionId: string) => void | Promise<void>;
-export declare class IdleScheduler {
+type IdleSchedulerFire = (sessionId: string) => void | Promise<void>;
+declare class IdleScheduler {
     private readonly delayMs;
     private readonly onFire;
     private readonly timers;
@@ -8,3 +8,5 @@ export declare class IdleScheduler {
     markActivity(sessionId: string): void;
     cancel(sessionId: string): void;
 }
+
+export { IdleScheduler, type IdleSchedulerFire };

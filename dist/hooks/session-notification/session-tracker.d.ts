@@ -1,4 +1,4 @@
-export declare class SessionTracker {
+declare class SessionTracker {
     private mainSessionId;
     private readonly subagents;
     registerSession(id: string): void;
@@ -21,3 +21,5 @@ export declare class SessionTracker {
     isMain(id: string): boolean;
     isSubagent(id: string): boolean;
 }
+
+export { SessionTracker };

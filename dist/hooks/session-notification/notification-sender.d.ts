@@ -1,15 +1,15 @@
-export interface ShellOutput {
+interface ShellOutput {
     readonly exitCode: number;
     readonly stdout: string | {
         toString(): string;
     };
 }
-export type ShellChain = Promise<ShellOutput> & {
+type ShellChain = Promise<ShellOutput> & {
     quiet(): ShellChain;
     nothrow(): ShellChain;
 };
-export type ShellTag = (parts: TemplateStringsArray, ...values: unknown[]) => ShellChain;
-export interface NotificationSenderContext {
+type ShellTag = (parts: TemplateStringsArray, ...values: unknown[]) => ShellChain;
+interface NotificationSenderContext {
     readonly $?: ShellTag;
 }
 /**
@@ -21,25 +21,25 @@ export interface NotificationSenderContext {
  * (e.g., `subtitle`) without escaping becomes a compile-time error rather
  * than a latent injection bug.
  */
-export type AppleScriptLiteral = string & {
+type AppleScriptLiteral = string & {
     readonly __appleScriptLiteral: unique symbol;
 };
-export declare function escapeAppleScriptText(input: string): string;
+declare function escapeAppleScriptText(input: string): string;
 /**
  * Returns the input as a fully-quoted AppleScript string literal (including
  * the surrounding `"`), branded as {@link AppleScriptLiteral}. Use this for
  * every value interpolated into an osascript template so that the type system
  * blocks raw-string interpolation paths.
  */
-export declare function appleQuote(input: string): AppleScriptLiteral;
+declare function appleQuote(input: string): AppleScriptLiteral;
 /**
  * Type-safe osascript template builder. Accepts only {@link AppleScriptLiteral}
  * values for interpolation, so any caller that tries to splice an unescaped
  * string in fails at compile time. The static parts come from the developer-
  * authored template literal and never carry user input.
  */
-export declare function appleScript(parts: TemplateStringsArray, ...values: readonly AppleScriptLiteral[]): string;
-export declare class NotificationSender {
+declare function appleScript(parts: TemplateStringsArray, ...values: readonly AppleScriptLiteral[]): string;
+declare class NotificationSender {
     private readonly ctx;
     private probeCache;
     /** Per-instance one-shot guard for the "ctx.$ unavailable" warning. */
@@ -53,3 +53,5 @@ export declare class NotificationSender {
     private probe;
     private warnOnceNoShell;
 }
+
+export { type AppleScriptLiteral, NotificationSender, type NotificationSenderContext, type ShellChain, type ShellOutput, type ShellTag, appleQuote, appleScript, escapeAppleScriptText };

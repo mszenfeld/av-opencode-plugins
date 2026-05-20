@@ -109,7 +109,7 @@ describe("AppVerkPlugins", () => {
     )
     expect(packageJson.files).toEqual(
       expect.arrayContaining([
-        "src",
+        "dist",
         "packages/commit/dist",
       ]),
     )
@@ -126,8 +126,8 @@ describe("AppVerkPlugins", () => {
     expect(packedFiles).toEqual(
       expect.arrayContaining([
         "package.json",
-        "src/index.js",
-        "src/index.d.ts",
+        "dist/index.js",
+        "dist/index.d.ts",
         "packages/commit/dist/index.js",
         "packages/commit/dist/index.d.ts",
         "packages/commit/dist/commands/commit.md",
@@ -150,18 +150,18 @@ describe("AppVerkPlugins", () => {
         "packages/coordinator/dist/index.js",
         "packages/coordinator/dist/index.d.ts",
         "packages/coordinator/dist/agents/perun.md",
-        "src/hooks/session-notification/plugin.js",
-        "src/hooks/session-notification/plugin.d.ts",
-        "src/hooks/session-notification/env-config.js",
-        "src/hooks/session-notification/env-config.d.ts",
-        "src/hooks/session-notification/idle-scheduler.js",
-        "src/hooks/session-notification/idle-scheduler.d.ts",
-        "src/hooks/session-notification/notification-sender.js",
-        "src/hooks/session-notification/notification-sender.d.ts",
-        "src/hooks/session-notification/session-notification.js",
-        "src/hooks/session-notification/session-notification.d.ts",
-        "src/hooks/session-notification/session-tracker.js",
-        "src/hooks/session-notification/session-tracker.d.ts",
+        "dist/hooks/session-notification/plugin.js",
+        "dist/hooks/session-notification/plugin.d.ts",
+        "dist/hooks/session-notification/env-config.js",
+        "dist/hooks/session-notification/env-config.d.ts",
+        "dist/hooks/session-notification/idle-scheduler.js",
+        "dist/hooks/session-notification/idle-scheduler.d.ts",
+        "dist/hooks/session-notification/notification-sender.js",
+        "dist/hooks/session-notification/notification-sender.d.ts",
+        "dist/hooks/session-notification/session-notification.js",
+        "dist/hooks/session-notification/session-notification.d.ts",
+        "dist/hooks/session-notification/session-tracker.js",
+        "dist/hooks/session-notification/session-tracker.d.ts",
       ]),
     )
   })
