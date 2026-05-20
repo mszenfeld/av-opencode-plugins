@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { normalizeCommitMessage } from "./message-policy.js";
 const execFileAsync = promisify(execFile);
-async function runGit(cwd, args) {
+const defaultGitRunner = async (cwd, args) => {
   try {
     const result = await execFileAsync("git", args, { cwd });
     return {
@@ -18,8 +18,9 @@ async function runGit(cwd, args) {
       exitCode: Number(failure.code ?? 1)
     };
   }
-}
+};
 async function createControlledCommit(input) {
+  const runGit = input.runGit ?? defaultGitRunner;
   const repoCheck = await runGit(input.cwd, ["rev-parse", "--is-inside-work-tree"]);
   if (repoCheck.exitCode !== 0) {
     throw new Error("Current directory is not a git repository.");
@@ -47,5 +48,6 @@ async function createControlledCommit(input) {
   };
 }
 export {
-  createControlledCommit
+  createControlledCommit,
+  defaultGitRunner
 };

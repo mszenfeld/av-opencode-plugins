@@ -8,32 +8,21 @@ const COMMIT_COMMAND_DESCRIPTION = "Create a git commit with the AppVerk commit 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packagedCommandPath = path.resolve(moduleDirectory, "../../commands/commit.md");
 const sourceCommandPath = path.resolve(moduleDirectory, "../../../src/commands/commit.md");
+const isDevEnvironment = import.meta.url.includes("/src/");
 function loadCommitCommandTemplate() {
-  try {
-    return readFileSync(packagedCommandPath, "utf8");
-  } catch {
+  if (isDevEnvironment) {
     return readFileSync(sourceCommandPath, "utf8");
   }
-}
-function createLazyCommitTemplateLoader() {
-  let cached;
-  return () => {
-    if (cached === void 0) {
-      cached = loadCommitCommandTemplate();
-    }
-    return cached;
-  };
+  return readFileSync(packagedCommandPath, "utf8");
 }
 const AppVerkCommitPlugin = async () => {
-  const getCommitTemplate = createLazyCommitTemplateLoader();
+  const commitTemplate = loadCommitCommandTemplate();
   return {
     config: async (config) => {
       config.command = config.command ?? {};
       config.command.commit = {
         description: COMMIT_COMMAND_DESCRIPTION,
-        get template() {
-          return getCommitTemplate();
-        }
+        template: commitTemplate
       };
     },
     tool: {
