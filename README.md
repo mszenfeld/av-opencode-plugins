@@ -324,6 +324,13 @@ npm run check
 - [Pantheon Plugin Guide](docs/plugins/pantheon.md)
 - [Coordinator Plugin Guide](docs/plugins/coordinator.md)
 
+### Architecture & Migration
+
+Canonical reference for the in-progress `src/` TypeScript absorption program — read these before adding or modifying an absorbed module (Stage 1 of N: commit pilot):
+
+- [Spec: src TypeScript migration — commit pilot (design)](docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md) — design rationale (e.g. `bundle: false`, build-order constraints, `tsup.root.config.ts` filename).
+- [Plan: src TypeScript migration — commit pilot](docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md) — staged execution plan for absorbing modules into `src/`.
+
 ## License
 
 This repository currently does not include a top-level `LICENSE` file. Add one before publishing or distributing the packages beyond internal use.

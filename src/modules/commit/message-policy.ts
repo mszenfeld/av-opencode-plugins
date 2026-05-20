@@ -3,6 +3,25 @@ const COMMIT_HEADER =
 
 const DISALLOWED_FOOTERS = [/^co-authored-by:/i]
 
+function sanitizeTaskId(taskId: string): string {
+  if (/[\r\n]/.test(taskId)) {
+    throw new Error(
+      "Task ID must not contain newlines or carriage returns.",
+    )
+  }
+  return taskId.trim()
+}
+
+function assertNoDisallowedFooters(lines: string[]): void {
+  if (
+    lines.some((line) =>
+      DISALLOWED_FOOTERS.some((pattern) => pattern.test(line.trim())),
+    )
+  ) {
+    throw new Error("Co-Authored-By footers are not allowed.")
+  }
+}
+
 export function normalizeCommitMessage(message: string, taskId?: string): string {
   const normalized = message.trim()
 
@@ -17,23 +36,29 @@ export function normalizeCommitMessage(message: string, taskId?: string): string
     throw new Error("Commit message must follow Conventional Commits.")
   }
 
-  if (
-    lines.some((line) =>
-      DISALLOWED_FOOTERS.some((pattern) => pattern.test(line.trim())),
-    )
-  ) {
-    throw new Error("Co-Authored-By footers are not allowed.")
-  }
+  assertNoDisallowedFooters(lines)
 
   if (!taskId) {
     return normalized
   }
 
-  const refsFooter = `Refs: ${taskId}`
+  const sanitizedTaskId = sanitizeTaskId(taskId)
+
+  if (!sanitizedTaskId) {
+    return normalized
+  }
+
+  const refsFooter = `Refs: ${sanitizedTaskId}`
 
   if (lines.some((line) => line.trim() === refsFooter)) {
     return normalized
   }
 
-  return `${normalized}\n\n${refsFooter}`
+  const combined = `${normalized}\n\n${refsFooter}`
+
+  // Defense in depth: re-validate the combined message in case the
+  // sanitized taskId still smuggles a disallowed footer past sanitization.
+  assertNoDisallowedFooters(combined.split(/\r?\n/))
+
+  return combined
 }

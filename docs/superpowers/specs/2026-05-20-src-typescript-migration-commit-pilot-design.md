@@ -4,6 +4,8 @@
 **Status:** Draft (awaiting user review)
 **Stage:** 1 of N (broader monorepo→single-project consolidation)
 
+> **Deviation from original plan:** The root tsup config is named `tsup.root.config.ts`, not `tsup.config.ts`. tsup auto-discovers any `tsup.config.ts` in a parent of the cwd, so a generic name at the repo root would leak `bundle: false` into every workspace build. The distinctive filename is invoked explicitly via `tsup --config tsup.root.config.ts` (see `package.json` → `scripts.build:root`).
+
 ## Goal
 
 Align the root package to the workspace pattern (TS-only in `src/`, build output in `dist/`) and, as the first step of a longer-term consolidation of the monorepo into a single-project layout (in the style of `oh-my-openagent`), absorb the `commit` workspace package into root `src/modules/commit/`. This spec defines the **first stage** only; subsequent packages will be migrated in their own specs following the pattern established here.
@@ -98,7 +100,7 @@ Note the 1:1 mirror — `bundle: false` (see [Build Pipeline](#build-pipeline)) 
 
 ## Build Pipeline
 
-### `tsup.config.ts` (new file, root)
+### `tsup.root.config.ts` (new file, root)
 
 ```ts
 import { defineConfig } from "tsup"
@@ -144,7 +146,7 @@ The table below shows the **final** state. Each commit owns part of it; per-comm
 | `main` | `./src/index.js` | `./dist/index.js` | Commit 1 |
 | `types` | `./src/index.d.ts` | `./dist/index.d.ts` | Commit 1 |
 | `files` | includes `src` | replaces `src` with `dist`; drops `packages/commit/dist` | Commit 1 (src→dist) + Commit 2 (drop commit entry) |
-| `scripts.build:root` | `find src -delete && tsc ... && cp ... && rm` | `tsup --config tsup.config.ts && node scripts/copy-root-assets.mjs` | Commit 1 |
+| `scripts.build:root` | `find src -delete && tsc ... && cp ... && rm` | `tsup --config tsup.root.config.ts && node scripts/copy-root-assets.mjs` | Commit 1 |
 | `scripts.build` | chains `@appverk/opencode-commit` | drops `@appverk/opencode-commit` from the chain | Commit 2 |
 | `scripts.test` | chains `@appverk/opencode-commit` | drops it | Commit 2 |
 | `scripts.typecheck` | chains `@appverk/opencode-commit` | drops it | Commit 2 |
@@ -157,7 +159,7 @@ The table below shows the **final** state. Each commit owns part of it; per-comm
 
 ### Removed files
 
-- `tsconfig.build.json` — replaced by `tsup.config.ts`.
+- `tsconfig.build.json` — replaced by `tsup.root.config.ts`.
 
 ## Path Resolution
 
@@ -194,7 +196,7 @@ Pure infrastructure move; no plugin code is moved or modified.
 
 **Steps:**
 
-1. Add `tsup.config.ts` in the root.
+1. Add `tsup.root.config.ts` in the root.
 2. Add `scripts/copy-root-assets.mjs`.
 3. Update `package.json`: change `main`, `types`, `files` (replace `"src"` with `"dist"`, keep all `packages/*/dist` entries), and the `build:root` script.
 4. Update `.gitignore`: un-ignore root `dist/`.

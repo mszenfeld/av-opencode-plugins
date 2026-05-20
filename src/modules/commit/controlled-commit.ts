@@ -4,20 +4,25 @@ import { normalizeCommitMessage } from "./message-policy.js"
 
 const execFileAsync = promisify(execFile)
 
-export interface ControlledCommitInput {
-  cwd: string
-  message: string
-  files?: string[]
-  taskId?: string
-}
-
-interface GitResult {
+export interface GitResult {
   stdout: string
   stderr: string
   exitCode: number
 }
 
-async function runGit(cwd: string, args: string[]): Promise<GitResult> {
+export interface GitRunner {
+  (cwd: string, args: string[]): Promise<GitResult>
+}
+
+export interface ControlledCommitInput {
+  cwd: string
+  message: string
+  files?: string[]
+  taskId?: string
+  runGit?: GitRunner
+}
+
+export const defaultGitRunner: GitRunner = async (cwd, args) => {
   try {
     const result = await execFileAsync("git", args, { cwd })
 
@@ -42,6 +47,7 @@ async function runGit(cwd: string, args: string[]): Promise<GitResult> {
 }
 
 export async function createControlledCommit(input: ControlledCommitInput) {
+  const runGit = input.runGit ?? defaultGitRunner
   const repoCheck = await runGit(input.cwd, ["rev-parse", "--is-inside-work-tree"])
 
   if (repoCheck.exitCode !== 0) {

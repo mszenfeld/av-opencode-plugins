@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers), plus root-resident plugins absorbed into `src/modules/<name>/` (currently: `commit`) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -52,6 +52,16 @@ Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **roo
 - **Root entrypoint:** `src/index.ts` is the typed source. The root build (`npm run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
 - **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets) plus the eight remaining `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
 
+### Tracked dist paths in CI
+
+`scripts/verify-dist-sync.mjs` is the **source of truth** for which `dist/` trees are checked for drift after `npm run build`. The `trackedDistPaths` array in that script must stay in sync with:
+
+- The `files` array in the root `package.json` (everything published must be verified).
+- The `.gitignore` carve-outs for each `packages/<name>/dist/` (everything verified must be committed).
+- The per-workspace `build` invocations in the root `build` script (everything verified must actually be built).
+
+When adding a new workspace plugin, update **all four** locations together. If any are out of sync, CI will either silently pass on dist drift (path missing from the script) or fail permanently (path tracked but never built/committed).
+
 ## TypeScript Configuration
 
 - `tsconfig.base.json` sets `target: ES2022`, `module: NodeNext`, `strict: true`, `noUncheckedIndexedAccess: true`.
@@ -81,7 +91,7 @@ const defaultPluginFactories: Plugin[] = [
 ]
 ```
 
-### Absorbed (root-resident) module import
+### Absorbed module import
 
 For plugins absorbed into `src/modules/<name>/`:
 
@@ -168,9 +178,15 @@ Create a dedicated guide with:
 
 ---
 
-## Adding a New Root-Resident Module
+## Adding a New Absorbed Module
 
 For small absorbed modules (no separate workspace), follow this pattern instead:
+
+> **Canonical reference:** The `src/` TypeScript absorption program is documented in
+> [`docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md`](docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md)
+> (design rationale: `bundle: false`, build-order constraints, `tsup.root.config.ts` filename) and
+> [`docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md`](docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md)
+> (staged execution plan — Stage 1 of N is the `commit` pilot). Read both before starting a new absorption stage so future work does not re-derive or contradict these decisions.
 
 1. Create `src/modules/<name>/` with `index.ts` and supporting `.ts` modules.
 2. Place `.md` assets under `src/commands/`, `src/agents/`, or `src/skills/` (the layout `scripts/copy-root-assets.mjs` knows about).
@@ -206,7 +222,7 @@ If a user reports missing commands after an update, instruct them to either:
 
 ## Common Pitfalls
 
-- Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead.
+- Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead. This bash gate (`classifyBashCommand` in `src/modules/commit/bash-policy.ts`) is **defense-in-depth / a workflow rail, not a security boundary** — it keeps the `/commit` workflow consistent but is bypassable by shapes the literal `git` token-match misses (`/usr/bin/git …`, `bash -c "git …"`, `hub commit`, `command git …`, alias indirection, `$(echo git) commit`, plumbing subcommands like `commit-tree` / `fast-import` / `update-ref`). Per project doctrine ([`docs/plugins/coordinator.md`](docs/plugins/coordinator.md): *"Treat code-enforced rules as the security boundary. The LLM-requested rules are defense in depth — they raise the cost of a successful prompt-injection escalation but are not the last line of defense."*), real shell-execution boundaries live outside this plugin. See [`docs/plugins/commit.md`](docs/plugins/commit.md#classifybashcommand-is-defense-in-depth-not-a-security-boundary) for the full bypass list.
 - After changing anything under `src/`, run `npm run build:root` to regenerate `dist/` — published consumers and OpenCode load from `dist/`, not `src/`.
 - Removing a workspace `packages/<name>/dist/` will break the root entrypoint and packaging tests. (The root `dist/` is also committed — do not delete it manually; let `npm run build:root` regenerate it.)
 - **Forgetting to add a `.gitignore` exception and commit `packages/<name>/dist/`** will cause `Cannot find module` errors for consumers installing from git, because npm does not run the build step on git dependencies.

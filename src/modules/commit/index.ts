@@ -12,36 +12,27 @@ const COMMIT_COMMAND_DESCRIPTION =
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packagedCommandPath = path.resolve(moduleDirectory, "../../commands/commit.md")
 const sourceCommandPath = path.resolve(moduleDirectory, "../../../src/commands/commit.md")
+const isDevEnvironment = import.meta.url.includes("/src/")
 
 function loadCommitCommandTemplate(): string {
-  try {
-    return readFileSync(packagedCommandPath, "utf8")
-  } catch {
+  if (isDevEnvironment) {
     return readFileSync(sourceCommandPath, "utf8")
   }
-}
-
-function createLazyCommitTemplateLoader(): () => string {
-  let cached: string | undefined
-  return () => {
-    if (cached === undefined) {
-      cached = loadCommitCommandTemplate()
-    }
-    return cached
-  }
+  return readFileSync(packagedCommandPath, "utf8")
 }
 
 export const AppVerkCommitPlugin: Plugin = async () => {
-  const getCommitTemplate = createLazyCommitTemplateLoader()
+  // Read the ~5KB markdown template once at plugin construction so the
+  // exposed config is a plain serializable object (no getter, no surprise
+  // I/O when something JSON.stringifies or spreads the config).
+  const commitTemplate = loadCommitCommandTemplate()
 
   return {
     config: async (config) => {
       config.command = config.command ?? {}
       config.command.commit = {
         description: COMMIT_COMMAND_DESCRIPTION,
-        get template() {
-          return getCommitTemplate()
-        },
+        template: commitTemplate,
       }
     },
     tool: {

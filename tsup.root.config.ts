@@ -2,6 +2,7 @@
 // workspace tsup runs and leak bundle:false into them, breaking their
 // expected bundled output. The root build invokes this explicitly via
 // `tsup --config tsup.root.config.ts` in package.json.
+// TODO(consolidation): rename back to tsup.config.ts once all workspaces are absorbed into src/modules/.
 import { defineConfig } from "tsup"
 
 export default defineConfig({

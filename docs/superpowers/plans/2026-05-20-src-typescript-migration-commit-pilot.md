@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Deviation from original plan:** The root tsup config is named `tsup.root.config.ts`, not `tsup.config.ts`. tsup auto-discovers any `tsup.config.ts` in a parent of the cwd, so a generic name at the repo root would leak `bundle: false` into every workspace build. The distinctive filename is invoked explicitly via `tsup --config tsup.root.config.ts`. Follow this filename literally in subsequent migration stages.
+
 **Spec:** `docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md`
 
 **Goal:** Replace the in-place root build (which commits `.ts`, `.js`, and `.d.ts` side by side in `src/`) with a conventional `src/` → `dist/` pipeline, and absorb the `packages/commit/` workspace into `src/modules/commit/` + `src/commands/commit.md` to establish the pattern for future monorepo consolidation.
@@ -15,12 +17,12 @@
 ## File Structure
 
 ### Files to **create**
-- `tsup.config.ts` — root tsup configuration
+- `tsup.root.config.ts` — root tsup configuration
 - `scripts/copy-root-assets.mjs` — copies `.md` assets from `src/{commands,agents,skills}/` to `dist/`
 - `tests/modules/commit/build-output.test.ts` — regression test for asset copy + packaged-path resolution
 
 ### Files to **delete**
-- `tsconfig.build.json` — superseded by `tsup.config.ts`
+- `tsconfig.build.json` — superseded by `tsup.root.config.ts`
 - `src/index.js`, `src/index.d.ts`
 - `src/hooks/session-notification/*.js`, `src/hooks/session-notification/*.d.ts`
 - `packages/commit/` (entire directory) — including `packages/commit/scripts/copy-command-template.mjs`
@@ -84,12 +86,12 @@ Expected: typecheck + test + build all pass. If any step fails, do NOT proceed �
 ## Task 2: Add build infrastructure
 
 **Files:**
-- Create: `tsup.config.ts`
+- Create: `tsup.root.config.ts`
 - Create: `scripts/copy-root-assets.mjs`
 
-- [ ] **Step 1: Create `tsup.config.ts`**
+- [ ] **Step 1: Create `tsup.root.config.ts`**
 
-Write to `tsup.config.ts`:
+Write to `tsup.root.config.ts`:
 ```ts
 import { defineConfig } from "tsup"
 
@@ -198,7 +200,7 @@ Change the current `build:root` script:
 ```
 To:
 ```
-"build:root": "tsup --config tsup.config.ts && node scripts/copy-root-assets.mjs",
+"build:root": "tsup --config tsup.root.config.ts && node scripts/copy-root-assets.mjs",
 ```
 
 - [ ] **Step 4: Update `.gitignore` — un-ignore root `dist/`**
@@ -353,7 +355,7 @@ Expected: at least `dist/index.d.ts` and one `.d.ts` per source `.ts` under `src
 
 If any `.d.ts` is missing, **do not proceed** — fall back to chaining `tsc --emitDeclarationOnly -p tsconfig.json` after the tsup invocation. To do that, change the `build:root` script to:
 ```
-"build:root": "tsup --config tsup.config.ts && tsc -p tsconfig.json --emitDeclarationOnly --outDir dist && node scripts/copy-root-assets.mjs",
+"build:root": "tsup --config tsup.root.config.ts && tsc -p tsconfig.json --emitDeclarationOnly --outDir dist && node scripts/copy-root-assets.mjs",
 ```
 Then re-run step 1 and step 2.
 
@@ -417,7 +419,7 @@ git add -A
 git status --short
 ```
 Expected: includes (renamed/deleted as appropriate):
-- new: `tsup.config.ts`, `scripts/copy-root-assets.mjs`
+- new: `tsup.root.config.ts`, `scripts/copy-root-assets.mjs`
 - modified: `package.json`, `.gitignore`, `scripts/verify-dist-sync.mjs`, `tests/root-plugin.test.ts`
 - deleted: `tsconfig.build.json`, all `src/**/*.{js,d.ts}` files
 - new tree: `dist/` (entire)
