@@ -8,7 +8,6 @@ import process from "node:process"
 
 const trackedDistPaths = [
   "dist",
-  "packages/commit/dist",
   "packages/python-developer/dist",
   "packages/code-review/dist",
   "packages/frontend-developer/dist",

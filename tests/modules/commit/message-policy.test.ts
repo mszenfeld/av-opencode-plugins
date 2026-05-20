@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { normalizeCommitMessage } from "../src/message-policy.js"
+import { normalizeCommitMessage } from "../../../src/modules/commit/message-policy.js"
 
 describe("normalizeCommitMessage", () => {
   it("accepts a valid Conventional Commit subject", () => {

@@ -17,8 +17,8 @@ The AppVerk commit plugin adds an OpenCode-native commit workflow with policy en
 
 ## Prompt Source
 
-- The `/commit` prompt source lives in `packages/commit/src/commands/commit.md`.
-- The build copies it to `packages/commit/dist/commands/commit.md`.
+- The `/commit` prompt source lives in `src/commands/commit.md`.
+- The build copies it to `dist/commands/commit.md`.
 - The content is based on the Claude marketplace `commit` command and adapted to use `av_commit` instead of raw bash commits.
 
 ## Usage

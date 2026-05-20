@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classifyBashCommand } from "../src/bash-policy.js"
+import { classifyBashCommand } from "../../../src/modules/commit/bash-policy.js"
 
 describe("classifyBashCommand", () => {
   it("blocks direct git commit commands", () => {

@@ -273,7 +273,9 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 
 ## Repository Structure
 
-- `packages/commit` - plugin source, tests, command template, and build scripts for the commit workflow.
+- `src/modules/commit/` - plugin source for the commit workflow (TypeScript only).
+- `src/commands/commit.md` - the `/commit` slash-command template.
+- `tests/modules/commit/` - tests for the commit workflow.
 - `docs/plugins/commit.md` - package-level behavior and usage guide.
 - `packages/python-developer` - plugin source, tests, skill files, and build scripts for the Python development workflow.
 - `docs/plugins/python-developer.md` - package-level behavior and usage guide.

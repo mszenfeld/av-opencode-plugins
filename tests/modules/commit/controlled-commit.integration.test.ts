@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 import { describe, expect, it } from "vitest"
-import { createControlledCommit } from "../src/controlled-commit.js"
+import { createControlledCommit } from "../../../src/modules/commit/controlled-commit.js"
 
 const execFileAsync = promisify(execFile)
 

@@ -110,7 +110,6 @@ describe("AppVerkPlugins", () => {
     expect(packageJson.files).toEqual(
       expect.arrayContaining([
         "dist",
-        "packages/commit/dist",
       ]),
     )
 
@@ -128,9 +127,9 @@ describe("AppVerkPlugins", () => {
         "package.json",
         "dist/index.js",
         "dist/index.d.ts",
-        "packages/commit/dist/index.js",
-        "packages/commit/dist/index.d.ts",
-        "packages/commit/dist/commands/commit.md",
+        "dist/commands/commit.md",
+        "dist/modules/commit/index.js",
+        "dist/modules/commit/index.d.ts",
         "packages/frontend-developer/dist/index.js",
         "packages/frontend-developer/dist/index.d.ts",
         "packages/frontend-developer/dist/commands/frontend.md",

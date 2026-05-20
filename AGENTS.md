@@ -1,13 +1,13 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins: a controlled `/commit` workflow, a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers, plus a Pantheon session-notification hook (`src/hooks/session-notification/`) that lives in the root `src/` tree rather than as a workspace package. The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers), plus root-resident plugins absorbed into `src/modules/<name>/` (currently: `commit`) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
 | Path | Role |
 |------|------|
-| `src/index.js` + `src/index.d.ts` | **Published root entrypoint** — loads built outputs from all packages and merges their tools/hooks. |
-| `packages/commit` | Commit plugin source, tests, build scripts. Output shipped at `packages/commit/dist/`. |
+| `src/index.ts` | **Root entrypoint** (TypeScript source) — loads built outputs from all workspace packages plus absorbed modules under `src/modules/`, merges their tools/hooks. Built into `dist/index.js` for runtime. |
+| `src/modules/commit/` | Absorbed commit plugin — TS source only. Asset: `src/commands/commit.md`. Tests: `tests/modules/commit/`. Built into `dist/modules/commit/` and `dist/commands/`. |
 | `packages/python-developer` | Python-developer plugin source, tests, skills, build scripts. Output shipped at `packages/python-developer/dist/`. |
 | `packages/code-review` | Code-review plugin source, tests, agent prompts, command templates, skill-agents, build scripts. Output shipped at `packages/code-review/dist/`. All agents and commands automatically load the `standards-discovery` skill during pre-analysis to discover project-specific standards before reviewing. |
 | `packages/frontend-developer` | Frontend-developer plugin source, tests, skills, build scripts. Output shipped at `packages/frontend-developer/dist/`. |
@@ -19,7 +19,7 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins:
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
 | `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
-**Important:** `dist/` is usually ignored, but `packages/*/dist/` is **committed and published** (see `.gitignore`). Do not delete those `dist/` trees.
+**Important:** `dist/` is usually ignored, but the **root `dist/`** and **`packages/*/dist/`** are committed and published (see `.gitignore`). Do not delete those `dist/` trees.
 
 ## Commands
 
@@ -38,17 +38,19 @@ npm run build          # tsup ESM + DTS for all packages
 Each workspace package has its own `typecheck`, `test`, and `build` scripts. Tests import from `dist/` (not `src/`), so **build is required before test**:
 
 ```bash
-npm run build --workspace @appverk/opencode-commit
-npm run test  --workspace @appverk/opencode-commit
+npm run build --workspace @appverk/opencode-python-developer
+npm run test  --workspace @appverk/opencode-python-developer
 ```
+
+Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **root** `npm run build:root` / `npm run test` — they no longer have a per-workspace script.
 
 ## Build & Packaging Details
 
 - **Module system:** ESM only (`"type": "module"`, NodeNext resolution).
 - **Package builds:** `tsup src/index.ts --format esm --dts`.
 - **Post-build asset copying:** Each package runs a Node script to copy markdown templates/skills into `dist/` (e.g., `dist/commands/commit.md`, `dist/skills/*.md`).
-- **Root entrypoint:** `src/index.js` is the runtime file consumed by tests and published consumers; `src/index.ts` is the typed source. When changing merge logic, update both `src/index.ts` and `src/index.js`, then run `npm run build` so the package-level tests still pass.
-- **Published files:** The entire `src/` tree (built `.js`/`.d.ts` artifacts colocated with their `.ts` sources, including harness-resident plugins under `src/hooks/`) plus the nine `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
+- **Root entrypoint:** `src/index.ts` is the typed source. The root build (`npm run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
+- **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets) plus the eight remaining `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
 
 ## TypeScript Configuration
 
@@ -60,55 +62,42 @@ npm run test  --workspace @appverk/opencode-commit
 
 - **Root tests:** `tests/root-plugin.test.ts` validates plugin merging and packaging via `npm pack --dry-run`.
 - **Package tests:** Located in `packages/*/tests/**/*.test.ts`.
-- **Integration tests:** `packages/commit/tests/controlled-commit.integration.test.ts` exercises real git operations.
+- **Integration tests:** `tests/modules/commit/controlled-commit.integration.test.ts` exercises real git operations.
 - All workspace vitest configs use `include: ["tests/**/*.test.ts"]`.
 
 ## Root Entrypoint Registration
 
-Every new plugin must be imported and registered in **both** root entrypoints. Skipping either will break tests or the published package.
+Every new plugin must be imported and registered in `src/index.ts`. The build (`npm run build:root`) produces `dist/index.js` from it; nothing is hand-edited under `dist/`.
 
-### `src/index.ts` (typed source)
+### Workspace plugin import
 
 ```typescript
 import { AppVerkNewPlugin } from "../packages/<name>/dist/index.js"
 
 const defaultPluginFactories: Plugin[] = [
-  AppVerkCommitPlugin,
   AppVerkPythonDeveloperPlugin,
   AppVerkCodeReviewPlugin,
   AppVerkNewPlugin,  // <-- add here
 ]
 ```
 
-### `src/index.js` (runtime entrypoint)
+### Absorbed (root-resident) module import
 
-```javascript
-import { AppVerkNewPlugin } from "../packages/<name>/dist/index.js"
+For plugins absorbed into `src/modules/<name>/`:
 
-const defaultPluginFactories = [
-  AppVerkCommitPlugin,
-  AppVerkPythonDeveloperPlugin,
-  AppVerkCodeReviewPlugin,
-  AppVerkNewPlugin,  // <-- add here
-]
+```typescript
+import { AppVerkCommitPlugin } from "./modules/commit/index.js"
 ```
 
-**Critical:** After adding to `src/index.ts`, mirror the exact same change in `src/index.js`. The JS file is the runtime entrypoint consumed by tests and published consumers; the TS file provides types.
+### Harness-resident hook import
 
-### Harness-resident plugins (`src/hooks/<name>/`)
-
-Plugins that live inside the root `src/` tree (rather than as a workspace package under `packages/`) are imported using a **relative path** to their colocated build artifact. Use this pattern when a plugin only needs to ship hooks (no separate build pipeline, tests can live alongside the source):
+For hooks under `src/hooks/<name>/`:
 
 ```typescript
 import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
-
-const defaultPluginFactories: Plugin[] = [
-  // ...workspace plugins (imported from ../packages/<name>/dist/)...
-  AppVerkPantheonPlugin,
-]
 ```
 
-Because the entire `src/` tree is published (see [Build & Packaging Details](#build--packaging-details)), the built `plugin.js`/`plugin.d.ts` siblings of `plugin.ts` ship automatically — no `packages/*/dist/` entry is required in root `package.json` `files`. Mirror the import in `src/index.js` exactly as with workspace plugins.
+All three patterns import a built `.js` file at runtime (Node ESM resolution). For workspace plugins, the built file lives in `packages/<name>/dist/`. For absorbed modules and hooks, the build emits to `dist/modules/<name>/` and `dist/hooks/<name>/` — referenced via the source-side `.js` extension which Node resolves at runtime.
 
 ## Agent Visibility (`mode`)
 
@@ -177,6 +166,20 @@ Create a dedicated guide with:
     ```
     Then run `git add packages/<name>/dist/` so the built output is committed. Without this, installing the plugin from git will fail with `Cannot find module` because the consumer has no built files.
 
+---
+
+## Adding a New Root-Resident Module
+
+For small absorbed modules (no separate workspace), follow this pattern instead:
+
+1. Create `src/modules/<name>/` with `index.ts` and supporting `.ts` modules.
+2. Place `.md` assets under `src/commands/`, `src/agents/`, or `src/skills/` (the layout `scripts/copy-root-assets.mjs` knows about).
+3. Place tests under `tests/modules/<name>/`. Import sources via `from "../../../src/modules/<name>/<file>.js"`.
+4. Import and register the plugin factory in `src/index.ts` (see [Root Entrypoint Registration](#root-entrypoint-registration)).
+5. Build and test via root `npm run build:root` and `npm run check` — no per-package scripts.
+6. Update `tests/root-plugin.test.ts` packed-file assertions to include the new `dist/modules/<name>/*` and `dist/commands/<file>.md` paths.
+7. Update `README.md` and this `AGENTS.md` per the [Documentation Checklist](#documentation-checklist).
+
 ## Versioning & Git Installation
 
 When installing from git, OpenCode (via Bun) caches the repository and **does not automatically pull updates** when the branch moves. To ensure users receive the latest commands and agents:
@@ -204,6 +207,6 @@ If a user reports missing commands after an update, instruct them to either:
 ## Common Pitfalls
 
 - Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead.
-- Changing `src/index.ts` without the corresponding `src/index.js` will break root tests and the published package.
-- Removing `packages/*/dist/` will break the root entrypoint and packaging tests.
+- After changing anything under `src/`, run `npm run build:root` to regenerate `dist/` — published consumers and OpenCode load from `dist/`, not `src/`.
+- Removing a workspace `packages/<name>/dist/` will break the root entrypoint and packaging tests. (The root `dist/` is also committed — do not delete it manually; let `npm run build:root` regenerate it.)
 - **Forgetting to add a `.gitignore` exception and commit `packages/<name>/dist/`** will cause `Cannot find module` errors for consumers installing from git, because npm does not run the build step on git dependencies.

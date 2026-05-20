@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { AppVerkCommitPlugin } from "../src/index.js"
+import { AppVerkCommitPlugin } from "../../../src/modules/commit/index.js"
 
 describe("AppVerkCommitPlugin runtime", () => {
   it("registers the /commit command in config", async () => {
