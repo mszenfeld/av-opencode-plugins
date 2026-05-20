@@ -6,12 +6,13 @@ import type { SDKClient } from "../src/sdk-specialist.js"
 /**
  * The OpenCode TUI's GenericTool renderer shows `{tool} {input(input)}`,
  * where the `input()` helper formats ONLY primitive top-level args. `tasks`
- * is an array, so without `summary` the call line collapses to a bare
- * `dispatch_parallel`. `summary` is the one inline knob we have.
+ * is an array, so without `agent` + `summary` the call line collapses to a
+ * bare `dispatch_parallel`. These two primitive strings are the inline knobs
+ * we have — `agent` carries the "who", `summary` carries the "what".
  *
- * These tests also pin the secondary use of `summary`: it is mirrored into
- * `state.title` via `ToolContext.metadata` so richer UIs (desktop/web) that
- * consume `state.title` get the same label.
+ * These tests also pin the secondary use: `agent` and `summary` are joined
+ * into `state.title` (`${agent} — ${summary}`) via `ToolContext.metadata`
+ * so richer UIs (desktop/web) that consume `state.title` get a single label.
  */
 
 function makeContext(
@@ -60,15 +61,16 @@ function makeFailingClient(): SDKClient {
   } as unknown as SDKClient
 }
 
-describe("dispatch_parallel summary surfacing", () => {
-  it("mirrors `summary` into state.title via context.metadata", async () => {
+describe("dispatch_parallel agent + summary surfacing", () => {
+  it("joins `agent` and `summary` into state.title via context.metadata", async () => {
     const metadataSpy = vi.fn()
     const dispatch = await loadDispatchTool(makeFailingClient())
 
     await expect(
       dispatch.execute(
         {
-          summary: "qa-fe-tester, qa-be-tester — run 2026-05-19-login plan",
+          agent: "qa-fe-tester, qa-be-tester",
+          summary: "run 2026-05-19-login plan",
           tasks: [
             { name: "qa-fe-tester", prompt: "run FE" },
             { name: "qa-be-tester", prompt: "run BE" },
@@ -85,6 +87,32 @@ describe("dispatch_parallel summary surfacing", () => {
     )
   })
 
+  it("supports ×N notation in `agent` for N copies of the same agent", async () => {
+    const metadataSpy = vi.fn()
+    const dispatch = await loadDispatchTool(makeFailingClient())
+
+    await expect(
+      dispatch.execute(
+        {
+          agent: "code-reviewer ×3",
+          summary: "security/perf/quality review of PR #123",
+          tasks: [
+            { name: "code-reviewer", prompt: "security review" },
+            { name: "code-reviewer", prompt: "perf review" },
+            { name: "code-reviewer", prompt: "quality review" },
+          ],
+        },
+        makeContext(metadataSpy),
+      ),
+    ).rejects.toThrow()
+
+    expect(metadataSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "code-reviewer ×3 — security/perf/quality review of PR #123",
+      }),
+    )
+  })
+
   it("includes per-task name and prompt in metadata for diagnostics", async () => {
     const metadataSpy = vi.fn()
     const dispatch = await loadDispatchTool(makeFailingClient())
@@ -92,7 +120,8 @@ describe("dispatch_parallel summary surfacing", () => {
     await expect(
       dispatch.execute(
         {
-          summary: "frontend-developer, qa-be-tester — login flow",
+          agent: "frontend-developer, qa-be-tester",
+          summary: "login flow",
           tasks: [
             { name: "frontend-developer", prompt: "build login form" },
             { name: "qa-be-tester", prompt: "test /api/users" },
@@ -124,7 +153,8 @@ describe("dispatch_parallel summary surfacing", () => {
     await expect(
       dispatch.execute(
         {
-          summary: "fix-auto — QA-003 missing CSRF token",
+          agent: "fix-auto",
+          summary: "QA-003 missing CSRF token",
           tasks: [{ name: "fix-auto", prompt: "<issue body>" }],
         },
         makeContext(metadataSpy),

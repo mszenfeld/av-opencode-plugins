@@ -55,18 +55,31 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "- Result shape: each entry has `{ name, status: \"success\" | \"error\" | \"timeout\" | \"aborted\", result, duration_ms, error? }`, in the same order as the input `tasks` array.",
       ].join("\n"),
     args: {
-      // Required. The OpenCode TUI's GenericTool renderer (the path used for
-      // every plugin-supplied tool) shows `{tool} {input(input)}`, where the
-      // `input()` helper formats only primitive top-level args. `tasks` is an
-      // array, so without `summary` the call line collapses to a bare
-      // `dispatch_parallel`. `summary` is the one knob we have to make the
-      // batch self-describing inline.
+      // `agent` + `summary` are both REQUIRED, primitive top-level args.
+      // The OpenCode TUI's GenericTool renderer (the path used for every
+      // plugin-supplied tool) shows `{tool} {input(input)}`, where the
+      // `input()` helper formats only primitive top-level args. `tasks` is
+      // an array, so without these two strings the call line collapses to a
+      // bare `dispatch_parallel`. Splitting into `agent` and `summary` lets
+      // reviewers see "who" and "what" as two distinct columns inline.
+      agent: tool.schema
+        .string()
+        .min(1)
+        .max(60)
+        .describe(
+          "REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n" +
+            "- single agent: bare name (e.g. \"code-reviewer\")\n" +
+            "- N copies of one agent: \"name ×N\" (e.g. \"code-reviewer ×3\")\n" +
+            "- different agents: comma-joined names (e.g. \"qa-fe-tester, qa-be-tester\")\n" +
+            "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
+            "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.",
+        ),
       summary: tool.schema
         .string()
         .min(1)
-        .max(120)
+        .max(80)
         .describe(
-          "REQUIRED. One-line label for this dispatch batch — comma-joined agent names plus a short goal (e.g. \"qa-fe-tester, qa-be-tester — run login plan\"). Rendered inline in the OpenCode UI so reviewers can see at a glance who you are dispatching and why. Keep under ~80 chars (hard cap 120); do not include prompts or PII.",
+          "REQUIRED. One-line description of what is being delegated (e.g. \"run login plan\", \"security/perf/quality review of PR #123\", \"QA-003 missing CSRF token\"). Rendered next to `agent` in the OpenCode TUI. Hard cap 80 chars; do not include prompts or PII.",
         ),
       tasks: tool.schema
         .array(
@@ -82,14 +95,14 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         .describe("Array of tasks to dispatch in parallel"),
     },
     async execute(args, context) {
-      // Mirror `summary` into the tool-part metadata so richer UIs (desktop,
-      // web) that consume `state.title` get the same label. The current TUI
-      // renderer ignores `state.title` for plugin tools and instead shows
-      // top-level primitive args — so `summary` carries the inline label
-      // there. Set BEFORE any validation so the label survives downstream
-      // failures.
+      // Mirror `agent — summary` into the tool-part metadata so richer UIs
+      // (desktop, web) that consume `state.title` get a combined label. The
+      // current TUI renderer ignores `state.title` for plugin tools and
+      // instead shows top-level primitive args — so `agent` and `summary`
+      // carry the inline label there as two separate columns. Set BEFORE
+      // any validation so the label survives downstream failures.
       context.metadata({
-        title: args.summary,
+        title: `${args.agent} — ${args.summary}`,
         metadata: {
           tasks: args.tasks.map((t) => ({ name: t.name, prompt: t.prompt })),
         },

@@ -163,6 +163,7 @@ async function invokePlugin(
 ): Promise<{
   dispatchParallel: (
     args: {
+      agent: string
       summary: string
       tasks: Array<{ name: string; prompt: string; context?: string }>
     },
@@ -265,7 +266,8 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
-        summary: "qa-fe-tester, qa-be-tester — integration test plan",
+        agent: "qa-fe-tester, qa-be-tester",
+        summary: "integration test plan",
         tasks: [
           { name: "qa-fe-tester", prompt: "<FE scenarios>" },
           { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -356,7 +358,8 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
-        summary: "qa-fe-tester, qa-be-tester — partial failure path",
+        agent: "qa-fe-tester, qa-be-tester",
+        summary: "partial failure path",
         tasks: [
           { name: "qa-fe-tester", prompt: "<FE scenarios>" },
           { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -399,7 +402,8 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const rawResults = await plugin.dispatchParallel(
         {
-          summary: "qa-fe-tester, qa-be-tester — determinism check",
+          agent: "qa-fe-tester, qa-be-tester",
+          summary: "determinism check",
           tasks: [
             { name: "qa-fe-tester", prompt: "<FE scenarios>" },
             { name: "qa-be-tester", prompt: "<BE scenarios>" },
@@ -440,7 +444,8 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     await expect(
       plugin.dispatchParallel(
         {
-          summary: "ghost-agent — anti-recursion negative test",
+          agent: "ghost-agent",
+          summary: "anti-recursion negative test",
           tasks: [{ name: "ghost-agent", prompt: "noop" }],
         },
         ctx,
@@ -467,7 +472,8 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     await expect(
       plugin.dispatchParallel(
         {
-          summary: "perun — primary-mode rejection",
+          agent: "perun",
+          summary: "primary-mode rejection",
           tasks: [{ name: "perun", prompt: "recurse" }],
         },
         ctx,
