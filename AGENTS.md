@@ -152,7 +152,7 @@ Create a dedicated guide with:
 
 1. Create `packages/<name>/` with `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/index.ts`, and `tests/`.
 2. Add the workspace name to root `package.json` `workspaces` (already `packages/*`).
-3. **Import and register the new plugin factory in `src/index.ts` and `src/index.js`.** See [Root Entrypoint Registration](#root-entrypoint-registration) above.
+3. **Import and register the new plugin factory in `src/index.ts`.** See [Root Entrypoint Registration](#root-entrypoint-registration) above.
 4. Add the new `packages/<name>/dist/` path to root `package.json` `files`.
 5. Update root `npm run build` / `npm run test` / `npm run typecheck` scripts to include the new workspace.
 6. Add a smoke/packaging test in `tests/` or `packages/<name>/tests/`.

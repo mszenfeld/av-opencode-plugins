@@ -85,7 +85,7 @@ export const AppVerkCommitPlugin: Plugin = async () => {
       }
 
       if (decision === "block-push") {
-        throw new Error("git push is blocked by @appverk/opencode-commit.")
+        throw new Error("git push is blocked by the AppVerk commit plugin.")
       }
     },
   }
