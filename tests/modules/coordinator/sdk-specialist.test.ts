@@ -6,7 +6,7 @@ import {
   loadAgentRegistry,
   toPollerMessage,
   type SDKClient,
-} from "../src/sdk-specialist.js"
+} from "../../../src/modules/coordinator/sdk-specialist.js"
 
 /**
  * Fake `OpencodeClient` recorder — keeps a permanent transcript of every call

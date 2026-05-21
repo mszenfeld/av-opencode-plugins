@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assignIssueIds } from "../src/assign-issue-ids.js"
+import { assignIssueIds } from "../../../src/modules/coordinator/assign-issue-ids.js"
 
 describe("assignIssueIds", () => {
   it("returns empty array for empty findings", () => {

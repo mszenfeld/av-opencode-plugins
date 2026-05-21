@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   deriveReportPath,
   neutralizeUntrustedOutput,
-} from "../src/sanitize.js"
+} from "../../../src/modules/coordinator/sanitize.js"
 
 describe("neutralizeUntrustedOutput", () => {
   it("returns empty string unchanged", () => {

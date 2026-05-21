@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { pollUntilIdle, PollerAbortError } from "../src/poller.js"
-import type { PollerMessage } from "../src/poller.js"
+import { pollUntilIdle, PollerAbortError } from "../../../src/modules/coordinator/poller.js"
+import type { PollerMessage } from "../../../src/modules/coordinator/poller.js"
 
 describe("pollUntilIdle", () => {
   beforeEach(() => {

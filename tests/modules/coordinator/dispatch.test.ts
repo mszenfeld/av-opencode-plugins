@@ -6,8 +6,8 @@ import {
   type DispatchSpecialist,
   type DispatchTask,
   type AgentInfo,
-} from "../src/dispatch.js"
-import type { PollerMessage } from "../src/poller.js"
+} from "../../../src/modules/coordinator/dispatch.js"
+import type { PollerMessage } from "../../../src/modules/coordinator/poller.js"
 
 function finishedMessage(content: string): PollerMessage {
   return { role: "assistant", content, finish_reason: "end_turn" }

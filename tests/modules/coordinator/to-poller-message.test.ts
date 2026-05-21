@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AssistantMessage, Message, UserMessage } from "@opencode-ai/sdk"
-import { toPollerMessage } from "../src/index.js"
+import { toPollerMessage } from "../../../src/modules/coordinator/index.js"
 
 function makeAssistant(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
   return {

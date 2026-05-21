@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ToolContext } from "@opencode-ai/plugin"
-import { AppVerkCoordinatorPlugin } from "../src/index.js"
-import type { SDKClient } from "../src/sdk-specialist.js"
+import { AppVerkCoordinatorPlugin } from "../../../src/modules/coordinator/index.js"
+import type { SDKClient } from "../../../src/modules/coordinator/sdk-specialist.js"
 
 /**
  * The OpenCode TUI's GenericTool renderer shows `{tool} {input(input)}`,

@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import type { Agent, Message } from "@opencode-ai/sdk"
 import type { ToolContext } from "@opencode-ai/plugin"
-import { AppVerkCoordinatorPlugin } from "../src/index.js"
-import type { SDKClient } from "../src/sdk-specialist.js"
-import type { DispatchResult } from "../src/dispatch.js"
-import { assignIssueIds, type Finding } from "../src/assign-issue-ids.js"
+import { AppVerkCoordinatorPlugin } from "../../../src/modules/coordinator/index.js"
+import type { SDKClient } from "../../../src/modules/coordinator/sdk-specialist.js"
+import type { DispatchResult } from "../../../src/modules/coordinator/dispatch.js"
+import { assignIssueIds, type Finding } from "../../../src/modules/coordinator/assign-issue-ids.js"
 
 /**
  * End-to-end integration test for the coordinator plugin. Exercises the public
