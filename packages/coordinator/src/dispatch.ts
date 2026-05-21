@@ -60,7 +60,8 @@ export interface DispatchParallelInput {
 export const DEFAULT_POLL_INTERVAL_MS = 1000
 export const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
 export const DEFAULT_RESULT_MAX_BYTES = 100 * 1024
-export const MAX_PARALLEL_TASKS = 10
+export const MAX_PARALLEL_TASKS = 50
+export const DISPATCH_CONCURRENCY = 4
 
 export async function dispatchParallel(
   input: DispatchParallelInput,
@@ -77,10 +78,11 @@ export async function dispatchParallel(
 
   if (tasks.length > MAX_PARALLEL_TASKS) {
     throw new Error(
-      `dispatch_parallel: too many tasks (${tasks.length}); maximum is ${MAX_PARALLEL_TASKS}`,
+      `dispatch_parallel: tasks.length (${tasks.length}) exceeds DISPATCH_MAX_TASKS (${MAX_PARALLEL_TASKS})`,
     )
   }
 
+  // Anti-recursion: validate every task BEFORE any session spawns.
   for (const task of tasks) {
     const agentInfo = agentRegistry[task.name]
     if (agentInfo === undefined) {
@@ -95,11 +97,44 @@ export async function dispatchParallel(
     }
   }
 
-  return Promise.all(
-    tasks.map((task) =>
-      runTask(task, specialist, { pollIntervalMs, taskTimeoutMs, resultMaxBytes, signal }),
-    ),
-  )
+  // Worker pool: maintain DISPATCH_CONCURRENCY workers draining a shared queue.
+  // `next++` is race-free in single-threaded JS between `await` points.
+  const results: DispatchResult[] = new Array(tasks.length)
+  let next = 0
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (signal?.aborted === true) {
+        // Drain any remaining task slots as never-started aborts so the
+        // results array has a defined entry at every index.
+        while (next < tasks.length) {
+          const i = next++
+          const task = tasks[i]!
+          results[i] = {
+            name: task.name,
+            status: "aborted",
+            result: "",
+            duration_ms: 0,
+            error: "aborted before start",
+          }
+        }
+        return
+      }
+      const i = next++
+      if (i >= tasks.length) return
+      const task = tasks[i]!
+      results[i] = await runTask(task, specialist, {
+        pollIntervalMs,
+        taskTimeoutMs,
+        resultMaxBytes,
+        signal,
+      })
+    }
+  }
+
+  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
 
 /**
