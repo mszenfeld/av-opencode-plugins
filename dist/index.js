@@ -5,7 +5,7 @@ import { AppVerkFrontendDeveloperPlugin } from "../packages/frontend-developer/d
 import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/index.js";
 import { AppVerkQAPlugin } from "./modules/qa/index.js";
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js";
-import { AppVerkCoordinatorPlugin } from "../packages/coordinator/dist/index.js";
+import { AppVerkCoordinatorPlugin } from "./modules/coordinator/index.js";
 import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js";
 const defaultPluginFactories = [
   AppVerkCommitPlugin,
