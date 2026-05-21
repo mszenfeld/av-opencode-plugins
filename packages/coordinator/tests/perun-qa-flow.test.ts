@@ -248,29 +248,37 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     expect(content).toMatch(/BE-0\d/)
   })
 
-  it("dispatches FE and BE testers in parallel via plugin.tool.dispatch_parallel.execute and combines findings with assigned IDs", async () => {
+  it("dispatches one qa-tester variant per scenario via plugin.tool.dispatch_parallel.execute and combines findings with assigned IDs", async () => {
+    // Post-Task-2 shape: Perun dispatches per-scenario tasks, routing each
+    // FE-XX scenario to qa-tester-fe and each BE-XX scenario to qa-tester-be.
+    // Both variants reuse a single session id in this test because the fake
+    // client maps session by title suffix `dispatch to <agent>`.
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-fe-tester", "subagent"),
-        makeAgent("qa-be-tester", "subagent"),
+        makeAgent("qa-tester-fe", "subagent"),
+        makeAgent("qa-tester-be", "subagent"),
         makeAgent("perun", "primary"),
       ],
       sessions: {
-        "qa-fe-tester": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
-        "qa-be-tester": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+        "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+        "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
       },
     })
 
     const plugin = await invokePlugin(fake.client)
     const ctx = makeToolContext("perun-parent-session")
 
+    // Three scenarios: two FE, one BE — total 3 per-scenario tasks. The
+    // `agent` label uses the logical-name exception (`qa-tester ×3`), never
+    // a comma-joined `qa-tester-fe ×2, qa-tester-be`.
     const rawResults = await plugin.dispatchParallel(
       {
-        agent: "qa-fe-tester, qa-be-tester",
+        agent: "qa-tester ×3",
         summary: "integration test plan",
         tasks: [
-          { name: "qa-fe-tester", prompt: "<FE scenarios>" },
-          { name: "qa-be-tester", prompt: "<BE scenarios>" },
+          { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
+          { name: "qa-tester-fe", prompt: "<FE-02 scenario block>" },
+          { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
         ],
       },
       ctx,
@@ -278,42 +286,45 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const results = JSON.parse(rawResults) as DispatchResult[]
 
-    // Result shape: ordered, with status/result/duration_ms.
-    expect(results).toHaveLength(2)
-    expect(results[0]?.name).toBe("qa-fe-tester")
+    // Result shape: ordered, with status/result/duration_ms. Three tasks ⇒
+    // three results in input order.
+    expect(results).toHaveLength(3)
+    expect(results[0]?.name).toBe("qa-tester-fe")
     expect(results[0]?.status).toBe("success")
-    expect(results[1]?.name).toBe("qa-be-tester")
+    expect(results[1]?.name).toBe("qa-tester-fe")
     expect(results[1]?.status).toBe("success")
+    expect(results[2]?.name).toBe("qa-tester-be")
+    expect(results[2]?.status).toBe("success")
 
-    // SDK wiring assertions: registry was loaded once, two sessions were
+    // SDK wiring assertions: registry was loaded once, three sessions were
     // created with the perun parent ID, and each session was prompted with
-    // its bound agent.
+    // its bound variant.
     expect(fake.calls.appAgents).toHaveLength(1)
-    expect(fake.calls.sessionCreate).toHaveLength(2)
+    expect(fake.calls.sessionCreate).toHaveLength(3)
     expect(fake.calls.sessionCreate[0]).toEqual({
       body: {
         parentID: "perun-parent-session",
-        title: "[perun] dispatch to qa-fe-tester",
+        title: "[perun] dispatch to qa-tester-fe",
       },
     })
-    expect(fake.calls.sessionCreate[1]).toEqual({
+    expect(fake.calls.sessionCreate[2]).toEqual({
       body: {
         parentID: "perun-parent-session",
-        title: "[perun] dispatch to qa-be-tester",
+        title: "[perun] dispatch to qa-tester-be",
       },
     })
-    expect(fake.calls.sessionPrompt).toHaveLength(2)
+    expect(fake.calls.sessionPrompt).toHaveLength(3)
     expect(fake.calls.sessionPrompt[0]).toMatchObject({
-      path: { id: "fe-session" },
-      body: { agent: "qa-fe-tester" },
+      body: { agent: "qa-tester-fe" },
     })
-    expect(fake.calls.sessionPrompt[1]).toMatchObject({
-      path: { id: "be-session" },
-      body: { agent: "qa-be-tester" },
+    expect(fake.calls.sessionPrompt[2]).toMatchObject({
+      body: { agent: "qa-tester-be" },
     })
 
     // Functional assertions: ID assignment routes through the public path
     // (assign_issue_ids tool) and produces the same deterministic ordering.
+    // The FE finding repeats twice because both FE tasks return the same
+    // canned response; the BE finding appears once.
     const rawFindings: Finding[] = results.map((r) => JSON.parse(r.result) as Finding)
     const sorted = sortBySeverity(rawFindings)
 
@@ -323,30 +334,32 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     )
     const withIds = JSON.parse(rawWithIds) as Array<Finding & { id: string }>
 
-    expect(withIds).toHaveLength(2)
+    expect(withIds).toHaveLength(3)
+    // BE finding is HIGH, so it lands first after sortBySeverity.
     expect(withIds[0]?.id).toBe("QA-001")
     expect(withIds[0]?.title).toBe("POST /api/users returns 500")
     expect(withIds[1]?.id).toBe("QA-002")
-    expect(withIds[1]?.title).toBe("Login error not visible")
+    expect(withIds[2]?.id).toBe("QA-003")
   })
 
   it("handles partial failure routed through the plugin: BE specialist session id missing, FE succeeds", async () => {
-    // Configure the fake so that the BE session.create resolves to an empty
-    // session id, which the SDK adapter must surface as a per-task error.
+    // Configure the fake so that the BE variant's session.create resolves to
+    // an empty session id, which the SDK adapter must surface as a per-task
+    // error.
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-fe-tester", "subagent"),
-        makeAgent("qa-be-tester", "subagent"),
+        makeAgent("qa-tester-fe", "subagent"),
+        makeAgent("qa-tester-be", "subagent"),
       ],
       sessions: {
-        "qa-fe-tester": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+        "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
       },
     })
 
-    // Override session.create to return an empty id specifically for the BE agent.
+    // Override session.create to return an empty id specifically for the BE variant.
     const originalCreate = fake.client.session.create.bind(fake.client.session)
     fake.client.session.create = (async (options: { body: { parentID: string; title: string } }) => {
-      if (options.body.title.endsWith("dispatch to qa-be-tester")) {
+      if (options.body.title.endsWith("dispatch to qa-tester-be")) {
         fake.calls.sessionCreate.push(options)
         return { data: { id: "" } }
       }
@@ -358,11 +371,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
-        agent: "qa-fe-tester, qa-be-tester",
+        agent: "qa-tester ×2",
         summary: "partial failure path",
         tasks: [
-          { name: "qa-fe-tester", prompt: "<FE scenarios>" },
-          { name: "qa-be-tester", prompt: "<BE scenarios>" },
+          { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
+          { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
         ],
       },
       ctx,
@@ -389,12 +402,12 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     async function runFlow(): Promise<string[]> {
       const fake = makeFakeClient({
         agents: [
-          makeAgent("qa-fe-tester", "subagent"),
-          makeAgent("qa-be-tester", "subagent"),
+          makeAgent("qa-tester-fe", "subagent"),
+          makeAgent("qa-tester-be", "subagent"),
         ],
         sessions: {
-          "qa-fe-tester": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
-          "qa-be-tester": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+          "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
         },
       })
       const plugin = await invokePlugin(fake.client)
@@ -402,11 +415,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const rawResults = await plugin.dispatchParallel(
         {
-          agent: "qa-fe-tester, qa-be-tester",
+          agent: "qa-tester ×2",
           summary: "determinism check",
           tasks: [
-            { name: "qa-fe-tester", prompt: "<FE scenarios>" },
-            { name: "qa-be-tester", prompt: "<BE scenarios>" },
+            { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
+            { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
           ],
         },
         ctx,
@@ -435,7 +448,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
   it("rejects unknown agents at the plugin entry point before creating any session", async () => {
     const fake = makeFakeClient({
-      agents: [makeAgent("qa-fe-tester", "subagent")],
+      agents: [makeAgent("qa-tester-fe", "subagent")],
       sessions: {},
     })
     const plugin = await invokePlugin(fake.client)
@@ -461,7 +474,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
   it("rejects primary-mode agents at the plugin entry point (anti-recursion)", async () => {
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-fe-tester", "subagent"),
+        makeAgent("qa-tester-fe", "subagent"),
         makeAgent("perun", "primary"),
       ],
       sessions: {},
@@ -480,5 +493,153 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       ),
     ).rejects.toThrow("Cannot dispatch primary agent: perun")
     expect(fake.calls.sessionCreate).toHaveLength(0)
+  })
+
+  // Path B coverage (per Task 2 implementation choice): dependency parsing,
+  // cycle detection, and wave computation live in Perun's prompt (perun.md),
+  // not as exported TS helpers. The end-to-end behaviour Perun is contracted
+  // to drive is exercised here through fixture-driven calls into the public
+  // dispatch_parallel tool — one `dispatchParallel` invocation per wave is
+  // what Perun emits when a plan declares `**Depends-on:**`. These tests
+  // assert the dispatcher behaviour Perun depends on (per-scenario tasks per
+  // wave, deterministic ordering, isolated failures) without binding to the
+  // prompt-level parser.
+  describe("dependency-aware dispatch (Path B: fixture-driven)", () => {
+    it("runs each wave as its own dispatch_parallel call with per-scenario tasks", async () => {
+      // Simulate Perun's two-wave behaviour for a plan with
+      // BE-01 (no deps) → BE-02 [depends-on: BE-01].
+      const fake = makeFakeClient({
+        agents: [
+          makeAgent("qa-tester-fe", "subagent"),
+          makeAgent("qa-tester-be", "subagent"),
+        ],
+        sessions: {
+          "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+        },
+      })
+      const plugin = await invokePlugin(fake.client)
+      const ctx = makeToolContext("perun-parent-session")
+
+      // Wave 1: BE-01 only.
+      const wave1Raw = await plugin.dispatchParallel(
+        {
+          agent: "qa-tester",
+          summary: "deps plan (wave 1/2)",
+          tasks: [{ name: "qa-tester-be", prompt: "<BE-01 scenario block>" }],
+        },
+        ctx,
+      )
+      const wave1 = JSON.parse(wave1Raw) as DispatchResult[]
+      expect(wave1).toHaveLength(1)
+      expect(wave1[0]?.status).toBe("success")
+
+      // Wave 2: BE-02 (depends on BE-01, which completed in wave 1).
+      const wave2Raw = await plugin.dispatchParallel(
+        {
+          agent: "qa-tester",
+          summary: "deps plan (wave 2/2)",
+          tasks: [{ name: "qa-tester-be", prompt: "<BE-02 scenario block>" }],
+        },
+        ctx,
+      )
+      const wave2 = JSON.parse(wave2Raw) as DispatchResult[]
+      expect(wave2).toHaveLength(1)
+      expect(wave2[0]?.status).toBe("success")
+
+      // Two distinct dispatch_parallel calls ⇒ two separate session-create
+      // batches. Total session.create calls across both waves = 2.
+      expect(fake.calls.sessionCreate).toHaveLength(2)
+    })
+
+    it("fans out within a single wave when scenarios share a common predecessor", async () => {
+      // Simulate Perun's fan-out shape: BE-01 in wave 0, BE-02 + BE-03 (each
+      // depends-on BE-01) in wave 1. Wave 1 is a single dispatch_parallel
+      // call with two tasks in parallel.
+      const fake = makeFakeClient({
+        agents: [
+          makeAgent("qa-tester-fe", "subagent"),
+          makeAgent("qa-tester-be", "subagent"),
+        ],
+        sessions: {
+          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+        },
+      })
+      const plugin = await invokePlugin(fake.client)
+      const ctx = makeToolContext("perun-parent-session")
+
+      const rawResults = await plugin.dispatchParallel(
+        {
+          agent: "qa-tester ×2",
+          summary: "deps plan (wave 2/2)",
+          tasks: [
+            { name: "qa-tester-be", prompt: "<BE-02 scenario block>" },
+            { name: "qa-tester-be", prompt: "<BE-03 scenario block>" },
+          ],
+        },
+        ctx,
+      )
+      const results = JSON.parse(rawResults) as DispatchResult[]
+
+      expect(results).toHaveLength(2)
+      expect(results[0]?.status).toBe("success")
+      expect(results[1]?.status).toBe("success")
+      // Both fan-out tasks dispatched in the same wave ⇒ one session.create
+      // batch with two entries.
+      expect(fake.calls.sessionCreate).toHaveLength(2)
+    })
+
+    it("isolates predecessor failure: dependent wave still runs after wave 0 returns error", async () => {
+      // Perun's documented semantics: predecessor failure does NOT block
+      // dependents. The dispatcher cannot model that semantic on its own (it
+      // has no knowledge of waves), so Perun is responsible for emitting the
+      // next wave regardless of wave 0's status. This test asserts the
+      // dispatcher honours both calls independently.
+      const fake = makeFakeClient({
+        agents: [makeAgent("qa-tester-be", "subagent")],
+        sessions: {
+          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+        },
+      })
+
+      // Wave 0: force an empty session id so the BE task errors out.
+      const originalCreate = fake.client.session.create.bind(fake.client.session)
+      let calls = 0
+      fake.client.session.create = (async (options: { body: { parentID: string; title: string } }) => {
+        calls += 1
+        if (calls === 1) {
+          fake.calls.sessionCreate.push(options)
+          return { data: { id: "" } }
+        }
+        return originalCreate(options)
+      }) as typeof fake.client.session.create
+
+      const plugin = await invokePlugin(fake.client)
+      const ctx = makeToolContext("perun-parent-session")
+
+      const wave0Raw = await plugin.dispatchParallel(
+        {
+          agent: "qa-tester",
+          summary: "deps plan (wave 1/2)",
+          tasks: [{ name: "qa-tester-be", prompt: "<BE-01 scenario block>" }],
+        },
+        ctx,
+      )
+      const wave0 = JSON.parse(wave0Raw) as DispatchResult[]
+      expect(wave0[0]?.status).toBe("error")
+
+      // Perun, per the spec, still dispatches wave 1 — dependents run
+      // regardless of predecessor failure.
+      const wave1Raw = await plugin.dispatchParallel(
+        {
+          agent: "qa-tester",
+          summary: "deps plan (wave 2/2)",
+          tasks: [{ name: "qa-tester-be", prompt: "<BE-02 scenario block>" }],
+        },
+        ctx,
+      )
+      const wave1 = JSON.parse(wave1Raw) as DispatchResult[]
+      expect(wave1[0]?.status).toBe("success")
+    })
   })
 })

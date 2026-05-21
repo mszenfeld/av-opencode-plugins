@@ -121,7 +121,8 @@ function deriveReportPath(planPath, today) {
 var DEFAULT_POLL_INTERVAL_MS = 1e3;
 var DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
 var DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
-var MAX_PARALLEL_TASKS = 10;
+var DISPATCH_MAX_TASKS = 50;
+var DISPATCH_CONCURRENCY = 4;
 async function dispatchParallel(input) {
   const {
     tasks,
@@ -132,9 +133,9 @@ async function dispatchParallel(input) {
     resultMaxBytes = DEFAULT_RESULT_MAX_BYTES,
     signal
   } = input;
-  if (tasks.length > MAX_PARALLEL_TASKS) {
+  if (tasks.length > DISPATCH_MAX_TASKS) {
     throw new Error(
-      `dispatch_parallel: too many tasks (${tasks.length}); maximum is ${MAX_PARALLEL_TASKS}`
+      `dispatch_parallel: tasks.length (${tasks.length}) exceeds DISPATCH_MAX_TASKS (${DISPATCH_MAX_TASKS})`
     );
   }
   for (const task of tasks) {
@@ -146,11 +147,38 @@ async function dispatchParallel(input) {
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`);
     }
   }
-  return Promise.all(
-    tasks.map(
-      (task) => runTask(task, specialist, { pollIntervalMs, taskTimeoutMs, resultMaxBytes, signal })
-    )
-  );
+  const results = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      if (signal?.aborted === true) {
+        while (next < tasks.length) {
+          const i2 = next++;
+          const task2 = tasks[i2];
+          results[i2] = {
+            name: task2.name,
+            status: "aborted",
+            result: "",
+            duration_ms: 0,
+            error: "aborted before start"
+          };
+        }
+        return;
+      }
+      const i = next++;
+      if (i >= tasks.length) return;
+      const task = tasks[i];
+      results[i] = await runTask(task, specialist, {
+        pollIntervalMs,
+        taskTimeoutMs,
+        resultMaxBytes,
+        signal
+      });
+    }
+  }
+  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 function classifyError(err) {
   if (err instanceof PollerAbortError) {
@@ -328,7 +356,8 @@ var AppVerkCoordinatorPlugin = async (input) => {
       "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
       "",
       "Guarantees and limits:",
-      "- Maximum 10 tasks per call (over-limit calls are rejected before any session is created).",
+      "- Maximum 50 tasks per call (over-limit calls are rejected before any session is created).",
+      "- Internally throttled to a 4-worker pool: tasks beyond the first 4 wait until a slot frees up. Result order is preserved.",
       '- Each task has a 5-minute hard timeout; on expiry the task is returned with status "timeout" and the partial result is discarded.',
       '- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker "[\u2026truncated\u2026]" \u2014 synthesize what is present, do not retry.',
       "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent, a `mode: primary` agent, or a `mode: all` agent are rejected with a thrown error and no work is dispatched.",
@@ -345,7 +374,7 @@ var AppVerkCoordinatorPlugin = async (input) => {
       // bare `dispatch_parallel`. Splitting into `agent` and `summary` lets
       // reviewers see "who" and "what" as two distinct columns inline.
       agent: tool.schema.string().min(1).max(60).describe(
-        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent: "name \xD7N" (e.g. "code-reviewer \xD73")\n- different agents: comma-joined names (e.g. "qa-fe-tester, qa-be-tester")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.'
+        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent: "name \xD7N" (e.g. "code-reviewer \xD73")\n- different agents: comma-joined names (e.g. "code-reviewer, security-auditor")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.\n\nException for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `qa-tester` \u2192 `qa-tester-fe` + `qa-tester-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent\'s prompt.'
       ),
       summary: tool.schema.string().min(1).max(80).describe(
         'REQUIRED. One-line description of what is being delegated (e.g. "run login plan", "security/perf/quality review of PR #123", "QA-003 missing CSRF token"). Rendered next to `agent` in the OpenCode TUI. Hard cap 80 chars; do not include prompts or PII.'

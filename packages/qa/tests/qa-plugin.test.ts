@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import type { Config } from "@opencode-ai/plugin"
-import { AppVerkQAPlugin } from "../dist/index.js"
+import { AppVerkQAPlugin, buildQATesterAgent, FE_TOOLS, BE_TOOLS } from "../dist/index.js"
 
 describe("AppVerkQAPlugin", () => {
   let pluginResult: Awaited<ReturnType<typeof AppVerkQAPlugin>>
@@ -13,10 +13,11 @@ describe("AppVerkQAPlugin", () => {
     expect(typeof AppVerkQAPlugin).toBe("function")
   })
 
-  const EXPECTED_AGENTS = ["qa-fe-tester", "qa-be-tester"]
+  const EXPECTED_VARIANTS = ["qa-tester-fe", "qa-tester-be"]
+  const REMOVED_AGENTS = ["qa-fe-tester", "qa-be-tester", "qa-tester"]
   const EXPECTED_COMMANDS = ["create-qa-plan", "run-qa"]
 
-  it.each(EXPECTED_AGENTS)("registers %s agent", async (name) => {
+  it.each(EXPECTED_VARIANTS)("registers %s variant", async (name) => {
     const config: Config = { agent: {} }
     await pluginResult.config?.(config)
     expect(config.agent![name]).toBeDefined()
@@ -24,10 +25,37 @@ describe("AppVerkQAPlugin", () => {
     expect(typeof config.agent![name]!.prompt).toBe("string")
   })
 
+  it.each(REMOVED_AGENTS)("does not register %s (old or unsuffixed)", async (name) => {
+    const config: Config = { agent: {} }
+    await pluginResult.config?.(config)
+    expect(config.agent![name]).toBeUndefined()
+  })
+
   it.each(EXPECTED_COMMANDS)("registers %s command", async (name) => {
     const config: Config = { command: {} }
     await pluginResult.config?.(config)
     expect(config.command![name]).toBeDefined()
     expect(typeof config.command![name]!.template).toBe("string")
+  })
+})
+
+describe("buildQATesterAgent", () => {
+  it("produces fe variant with FE tools and no BE tools", () => {
+    const { prompt } = buildQATesterAgent("fe")
+    expect(prompt).toContain("name: qa-tester-fe")
+    expect(prompt).toContain("mode: subagent")
+    for (const t of FE_TOOLS) expect(prompt).toContain(t)
+    for (const t of BE_TOOLS) expect(prompt).not.toContain(t)
+    expect(prompt).toContain("FE variant — Playwright")
+    expect(prompt).not.toContain("BE variant — HTTP + DB")
+  })
+
+  it("produces be variant with BE tools and no FE tools", () => {
+    const { prompt } = buildQATesterAgent("be")
+    expect(prompt).toContain("name: qa-tester-be")
+    for (const t of BE_TOOLS) expect(prompt).toContain(t)
+    for (const t of FE_TOOLS) expect(prompt).not.toContain(t)
+    expect(prompt).toContain("BE variant — HTTP + DB")
+    expect(prompt).not.toContain("FE variant — Playwright")
   })
 })

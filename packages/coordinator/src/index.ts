@@ -71,9 +71,10 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
           "REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n" +
             "- single agent: bare name (e.g. \"code-reviewer\")\n" +
             "- N copies of one agent: \"name ×N\" (e.g. \"code-reviewer ×3\")\n" +
-            "- different agents: comma-joined names (e.g. \"qa-fe-tester, qa-be-tester\")\n" +
+            "- different agents: comma-joined names (e.g. \"code-reviewer, security-auditor\")\n" +
             "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
-            "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.",
+            "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.\n\n" +
+            "Exception for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `qa-tester` → `qa-tester-fe` + `qa-tester-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent's prompt.",
         ),
       summary: tool.schema
         .string()

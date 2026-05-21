@@ -2,49 +2,31 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Plugin } from "@opencode-ai/plugin"
+import { buildQATesterAgent } from "./modules/prompt-builder.js"
 
-const moduleDirectory = path.dirname(fileURLToPath(import.meta.url))
+export { buildQATesterAgent }
+export { FE_TOOLS, BE_TOOLS, SHARED_TOOLS, toolsForVariant } from "./modules/allowed-tools.js"
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
 function loadMarkdownFile(name: string): string {
-  const filePath = path.resolve(moduleDirectory, name)
-  const baseDir = path.resolve(moduleDirectory, "..")
+  const filePath = path.resolve(moduleDir, name)
+  const baseDir = path.resolve(moduleDir, "..")
   if (!filePath.startsWith(baseDir)) {
     throw new Error("Invalid path: traversal detected")
   }
-  try {
-    return readFileSync(filePath, "utf8")
-  } catch {
-    throw new Error(
-      `Markdown asset not found: ${name} (looked in ${filePath}). ` +
-        `Ensure the package is built so that copy-assets.mjs copies assets into dist/.`
-    )
-  }
+  return readFileSync(filePath, "utf8")
 }
 
 function createLazyMarkdownLoader(name: string): () => string {
   let cached: string | undefined
   return () => {
-    if (cached === undefined) {
-      cached = loadMarkdownFile(name)
-    }
+    if (cached === undefined) cached = loadMarkdownFile(name)
     return cached
   }
 }
 
-const AGENTS = [
-  {
-    name: "qa-fe-tester",
-    description:
-      "Frontend testing agent that executes FE test scenarios from a QA test plan using Playwright. Navigates pages, interacts with UI elements, verifies states, and takes screenshots on failure.",
-    path: "agents/fe-tester.md",
-  },
-  {
-    name: "qa-be-tester",
-    description:
-      "Backend testing agent that executes BE test scenarios from a QA test plan. Tests API endpoints, verifies response codes and bodies, checks database state, and handles error scenarios.",
-    path: "agents/be-tester.md",
-  },
-]
+const VARIANTS = ["fe", "be"] as const
 
 const COMMANDS = [
   {
@@ -56,7 +38,7 @@ const COMMANDS = [
   {
     name: "run-qa",
     description:
-      "Execute a QA test plan — launch FE and BE testing agents, collect results, and generate a report with QA-XXX issue IDs.",
+      "Execute a QA test plan — Perun parses scenarios, dispatches one qa-tester variant per scenario through dispatch_parallel.",
     path: "commands/run-qa.md",
   },
 ]
@@ -64,12 +46,14 @@ const COMMANDS = [
 export const AppVerkQAPlugin: Plugin = async () => ({
   config: async (config) => {
     config.agent ??= {}
-    for (const a of AGENTS) {
-      const getPrompt = createLazyMarkdownLoader(a.path)
-      config.agent[a.name] = {
-        description: a.description,
+    for (const stack of VARIANTS) {
+      // Per-variant lazy cache: build the markdown once per variant at first access.
+      let cached: string | undefined
+      config.agent[`qa-tester-${stack}`] = {
+        description: `QA tester — ${stack.toUpperCase()} scenarios (internal variant of qa-tester)`,
         get prompt() {
-          return getPrompt()
+          cached ??= buildQATesterAgent(stack).prompt
+          return cached
         },
         mode: "subagent",
       }

@@ -116,6 +116,30 @@ For EVERY scenario, consider and include relevant edge cases from:
 
 ---
 
+## Dependency annotations (opt-in)
+
+Scenarios may declare dependencies on other scenarios via an optional `**Depends-on:**` field directly beneath the heading. Listed scenarios run to completion (any status — pass/fail/skip) before this scenario starts.
+
+Example:
+
+~~~markdown
+### BE-02: PUT /api/users updates the user created in BE-01
+**Depends-on:** BE-01
+- **Method:** PUT /api/users/<id>
+...
+~~~
+
+Rules:
+
+- Reference scenarios by their full ID (`FE-01`, `BE-02`). Multiple IDs are comma-separated.
+- Cross-stack deps are allowed: `BE-02 **Depends-on:** FE-01`.
+- No self-references, no cycles, no dangling refs (the run aborts at plan-parse time if any is detected).
+- Predecessor failure does NOT block dependents. A dependent surfaces a diagnostic failure rather than skipping silently — better signal-to-noise than auto-skip cascades.
+
+This field is **opt-in**. Plans without `**Depends-on:**` dispatch fully in parallel (subject to the 4-worker pool throttle).
+
+---
+
 ## Plan Quality Checklist
 
 Before saving the plan, verify:
@@ -126,3 +150,4 @@ Before saving the plan, verify:
 - [ ] DB Checks use actual table/column names from the codebase
 - [ ] API paths match actual routes from the codebase
 - [ ] No placeholder text (TBD, TODO, fill in later)
+- [ ] `**Depends-on:**` fields, if present, reference existing scenario IDs without cycles
