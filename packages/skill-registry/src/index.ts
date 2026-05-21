@@ -12,7 +12,7 @@ const skillDirectories = [
   path.resolve(moduleDirectory, "../../python-developer/dist/skills"),
   path.resolve(moduleDirectory, "../../frontend-developer/dist/skills"),
   path.resolve(moduleDirectory, "../../code-review/dist/skills"),
-  path.resolve(moduleDirectory, "../../qa/dist/skills"),
+  path.resolve(moduleDirectory, "../../../dist/skills/qa"),
   path.resolve(moduleDirectory, "../../swift-developer/dist/skills"),
 ]
 

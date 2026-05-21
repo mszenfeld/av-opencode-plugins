@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import type { Config } from "@opencode-ai/plugin"
-import { AppVerkQAPlugin, buildQATesterAgent, FE_TOOLS, BE_TOOLS } from "../dist/index.js"
+import { AppVerkQAPlugin } from "../../../src/modules/qa/index.js"
+import { buildQATesterAgent } from "../../../src/modules/qa/prompt-builder.js"
+import { FE_TOOLS, BE_TOOLS } from "../../../src/modules/qa/allowed-tools.js"
 
 describe("AppVerkQAPlugin", () => {
   let pluginResult: Awaited<ReturnType<typeof AppVerkQAPlugin>>

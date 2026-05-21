@@ -63,25 +63,8 @@ function toolsForVariant(stack) {
 // src/modules/prompt-builder.ts
 var moduleDir = path.dirname(fileURLToPath(import.meta.url));
 function loadSection(name) {
-  const candidates = [
-    // (a) bundled into dist/index.js
-    path.resolve(moduleDir, "modules/prompt-sections", name),
-    // (b) standalone dist/modules/prompt-builder.js
-    path.resolve(moduleDir, "prompt-sections", name),
-    // (c) src/modules/prompt-builder.ts running unbundled
-    path.resolve(moduleDir, "../prompt-sections", name),
-    // (a-fallback) when bundle is at dist/index.js and src copy is desired
-    path.resolve(moduleDir, "../src/modules/prompt-sections", name)
-  ];
-  let lastError;
-  for (const candidate of candidates) {
-    try {
-      return readFileSync(candidate, "utf8");
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(`prompt-section asset not found: ${name}`);
+  const filePath = path.resolve(moduleDir, "modules/prompt-sections", name);
+  return readFileSync(filePath, "utf8");
 }
 var cachedCore;
 var cachedOverlayFe;

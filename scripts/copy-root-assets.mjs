@@ -39,4 +39,18 @@ for (const root of sourceRoots) {
   )
 }
 
+// Walk src/modules/<name>/**/*.md to dist/modules/<name>/**/*.md so absorbed
+// modules can ship markdown asset siblings (e.g. prompt-sections).
+const modulesSrc = path.join(repoRoot, "src", "modules")
+const modulesDst = path.join(repoRoot, "dist", "modules")
+if (existsSync(modulesSrc)) {
+  for (const entry of readdirSync(modulesSrc, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    copyMarkdownRecursive(
+      path.join(modulesSrc, entry.name),
+      path.join(modulesDst, entry.name),
+    )
+  }
+}
+
 console.log(`Done. ${copiedCount} asset(s) copied.`)
