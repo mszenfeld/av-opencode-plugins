@@ -60,7 +60,7 @@ export interface DispatchParallelInput {
 export const DEFAULT_POLL_INTERVAL_MS = 1000
 export const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
 export const DEFAULT_RESULT_MAX_BYTES = 100 * 1024
-export const MAX_PARALLEL_TASKS = 50
+export const DISPATCH_MAX_TASKS = 50
 export const DISPATCH_CONCURRENCY = 4
 
 export async function dispatchParallel(
@@ -76,9 +76,9 @@ export async function dispatchParallel(
     signal,
   } = input
 
-  if (tasks.length > MAX_PARALLEL_TASKS) {
+  if (tasks.length > DISPATCH_MAX_TASKS) {
     throw new Error(
-      `dispatch_parallel: tasks.length (${tasks.length}) exceeds DISPATCH_MAX_TASKS (${MAX_PARALLEL_TASKS})`,
+      `dispatch_parallel: tasks.length (${tasks.length}) exceeds DISPATCH_MAX_TASKS (${DISPATCH_MAX_TASKS})`,
     )
   }
 

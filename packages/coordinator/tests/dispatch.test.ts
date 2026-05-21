@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   dispatchParallel,
   DEFAULT_RESULT_MAX_BYTES,
-  MAX_PARALLEL_TASKS,
+  DISPATCH_MAX_TASKS,
   type DispatchSpecialist,
   type DispatchTask,
   type AgentInfo,
@@ -145,10 +145,10 @@ describe("dispatchParallel", () => {
     expect(calls.startTask).toHaveLength(0)
   })
 
-  it(`throws when called with more than ${MAX_PARALLEL_TASKS} tasks before creating any session`, async () => {
+  it(`throws when called with more than ${DISPATCH_MAX_TASKS} tasks before creating any session`, async () => {
     const { specialist, calls } = makeSpecialistRecorder()
 
-    const overLimit = MAX_PARALLEL_TASKS + 1
+    const overLimit = DISPATCH_MAX_TASKS + 1
     const tasks: DispatchTask[] = Array.from({ length: overLimit }, (_, i) => ({
       name: "qa-fe-tester",
       prompt: `task ${i}`,
@@ -157,7 +157,7 @@ describe("dispatchParallel", () => {
     await expect(
       dispatchParallel({ tasks, agentRegistry: defaultRegistry, specialist }),
     ).rejects.toThrow(
-      `dispatch_parallel: tasks.length (${overLimit}) exceeds DISPATCH_MAX_TASKS (${MAX_PARALLEL_TASKS})`,
+      `dispatch_parallel: tasks.length (${overLimit}) exceeds DISPATCH_MAX_TASKS (${DISPATCH_MAX_TASKS})`,
     )
 
     // Fail-closed: no session work begins.
@@ -478,7 +478,7 @@ describe("dispatchParallel", () => {
     expect(inFlight.peak).toBeLessThanOrEqual(4)
   })
 
-  it("rejects tasks.length > MAX_PARALLEL_TASKS before any session spawns", async () => {
+  it("rejects tasks.length > DISPATCH_MAX_TASKS before any session spawns", async () => {
     const recorder = makeSpecialistRecorder()
     const tasks: DispatchTask[] = Array.from({ length: 51 }, (_, i) => ({
       name: "worker",
