@@ -13,7 +13,6 @@ const trackedDistPaths = [
   "packages/frontend-developer/dist",
   "packages/skill-utils/dist",
   "packages/skill-registry/dist",
-  "packages/qa/dist",
   "packages/swift-developer/dist",
   "packages/coordinator/dist",
 ]

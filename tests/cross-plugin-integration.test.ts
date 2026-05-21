@@ -21,6 +21,11 @@ function readPackageFile(packageName: string, relativePath: string): string {
   return readFileSync(filePath, "utf8")
 }
 
+function readSrcFile(relativePath: string): string {
+  const filePath = path.resolve(rootDirectory, "src", relativePath)
+  return readFileSync(filePath, "utf8")
+}
+
 describe("Cross-plugin Category→Prefix mapping consistency", () => {
   it("shared mapping contains all expected categories and prefixes", () => {
     expect(CATEGORY_PREFIX_MAPPING).toEqual({
@@ -68,10 +73,7 @@ describe("Cross-plugin Category→Prefix mapping consistency", () => {
   })
 
   it("qa report-format skill references Testing category and QA prefix", () => {
-    const reportFormatMd = readPackageFile(
-      "qa",
-      "skills/report-format/SKILL.md",
-    )
+    const reportFormatMd = readSrcFile("skills/qa/report-format/SKILL.md")
 
     expect(reportFormatMd).toContain("**Testing**")
     expect(reportFormatMd).toContain("**QA**")
@@ -89,10 +91,7 @@ describe("Cross-plugin Category→Prefix mapping consistency", () => {
 
   it("all plugins agree on the number of categories", () => {
     const reviewMd = readPackageFile("code-review", "commands/review.md")
-    const reportFormatMd = readPackageFile(
-      "qa",
-      "skills/report-format/SKILL.md",
-    )
+    const reportFormatMd = readSrcFile("skills/qa/report-format/SKILL.md")
 
     // Narrow match: look for rows where both cells are valid category/prefix values
     const reviewRows = reviewMd.match(/\|\s*\w+\s*\|\s*\w+\s*\|/g) ?? []
