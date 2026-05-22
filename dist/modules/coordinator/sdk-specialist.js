@@ -23,7 +23,7 @@ function createSDKSpecialist(client, parentSessionID) {
     async fetchMessages(sessionId) {
       const result = await client.session.messages({ path: { id: sessionId } });
       const list = result.data ?? [];
-      return list.map(toPollerMessage);
+      return list.length === 0 ? [] : [toPollerMessage(list[list.length - 1])];
     },
     async abortTask(sessionId) {
       await client.session.abort({ path: { id: sessionId } });

@@ -4,7 +4,7 @@ import {
   PollerTimeoutError,
   type PollerMessage,
 } from "./poller.js"
-import { neutralizeUntrustedOutput } from "./sanitize.js"
+import { neutralizeUntrustedOutput, normalizeVariantSuffix } from "./sanitize.js"
 import { truncateBytes } from "./truncate-bytes.js"
 
 export interface DispatchTask {
@@ -98,29 +98,22 @@ export async function dispatchParallel(
   }
 
   // Worker pool: maintain DISPATCH_CONCURRENCY workers draining a shared queue.
-  // `next++` is race-free in single-threaded JS between `await` points.
+  // `nextRef.value++` is race-free in single-threaded JS between `await` points.
+  // `nextRef` is passed by reference so the abort-drain helper can advance the
+  // shared cursor — keeps the queue invariant ("every index has a result")
+  // testable in isolation from the run-loop.
   const results: DispatchResult[] = new Array(tasks.length)
-  let next = 0
+  const nextRef = { value: 0 }
 
   async function worker(): Promise<void> {
     while (true) {
       if (signal?.aborted === true) {
-        // Drain any remaining task slots as never-started aborts so the
-        // results array has a defined entry at every index.
-        while (next < tasks.length) {
-          const i = next++
-          const task = tasks[i]!
-          results[i] = {
-            name: task.name,
-            status: "aborted",
-            result: "",
-            duration_ms: 0,
-            error: "aborted before start",
-          }
-        }
+        // First worker to detect abort drains the remaining slots; later
+        // workers see `nextRef.value >= tasks.length` and exit immediately.
+        fillUnstartedAsAborted(results, tasks, nextRef)
         return
       }
-      const i = next++
+      const i = nextRef.value++
       if (i >= tasks.length) return
       const task = tasks[i]!
       results[i] = await runTask(task, specialist, {
@@ -134,7 +127,52 @@ export async function dispatchParallel(
 
   const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+  // MAINT-001: convert the prompt-only variant-suffix invariant into a code
+  // invariant. The agent registry still validates input task names as the
+  // original variants (qa-tester-fe / qa-tester-be); only the OUTPUT
+  // `name` and `error` strings are normalised, so prompt drift or partial
+  // injection cannot leak `qa-tester-fe` / `qa-tester-be` into reports.
+  for (const r of results) {
+    r.name = normalizeVariantSuffix(r.name)
+    if (r.error !== undefined) {
+      r.error = normalizeVariantSuffix(r.error)
+    }
+  }
   return results
+}
+
+/**
+ * Drain every task slot that the worker pool has not yet claimed and fill it
+ * with a "never-started" aborted result. Called from the abort branch of
+ * `worker()` so the post-condition "every index in `results` has a defined
+ * entry" still holds after the pool short-circuits.
+ *
+ * Single-writer invariant: only the first worker to observe `signal.aborted`
+ * reaches this drain — by the time it returns, `nextRef.value >= tasks.length`,
+ * so every subsequent worker takes the `i >= tasks.length` exit. `nextRef.value++`
+ * is race-free in single-threaded JS between `await` points (no awaits here).
+ *
+ * `name: task.name` is the raw variant name; the MAINT-001 final pass in
+ * `dispatchParallel` rewrites it to the logical agent name, so we don't
+ * normalise here.
+ */
+function fillUnstartedAsAborted(
+  results: DispatchResult[],
+  tasks: DispatchTask[],
+  nextRef: { value: number },
+): void {
+  while (nextRef.value < tasks.length) {
+    const i = nextRef.value++
+    const task = tasks[i]!
+    results[i] = {
+      name: task.name,
+      status: "aborted",
+      result: "",
+      duration_ms: 0,
+      error: "aborted before start",
+    }
+  }
 }
 
 /**

@@ -20,11 +20,11 @@ export interface PollUntilIdleOptions {
   /**
    * Optional byte-level cap on the polled assistant content (UTF-8 bytes).
    * When set, `pollUntilIdle` truncates the LAST message's content using a
-   * UTF-8-safe slice before returning it as the result. Scope is limited to
-   * `messages[last].content` — the full transcript array returned by
-   * `fetchMessages` is still allocated in full by the SDK on each poll, so
-   * this is not a true mid-stream / full-transcript memory bound. See
-   * COMPOSITE-3 / SEC-010.
+   * UTF-8-safe slice before returning it as the result. Together with the
+   * adapter's projection in `createSDKSpecialist.fetchMessages` (which
+   * returns at most a single message — the latest one — see PERF-001), this
+   * provides a true per-poll memory bound: each poll allocates O(maxBytes)
+   * rather than O(transcript-length). See COMPOSITE-3 / SEC-010 / PERF-001.
    */
   maxBytes?: number
 }
@@ -72,13 +72,12 @@ export async function pollUntilIdle(options: PollUntilIdleOptions): Promise<stri
       return maxBytes === undefined ? last.content : truncateBytes(last.content, maxBytes)
     }
 
-    // SEC-010: bound the size of the LAST assistant message between polls.
-    // NOTE: This is NOT a full mid-stream / transcript-wide cap — `fetchMessages`
-    // still returns the entire `messages` array, which the SDK allocates in
-    // full before we ever see it. The truncation here only prevents the
-    // in-progress assistant turn (the one we will eventually surface as the
-    // result) from growing unboundedly across successive polls; it does not
-    // bound `totalBytes` across earlier transcript entries.
+    // SEC-010 / PERF-001: bound the size of the LAST assistant message
+    // between polls. The adapter (`createSDKSpecialist.fetchMessages`)
+    // already projects the SDK response to a single message — the latest
+    // one — so `messages.length <= 1` here. Truncating that one entry's
+    // content via `truncateBytes` therefore bounds the entire array's
+    // memory footprint to O(maxBytes), not just the eventual result.
     if (
       maxBytes !== undefined &&
       last !== undefined &&

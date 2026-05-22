@@ -181,7 +181,7 @@ describe("createSDKSpecialist.startTask", () => {
 })
 
 describe("createSDKSpecialist.fetchMessages", () => {
-  it("calls session.messages with { path: { id } } and maps each message via toPollerMessage", async () => {
+  it("calls session.messages with { path: { id } } and projects to only the LAST message (PERF-001)", async () => {
     const fake = makeFakeClient({
       messagesResponses: {
         "sess-child-1": {
@@ -209,14 +209,12 @@ describe("createSDKSpecialist.fetchMessages", () => {
     expect(fake.calls.sessionMessages).toHaveLength(1)
     expect(fake.calls.sessionMessages[0]).toEqual({ path: { id: "sess-child-1" } })
 
-    // Each raw message round-trips through toPollerMessage — same logic as the
-    // shared mapper, so we compare against its output rather than reproducing
-    // the projection inline.
-    expect(messages).toEqual([
-      toPollerMessage({
-        info: makeAssistant({ finish: undefined }),
-        parts: [{ type: "text", text: "thinking…" }],
-      }),
+    // PERF-001: the adapter must project to `[last]` only — `pollUntilIdle`
+    // inspects `messages[last]` exclusively, and holding the full transcript
+    // (~300 polls per 5-minute task) is unbounded by `maxBytes`. Returning a
+    // singleton bounds per-poll memory to O(1) entries.
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toEqual(
       toPollerMessage({
         info: makeAssistant({ finish: "end_turn" }),
         parts: [
@@ -225,10 +223,38 @@ describe("createSDKSpecialist.fetchMessages", () => {
           { type: "text", text: "answer" },
         ],
       }),
-    ])
+    )
+    expect(messages[0]?.content).toBe("final answer")
+    expect(messages[0]?.finish_reason).toBe("end_turn")
+  })
 
-    expect(messages[1]?.content).toBe("final answer")
-    expect(messages[1]?.finish_reason).toBe("end_turn")
+  it("projects a single-message transcript to that single entry", async () => {
+    // Single-message responses must still round-trip via `toPollerMessage`
+    // — the projection is `[last]`, which for length-1 lists is the only
+    // entry. Pins the boundary case alongside the multi-message case above.
+    const fake = makeFakeClient({
+      messagesResponses: {
+        "sess-single": {
+          data: [
+            {
+              info: makeAssistant({ finish: "end_turn" }),
+              parts: [{ type: "text", text: "sole answer" }],
+            },
+          ],
+        },
+      },
+    })
+    const specialist = createSDKSpecialist(fake.client, "parent-session-42")
+
+    const messages = await specialist.fetchMessages("sess-single")
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toEqual(
+      toPollerMessage({
+        info: makeAssistant({ finish: "end_turn" }),
+        parts: [{ type: "text", text: "sole answer" }],
+      }),
+    )
   })
 
   it("returns an empty list when SDK returns no data", async () => {

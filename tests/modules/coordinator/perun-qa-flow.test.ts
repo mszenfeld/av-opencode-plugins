@@ -288,12 +288,19 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     // Result shape: ordered, with status/result/duration_ms. Three tasks ⇒
     // three results in input order.
+    //
+    // MAINT-001: `result.name` is normalised from the internal variant
+    // (`qa-tester-fe` / `qa-tester-be`) to the logical agent name
+    // (`qa-tester`) inside `dispatchParallel`. The TS-level surface still
+    // *receives* the variant names — see `sessionPrompt[…].body.agent`
+    // assertions below — but the OUTPUT contract collapses them so the
+    // variant suffix cannot leak into a user-facing report.
     expect(results).toHaveLength(3)
-    expect(results[0]?.name).toBe("qa-tester-fe")
+    expect(results[0]?.name).toBe("qa-tester")
     expect(results[0]?.status).toBe("success")
-    expect(results[1]?.name).toBe("qa-tester-fe")
+    expect(results[1]?.name).toBe("qa-tester")
     expect(results[1]?.status).toBe("success")
-    expect(results[2]?.name).toBe("qa-tester-be")
+    expect(results[2]?.name).toBe("qa-tester")
     expect(results[2]?.status).toBe("success")
 
     // SDK wiring assertions: registry was loaded once, three sessions were

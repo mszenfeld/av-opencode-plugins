@@ -72,7 +72,7 @@ interface HandlerContext {
 type Handler = (ctx: HandlerContext) => Promise<void>
 
 const handleSessionCreated: Handler = async ({ sessionId, tracker }) => {
-  // TODO(pantheon-v2): wire parentSessionID detection through markAsSubagent
+  // TODO(pantheon-v2): wire parentSessionID detection to distinguish main vs. subagent sessions
   if (sessionId !== undefined) tracker.registerSession(sessionId)
 }
 

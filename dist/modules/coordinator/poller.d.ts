@@ -17,11 +17,11 @@ interface PollUntilIdleOptions {
     /**
      * Optional byte-level cap on the polled assistant content (UTF-8 bytes).
      * When set, `pollUntilIdle` truncates the LAST message's content using a
-     * UTF-8-safe slice before returning it as the result. Scope is limited to
-     * `messages[last].content` — the full transcript array returned by
-     * `fetchMessages` is still allocated in full by the SDK on each poll, so
-     * this is not a true mid-stream / full-transcript memory bound. See
-     * COMPOSITE-3 / SEC-010.
+     * UTF-8-safe slice before returning it as the result. Together with the
+     * adapter's projection in `createSDKSpecialist.fetchMessages` (which
+     * returns at most a single message — the latest one — see PERF-001), this
+     * provides a true per-poll memory bound: each poll allocates O(maxBytes)
+     * rather than O(transcript-length). See COMPOSITE-3 / SEC-010 / PERF-001.
      */
     maxBytes?: number;
 }

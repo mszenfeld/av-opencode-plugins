@@ -48,7 +48,14 @@ export function createSDKSpecialist(
     async fetchMessages(sessionId: string): Promise<PollerMessage[]> {
       const result = await client.session.messages({ path: { id: sessionId } })
       const list = result.data ?? []
-      return list.map(toPollerMessage)
+      // PERF-001: project to `[last]` here so the poller never holds the full
+      // transcript in memory. `pollUntilIdle` only inspects `messages[last]`,
+      // so returning a singleton (or empty) list is sufficient for the
+      // poller's contract while bounding allocations to O(1) per poll instead
+      // of O(transcript-length). Combined with `maxBytes` (which caps the
+      // last message's content), this makes `pollUntilIdle.maxBytes` a true
+      // per-poll memory bound.
+      return list.length === 0 ? [] : [toPollerMessage(list[list.length - 1]!)]
     },
     async abortTask(sessionId: string): Promise<void> {
       // POST /session/{id}/abort — server-side cleanup of an in-flight child

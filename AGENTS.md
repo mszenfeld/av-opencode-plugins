@@ -50,7 +50,7 @@ Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **roo
 - **Package builds:** `tsup src/index.ts --format esm --dts`.
 - **Post-build asset copying:** Each package runs a Node script to copy markdown templates/skills into `dist/` (e.g., `dist/commands/commit.md`, `dist/skills/*.md`).
 - **Root entrypoint:** `src/index.ts` is the typed source. The root build (`npm run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
-- **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets — this is where every absorbed module under `src/modules/` lands) plus the six remaining `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
+- **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets — this is where every absorbed module under `src/modules/` lands) plus the remaining `packages/*/dist/` directories for each workspace plugin — see root `package.json` `files` for the canonical list.
 
 ### Tracked dist paths in CI
 

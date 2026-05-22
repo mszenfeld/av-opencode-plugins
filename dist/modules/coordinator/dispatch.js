@@ -3,7 +3,7 @@ import {
   PollerAbortError,
   PollerTimeoutError
 } from "./poller.js";
-import { neutralizeUntrustedOutput } from "./sanitize.js";
+import { neutralizeUntrustedOutput, normalizeVariantSuffix } from "./sanitize.js";
 import { truncateBytes } from "./truncate-bytes.js";
 const DEFAULT_POLL_INTERVAL_MS = 1e3;
 const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
@@ -35,24 +35,14 @@ async function dispatchParallel(input) {
     }
   }
   const results = new Array(tasks.length);
-  let next = 0;
+  const nextRef = { value: 0 };
   async function worker() {
     while (true) {
       if (signal?.aborted === true) {
-        while (next < tasks.length) {
-          const i2 = next++;
-          const task2 = tasks[i2];
-          results[i2] = {
-            name: task2.name,
-            status: "aborted",
-            result: "",
-            duration_ms: 0,
-            error: "aborted before start"
-          };
-        }
+        fillUnstartedAsAborted(results, tasks, nextRef);
         return;
       }
-      const i = next++;
+      const i = nextRef.value++;
       if (i >= tasks.length) return;
       const task = tasks[i];
       results[i] = await runTask(task, specialist, {
@@ -65,7 +55,26 @@ async function dispatchParallel(input) {
   }
   const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  for (const r of results) {
+    r.name = normalizeVariantSuffix(r.name);
+    if (r.error !== void 0) {
+      r.error = normalizeVariantSuffix(r.error);
+    }
+  }
   return results;
+}
+function fillUnstartedAsAborted(results, tasks, nextRef) {
+  while (nextRef.value < tasks.length) {
+    const i = nextRef.value++;
+    const task = tasks[i];
+    results[i] = {
+      name: task.name,
+      status: "aborted",
+      result: "",
+      duration_ms: 0,
+      error: "aborted before start"
+    };
+  }
 }
 function classifyError(err) {
   if (err instanceof PollerAbortError) {

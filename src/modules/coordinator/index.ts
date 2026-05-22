@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { dispatchParallel } from "./dispatch.js"
 import { assignIssueIds } from "./assign-issue-ids.js"
-import { neutralizeUntrustedOutput, deriveReportPath } from "./sanitize.js"
+import { computeWaves } from "./compute-waves.js"
+import {
+  neutralizeUntrustedOutput,
+  deriveReportPath,
+  normalizeVariantSuffix,
+} from "./sanitize.js"
 import {
   createSDKSpecialist,
   loadAgentRegistry,
@@ -15,7 +20,7 @@ import {
 // imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
 // from `../src/index.js`).
 export { createSDKSpecialist, loadAgentRegistry, toPollerMessage }
-export { neutralizeUntrustedOutput, deriveReportPath }
+export { neutralizeUntrustedOutput, deriveReportPath, normalizeVariantSuffix }
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -164,6 +169,44 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
     },
   })
 
+  const computeWavesTool = tool({
+    description:
+      [
+        "Compute dependency-aware dispatch waves from a flat scenario list (Kahn's topological sort). Use this when a QA plan declares `**Depends-on:**` between scenarios — call BEFORE `dispatch_parallel` to decide what to run when.",
+        "",
+        "Inputs:",
+        '- `scenarios`: array of `{ id: string, dependsOn: string[], sourceOrder: number }`. `id` is the scenario heading (e.g. "BE-02"), `dependsOn` is the parsed `**Depends-on:**` list (empty array if absent), `sourceOrder` is the scenario\'s position in the plan (used as the tie-breaker within a wave).',
+        "",
+        "Output (JSON-stringified):",
+        "- `{ waves: string[][] }` on success. `waves[0]` is the first dispatch wave; within each wave the IDs are emitted in source order.",
+        '- `{ waves: [], error: { kind, details } }` on validation failure. `kind` is one of `"self-ref"`, `"dangling"`, `"cycle"`. The caller (Perun) MUST NOT call `dispatch_parallel` when `error` is present — surface `details` verbatim to the user and abort the run.',
+        "- Empty input returns `{ waves: [] }` with no error.",
+        "",
+        "Guarantees:",
+        '- Deterministic: same input → same output. Within a wave, source order is the tie-breaker.',
+        '- Pure: no I/O, no globals, no clock dependence.',
+      ].join("\n"),
+    args: {
+      scenarios: tool.schema
+        .array(
+          tool.schema.object({
+            id: tool.schema.string().describe("Scenario id, e.g. \"BE-02\""),
+            dependsOn: tool.schema
+              .array(tool.schema.string())
+              .describe("Scenario ids this scenario depends on (empty array if none)"),
+            sourceOrder: tool.schema
+              .number()
+              .describe("Scenario position in the plan (used as tie-breaker within a wave)"),
+          }),
+        )
+        .describe("Flat scenario list with parsed dependencies"),
+    },
+    async execute(args) {
+      const result = computeWaves(args.scenarios)
+      return JSON.stringify(result, null, 2)
+    },
+  })
+
   return {
     config: async (config) => {
       config.agent = config.agent ?? {}
@@ -179,12 +222,13 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         },
       }
     },
-    // IMPORTANT: Tool names "dispatch_parallel" and "assign_issue_ids" must exactly match
-    // the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename either tool,
-    // update both places. There is no programmatic linking — keep them in sync manually.
+    // IMPORTANT: Tool names "dispatch_parallel", "assign_issue_ids", and "compute_waves" must
+    // exactly match the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename any
+    // tool, update both places. There is no programmatic linking — keep them in sync manually.
     tool: {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,
+      compute_waves: computeWavesTool,
     },
   }
 }

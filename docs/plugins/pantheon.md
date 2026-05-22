@@ -22,8 +22,7 @@ concurrently through `dispatch_parallel`'s 4-worker pool: only the main
 banners. Subagent detection in v1 uses a **first-session-wins heuristic**:
 the first session registered after the hook starts is treated as the
 user-facing "main", and every subsequent `session.created` is classified
-as a subagent. Proper `parentSessionID` plumbing (via `markAsSubagent`) is
-deferred to v2.
+as a subagent. Proper `parentSessionID` plumbing is deferred to v2.
 
 ## How the confirmation delay works
 
@@ -95,7 +94,8 @@ Invalid numeric values fall back to the default and emit a one-time warning.
 - Per-event sound files
 - A config file (`opencode.json` or otherwise)
 - `parentSessionID`-based subagent detection (v2; today the hook uses a
-  first-session-wins heuristic and `SessionTracker.markAsSubagent` is
-  reserved for that future wiring)
+  first-session-wins heuristic, and v2 will introduce the API needed to
+  flip a previously-registered session's role once `parentSessionID`
+  detection lands)
 
 See `docs/superpowers/specs/2026-05-19-session-notification-hook-design.md` for the design and `docs/superpowers/plans/2026-05-19-session-notification-hook.md` for the implementation plan.

@@ -28,6 +28,7 @@
  *     of being interpreted as instructions or tags.
  */
 declare function neutralizeUntrustedOutput(s: string): string;
+declare function normalizeVariantSuffix(s: string): string;
 /**
  * Derives the canonical report file path from a plan path.
  *
@@ -45,4 +46,4 @@ declare function neutralizeUntrustedOutput(s: string): string;
  */
 declare function deriveReportPath(planPath: string, today: string): string;
 
-export { deriveReportPath, neutralizeUntrustedOutput };
+export { deriveReportPath, neutralizeUntrustedOutput, normalizeVariantSuffix };

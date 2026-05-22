@@ -75,6 +75,22 @@ function mergeToolExecuteAfter(plugins: PluginHooks[]) {
   }
 }
 
+// Compile-time guard: the generic merger in `mergeHook` discards each hook's
+// return value, so it is only safe for hooks whose return type is `Promise<void>`.
+// If a future OpenCode SDK upgrade introduces a value-returning hook (e.g. a
+// permission decision), `_AssertHooksReturnVoid` will fail to typecheck at this
+// site instead of silently dropping return values at runtime. Do not delete —
+// removing this guard removes the only compile-time guarantee against that bug.
+type FunctionHookKey = {
+  [K in HookKey]: NonNullable<PluginHooks[K]> extends (...args: never[]) => unknown ? K : never
+}[HookKey]
+type AssertVoidReturn<K extends FunctionHookKey> =
+  ReturnType<NonNullable<PluginHooks[K]> & ((...args: never[]) => unknown)> extends Promise<void>
+    ? true
+    : never
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- compile-time-only guard; see comment above
+type _AssertHooksReturnVoid = { [K in FunctionHookKey]: AssertVoidReturn<K> }
+
 function mergeHook<K extends HookKey>(plugins: PluginHooks[], key: K) {
   if (key === "tool.execute.before") {
     return mergeToolExecuteBefore(plugins) as PluginHooks[K]

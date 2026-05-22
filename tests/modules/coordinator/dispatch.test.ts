@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   dispatchParallel,
   DEFAULT_RESULT_MAX_BYTES,
+  DISPATCH_CONCURRENCY,
   DISPATCH_MAX_TASKS,
   type DispatchSpecialist,
   type DispatchTask,
@@ -475,7 +476,13 @@ describe("dispatchParallel", () => {
     const agentRegistry: Record<string, AgentInfo> = { worker: { mode: "subagent" } }
 
     await dispatchParallel({ tasks, agentRegistry, specialist: recorder.specialist })
-    expect(inFlight.peak).toBeLessThanOrEqual(4)
+    // Upper bound: pool must never exceed DISPATCH_CONCURRENCY.
+    expect(inFlight.peak).toBeLessThanOrEqual(DISPATCH_CONCURRENCY)
+    // Lower bound (MAINT-006): pool must actually parallelise. Without this,
+    // a regression that serialises the pool (e.g. workerCount = 1) would still
+    // satisfy the upper bound. With 8 tasks each holding for 50ms and 4
+    // workers, all 4 slots are guaranteed to be in-flight before any resolves.
+    expect(inFlight.peak).toBe(DISPATCH_CONCURRENCY)
   })
 
   it("rejects tasks.length > DISPATCH_MAX_TASKS before any session spawns", async () => {
@@ -570,7 +577,12 @@ describe("dispatchParallel", () => {
     expect(aborted.every((r) => r.error?.includes("aborted") ?? false)).toBe(true)
   })
 
-  it("fires all startTask calls before any fetchMessages call (parallel launch)", async () => {
+  // The "all starts before any fetch" invariant only holds when `tasks.length <=
+  // DISPATCH_CONCURRENCY` — at higher fan-out, a later task's `startTask`
+  // naturally interleaves with earlier tasks' `fetchMessages`. The 2-task input
+  // below sits within that bound, so this test pins the per-worker ordering
+  // shape, not a global guarantee. Don't rename without bumping `tasks.length`.
+  it("each worker calls startTask before fetchMessages (per-worker ordering)", async () => {
     const opLog: string[] = []
 
     const { specialist, calls } = makeSpecialistRecorder({
@@ -606,5 +618,153 @@ describe("dispatchParallel", () => {
     const firstFetchIndex = opLog.findIndex((op) => op.startsWith("fetch:"))
     expect(lastStartIndex).toBeLessThan(firstFetchIndex)
     expect(calls.startTask).toHaveLength(2)
+  })
+
+  describe("MAINT-001: variant-suffix normalisation on DispatchResult", () => {
+    // Registry uses the real internal variant names: agent-registry validation
+    // still receives the unmodified `task.name` (`qa-tester-fe` / `qa-tester-be`),
+    // so the input side of the contract is unchanged. Only the OUTPUT
+    // `result.name` (and `.error`) get normalised to the logical `qa-tester`.
+    const variantRegistry: Record<string, AgentInfo> = {
+      "qa-tester-fe": { mode: "subagent" },
+      "qa-tester-be": { mode: "subagent" },
+    }
+
+    it("rewrites result.name from qa-tester-fe to qa-tester on success", async () => {
+      const { specialist, calls } = makeSpecialistRecorder({
+        sessionMap: { s1: { messages: [finishedMessage("fe ok")] } },
+        sessionIdSequence: ["s1"],
+      })
+
+      const tasks: DispatchTask[] = [{ name: "qa-tester-fe", prompt: "fe scenario" }]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: variantRegistry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe("success")
+      expect(results[0]?.name).toBe("qa-tester")
+      // Input-side contract intact: the registry was consulted with the
+      // original variant name (no "Unknown agent" error fired).
+      expect(calls.startTask[0]?.agentName).toBe("qa-tester-fe")
+    })
+
+    it("rewrites result.name from qa-tester-be to qa-tester on success", async () => {
+      const { specialist } = makeSpecialistRecorder({
+        sessionMap: { s1: { messages: [finishedMessage("be ok")] } },
+        sessionIdSequence: ["s1"],
+      })
+
+      const tasks: DispatchTask[] = [{ name: "qa-tester-be", prompt: "be scenario" }]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: variantRegistry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results[0]?.name).toBe("qa-tester")
+    })
+
+    it("rewrites result.name on error results too", async () => {
+      const { specialist } = makeSpecialistRecorder({
+        startTaskHandler: async () => {
+          throw new Error("session creation failed")
+        },
+      })
+
+      const tasks: DispatchTask[] = [{ name: "qa-tester-fe", prompt: "will fail" }]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: variantRegistry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results[0]?.status).toBe("error")
+      expect(results[0]?.name).toBe("qa-tester")
+    })
+
+    it("scrubs variant suffix from result.error strings", async () => {
+      // Specialist throws an error message that mentions the variant suffix —
+      // simulates a server-side error that surfaces the internal agent name.
+      const { specialist } = makeSpecialistRecorder({
+        startTaskHandler: async () => {
+          throw new Error("failed to spawn qa-tester-be session for scenario BE-01")
+        },
+      })
+
+      const tasks: DispatchTask[] = [{ name: "qa-tester-be", prompt: "be scenario" }]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: variantRegistry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results[0]?.status).toBe("error")
+      expect(results[0]?.error).toBeDefined()
+      expect(results[0]?.error).not.toContain("qa-tester-be")
+      expect(results[0]?.error).toContain("qa-tester")
+    })
+
+    it("normalises a mixed batch of fe + be tasks while preserving order", async () => {
+      const { specialist } = makeSpecialistRecorder({
+        startTaskHandler: async (agentName: string): Promise<string> => agentName,
+        fetchMessagesHandler: async (sessionId: string): Promise<PollerMessage[]> => {
+          return [finishedMessage(`${sessionId} done`)]
+        },
+      })
+
+      const tasks: DispatchTask[] = [
+        { name: "qa-tester-fe", prompt: "fe-1" },
+        { name: "qa-tester-be", prompt: "be-1" },
+        { name: "qa-tester-fe", prompt: "fe-2" },
+      ]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: variantRegistry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results).toHaveLength(3)
+      expect(results.map((r) => r.name)).toEqual([
+        "qa-tester",
+        "qa-tester",
+        "qa-tester",
+      ])
+      expect(results.every((r) => r.status === "success")).toBe(true)
+    })
+
+    it("leaves non-qa-tester agent names untouched", async () => {
+      // Regression guard: the normaliser must not touch unrelated names.
+      const registry: Record<string, AgentInfo> = {
+        "fix-auto": { mode: "subagent" },
+      }
+      const { specialist } = makeSpecialistRecorder({
+        sessionMap: { s1: { messages: [finishedMessage("ok")] } },
+        sessionIdSequence: ["s1"],
+      })
+
+      const tasks: DispatchTask[] = [{ name: "fix-auto", prompt: "fix something" }]
+
+      const results = await dispatchParallel({
+        tasks,
+        agentRegistry: registry,
+        specialist,
+        pollIntervalMs: 10,
+      })
+
+      expect(results[0]?.name).toBe("fix-auto")
+    })
   })
 })
