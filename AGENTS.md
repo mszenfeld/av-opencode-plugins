@@ -161,10 +161,9 @@ For user-facing harness concerns (e.g. configuration, agent reference, workflow 
 4. Add the new `packages/<name>/dist/` path to root `package.json` `files`.
 5. Update root `npm run build` / `npm run test` / `npm run typecheck` scripts to include the new workspace.
 6. Add a smoke/packaging test in `tests/` or `packages/<name>/tests/`.
-7. **Update `README.md`** following the [Documentation Checklist](#documentation-checklist).
-8. **Create `docs/plugins/<name>.md`** following the per-plugin guide template.
-9. **Update this `AGENTS.md`** — increment plugin counts, add new rows to layout table, update published files count.
-10. **Add a `.gitignore` exception** for the new package's `dist/` directory:
+7. **Update `README.md` and contributor docs** following the [Documentation Checklist](#documentation-checklist). New user-facing harness surfaces get a topic doc under `docs/` (e.g. `docs/configuring-agents.md`); do **not** add new files under `docs/plugins/` (that tree is legacy).
+8. **Update this `AGENTS.md`** — add a row to the monorepo-layout table; update published files count.
+9. **Add a `.gitignore` exception** for the new package's `dist/` directory:
     ```gitignore
     !packages/<name>/dist/
     !packages/<name>/dist/**
