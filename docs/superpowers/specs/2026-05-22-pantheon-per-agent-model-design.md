@@ -274,8 +274,8 @@ Sourced from a project-wide `grep -rn "qa-tester"`. Anything that survives the r
 
 | File | Change |
 |---|---|
-| `AGENTS.md` | Update `src/modules/qa/` row; add `src/modules/pantheon-config/` row. |
-| `README.md` | Tables and prose. |
+| `AGENTS.md` | Update `src/modules/qa/` row; add `src/modules/pantheon-config/` row. Relax the "Documentation Checklist" (plugin count badge, "Available Commands & Agents table" updates) since the README is moving away from those constructs — see §8.2. |
+| `README.md` | **Full rewrite** to a harness-first, MVP document — Perun + Zmora + `pantheon.json` only. See §8.3 for the new outline and explicit non-content. |
 | `docs/configuring-agents.md` | **NEW** — see §8. |
 
 **Documentation (legacy `docs/plugins/`):**
@@ -319,11 +319,45 @@ Estimated size: ~150 lines including code blocks.
 - Add a row for `src/modules/pantheon-config/` in the monorepo-layout table.
 - Update the `src/modules/qa/` row to reflect the rename.
 - Add a brief "Pantheon harness configuration" subsection linking to `docs/configuring-agents.md`.
+- **Relax the "Documentation Checklist"** (`README.md (root)` subsection). Today it instructs contributors adding a new plugin to bump a plugin-count badge, add rows to an "Available Commands & Agents table", and link a per-plugin guide under `docs/plugins/`. After the README rewrite (§8.3) those constructs no longer exist in the README, so the checklist must change. Replacement text should:
+  - Drop the badge bump and "Available Commands & Agents table" steps.
+  - Drop the "create `docs/plugins/<name>.md`" step (the `docs/plugins/` tree is legacy and slated for removal).
+  - Keep the "register the plugin factory in `src/index.ts`" and packaging steps — those are still load-bearing.
+  - Add: "if the new piece is user-facing in Pantheon (an agent or a configuration surface), update the README's harness sections and `docs/configuring-agents.md` accordingly."
 
-### 8.3 `README.md` (UPDATE)
-- Update "Available Commands & Agents" table for the rename.
-- Add `docs/configuring-agents.md` to the documentation list.
-- Update installation example to `#v0.3.0`.
+### 8.3 `README.md` (REWRITE FROM SCRATCH)
+
+The current README (327 lines) is a plugin-marketing artifact that lists every workspace plugin (`/python`, `/frontend`, `/swift`, `/review`, `/commit`, `/create-qa-plan`, `/run-qa`, skill-registry, etc.) as a co-equal feature. As we pivot to a harness, this framing is wrong — the README must become a **harness-first document** that describes Pantheon, its current agents, and how to configure them. Everything else (legacy workspace plugins still bundled in `defaultPluginFactories`) is incidental and will be progressively removed.
+
+**Approach:** delete the existing README content. Write a new minimal version covering only what we want users to see today. Subsequent PRs will grow it as the harness matures.
+
+**MVP outline (this PR):**
+
+1. **Title & one-line pitch.** "Pantheon — agent harness for AppVerk OpenCode workflows." (or equivalent — narrative to be finalized during implementation; the constraint is harness-first framing, not the exact wording.)
+2. **Status banner** — explicit "early / WIP, migrating from a plugin bundle to a dedicated harness; surface area will change."
+3. **What you get today** — short list with **only** the harness-resident pieces:
+   - `@perun` (Pantheon coordinator) — primary agent that delegates work and synthesizes results.
+   - `@zmora` (QA tester, via `zmora-fe` / `zmora-be` variants) — runs FE and BE scenarios from a QA test plan.
+   - `pantheon.json` configuration for per-agent models.
+4. **Installation** — minimal OpenCode `plugin` config snippet, updated to `#v0.3.0`. Note that restart is required after install / config changes.
+5. **Quick start** — single-paragraph "how do I actually run a QA flow" (point at `/create-qa-plan` and `/run-qa` since they remain the user-facing commands).
+6. **Configuration** — one-paragraph teaser plus link to [`docs/configuring-agents.md`](docs/configuring-agents.md). The README does **not** duplicate the schema; the canonical reference is `docs/configuring-agents.md`.
+7. **Documentation index** — short list of pointers: `AGENTS.md`, `docs/configuring-agents.md`, `docs/superpowers/specs/`. No links into `docs/plugins/*` (that tree is legacy; we do not promote it from the new README).
+8. **Repository layout** — a brief, harness-focused version that mentions `src/agents/`, `src/modules/coordinator/`, `src/modules/qa/`, `src/modules/pantheon-config/`, `src/hooks/session-notification/`. Workspace plugins under `packages/*` get a single line acknowledging they exist as legacy bundle inhabitants pending removal.
+
+**Explicit non-content (do not include):**
+- The current "Available Commands & Agents" mega-table.
+- The "Plugins" badge counter.
+- Marketing bullets for `/python`, `/frontend`, `/swift`, `/review`, `/commit`, skill-registry.
+- Per-plugin usage examples that today live in the README.
+- Links into `docs/plugins/*.md`.
+
+**What survives the rewrite:**
+- Installation snippet (updated to `#v0.3.0`).
+- Basic OpenCode config example.
+- The bump-version + git-tag instructions stay in `AGENTS.md`, **not** in README.
+
+The `AGENTS.md` per-plugin documentation checklist (which today instructs contributors to update the README "Plugin count badge", "Available Commands & Agents table", etc.) must also be relaxed in this PR — that checklist is from the plugin-bundle era. See §8.2.
 
 ### 8.4 Legacy
 - `docs/plugins/*` is treated as legacy and will be removed once harness migration completes. We update `docs/plugins/qa.md` and `docs/plugins/pantheon.md` for consistency in this PR but do not add new plugins-tree documentation.
