@@ -83,7 +83,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
         specialist,
         // Thread the harness abort signal end-to-end: poller checks it at each
         // iteration and during the inter-poll sleep, and child sessions are
-        // cancelled server-side when it fires (COMPOSITE-3 / ARCH-001).
+        // cancelled server-side when it fires.
         signal: context.abort
       });
       return JSON.stringify(results, null, 2);

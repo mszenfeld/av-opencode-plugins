@@ -18,9 +18,9 @@ interface DispatchSpecialist {
     /**
      * Cancel a previously-started session. Called when `ToolContext.abort`
      * fires so the child session is cleaned up server-side (no orphaned
-     * compute, no charges) — see COMPOSITE-3 / ARCH-001. Implementations
-     * should treat this as best-effort: errors must not surface to the
-     * caller (the abort path already returns an "aborted" result).
+     * compute, no charges). Implementations should treat this as best-effort:
+     * errors must not surface to the caller (the abort path already returns
+     * an "aborted" result).
      */
     abortTask(sessionId: string): Promise<void>;
 }

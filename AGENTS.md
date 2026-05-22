@@ -220,6 +220,24 @@ If a user reports missing commands after an update, instruct them to either:
   rm -rf ~/.cache/opencode/packages/av-opencode-plugins*
   ```
 
+## Code Review Artefacts
+
+**Never write code-review issue IDs into source or test files.** IDs like `SEC-001`, `MAINT-006`, `PERF-001`, `ARCH-002`, `COMPOSITE-3` are generated per-review by the `/review` workflow and live in `docs/reviews/*.md`. They are context-bound to a single report and become noise the moment that report is archived, regenerated, or deleted.
+
+When applying a fix from a review:
+
+- **Keep the technical rationale** ("treat specialist output as untrusted, then truncate by UTF-8 byte length…"). The *why* belongs in the code.
+- **Drop the issue ID** ("SEC-001 / MAINT-006"). The *which-report* belongs in git history, not in the comment.
+- **Keep standardised external identifiers** like `CWE-117`, `CVE-2023-…`, `OWASP A03:2025` — those are stable, cross-project references, not per-review labels.
+
+Exceptions (these IDs are *system documentation*, not review residue, and may stay):
+
+- `docs/plugins/code-review.md`, `README.md` — describe the ID format the plugin emits.
+- `tests/modules/coordinator/assign-issue-ids.test.ts` — fixtures for the function that *generates* these IDs.
+- `src/skills/qa/report-format/SKILL.md` — illustrative examples for `/fix` routing.
+
+When in doubt: if removing the ID would make the comment less useful, the ID was load-bearing and the comment is wrong; rewrite the prose to stand on its own.
+
 ## Common Pitfalls
 
 - Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead. This bash gate (`classifyBashCommand` in `src/modules/commit/bash-policy.ts`) is **defense-in-depth / a workflow rail, not a security boundary** — it keeps the `/commit` workflow consistent but is bypassable by shapes the literal `git` token-match misses (`/usr/bin/git …`, `bash -c "git …"`, `hub commit`, `command git …`, alias indirection, `$(echo git) commit`, plumbing subcommands like `commit-tree` / `fast-import` / `update-ref`). Per project doctrine ([`docs/plugins/coordinator.md`](docs/plugins/coordinator.md): *"Treat code-enforced rules as the security boundary. The LLM-requested rules are defense in depth — they raise the cost of a successful prompt-injection escalation but are not the last line of defense."*), real shell-execution boundaries live outside this plugin. See [`docs/plugins/commit.md`](docs/plugins/commit.md#classifybashcommand-is-defense-in-depth-not-a-security-boundary) for the full bypass list.

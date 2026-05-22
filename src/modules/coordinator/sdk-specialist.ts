@@ -48,7 +48,7 @@ export function createSDKSpecialist(
     async fetchMessages(sessionId: string): Promise<PollerMessage[]> {
       const result = await client.session.messages({ path: { id: sessionId } })
       const list = result.data ?? []
-      // PERF-001: project to `[last]` here so the poller never holds the full
+      // Project to `[last]` here so the poller never holds the full
       // transcript in memory. `pollUntilIdle` only inspects `messages[last]`,
       // so returning a singleton (or empty) list is sufficient for the
       // poller's contract while bounding allocations to O(1) per poll instead
@@ -61,7 +61,7 @@ export function createSDKSpecialist(
       // POST /session/{id}/abort — server-side cleanup of an in-flight child
       // session when the parent's abort signal fires. Errors are surfaced to
       // the caller but `dispatch.ts` already swallows them on the abort path,
-      // so this remains best-effort end to end (COMPOSITE-3 / ARCH-001).
+      // so this remains best-effort end to end.
       await client.session.abort({ path: { id: sessionId } })
     },
   }

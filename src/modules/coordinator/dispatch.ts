@@ -27,9 +27,9 @@ export interface DispatchSpecialist {
   /**
    * Cancel a previously-started session. Called when `ToolContext.abort`
    * fires so the child session is cleaned up server-side (no orphaned
-   * compute, no charges) — see COMPOSITE-3 / ARCH-001. Implementations
-   * should treat this as best-effort: errors must not surface to the
-   * caller (the abort path already returns an "aborted" result).
+   * compute, no charges). Implementations should treat this as best-effort:
+   * errors must not surface to the caller (the abort path already returns
+   * an "aborted" result).
    */
   abortTask(sessionId: string): Promise<void>
 }
@@ -91,7 +91,7 @@ export async function dispatchParallel(
     // Default-deny: only strict "subagent" mode is dispatchable. Both "primary"
     // and "all" modes are rejected to prevent anti-recursion bypass — an "all"
     // agent can be invoked as a primary, so dispatching it from a primary
-    // would re-open the recursion door MAINT-001/ARCH-002 closed.
+    // would re-open the anti-recursion guarantee.
     if (agentInfo.mode !== "subagent") {
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`)
     }
@@ -128,9 +128,9 @@ export async function dispatchParallel(
   const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-  // MAINT-001: convert the prompt-only variant-suffix invariant into a code
-  // invariant. The agent registry still validates input task names as the
-  // original variants (qa-tester-fe / qa-tester-be); only the OUTPUT
+  // Convert the variant-suffix invariant from a prompt-only convention into
+  // a code-enforced one. The agent registry still validates input task names
+  // as the original variants (qa-tester-fe / qa-tester-be); only the OUTPUT
   // `name` and `error` strings are normalised, so prompt drift or partial
   // injection cannot leak `qa-tester-fe` / `qa-tester-be` into reports.
   for (const r of results) {
@@ -153,8 +153,8 @@ export async function dispatchParallel(
  * so every subsequent worker takes the `i >= tasks.length` exit. `nextRef.value++`
  * is race-free in single-threaded JS between `await` points (no awaits here).
  *
- * `name: task.name` is the raw variant name; the MAINT-001 final pass in
- * `dispatchParallel` rewrites it to the logical agent name, so we don't
+ * `name: task.name` is the raw variant name; the final normalisation pass
+ * in `dispatchParallel` rewrites it to the logical agent name, so we don't
  * normalise here.
  */
 function fillUnstartedAsAborted(
@@ -177,8 +177,8 @@ function fillUnstartedAsAborted(
 
 /**
  * Discriminates a `runTask` failure by error class. Kept as a pure helper so
- * the happy-path in `runTask` stays focused (MAINT-008). New poller error
- * types should be added here, not in the caller.
+ * the happy-path in `runTask` stays focused. New poller error types should
+ * be added here, not in the caller.
  */
 function classifyError(err: unknown): "timeout" | "error" | "aborted" {
   if (err instanceof PollerAbortError) {
@@ -194,7 +194,7 @@ function classifyError(err: unknown): "timeout" | "error" | "aborted" {
  * Best-effort server-side cancellation of a dispatched child session. Called
  * from the abort path so the specialist stops doing work and resources are
  * released. Errors are swallowed — the caller is already returning an
- * "aborted" result and we must not mask it (see COMPOSITE-3 / ARCH-001).
+ * "aborted" result and we must not mask it.
  */
 async function cleanupOnAbort(
   specialist: DispatchSpecialist,
@@ -235,14 +235,14 @@ async function runTask(
       timeoutMs: options.taskTimeoutMs,
       pollIntervalMs: options.pollIntervalMs,
       signal: options.signal,
-      // Bound in-flight memory in the poller too (SEC-010): the per-poll cap
-      // matches the final cap so we never hold an oversized string before the
-      // final truncation pass below.
+      // Bound in-flight memory in the poller too: the per-poll cap matches
+      // the final cap so we never hold an oversized string before the final
+      // truncation pass below.
       maxBytes: options.resultMaxBytes,
     })
 
-    // Treat specialist output as untrusted (SEC-001), then truncate by UTF-8
-    // byte length, not UTF-16 code units (SEC-009 / MAINT-006).
+    // Treat specialist output as untrusted, then truncate by UTF-8 byte
+    // length, not UTF-16 code units.
     const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes)
 
     return {

@@ -108,9 +108,9 @@ ${task.context}` : task.prompt;
       timeoutMs: options.taskTimeoutMs,
       pollIntervalMs: options.pollIntervalMs,
       signal: options.signal,
-      // Bound in-flight memory in the poller too (SEC-010): the per-poll cap
-      // matches the final cap so we never hold an oversized string before the
-      // final truncation pass below.
+      // Bound in-flight memory in the poller too: the per-poll cap matches
+      // the final cap so we never hold an oversized string before the final
+      // truncation pass below.
       maxBytes: options.resultMaxBytes
     });
     const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes);

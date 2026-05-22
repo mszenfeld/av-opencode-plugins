@@ -181,7 +181,7 @@ describe("createSDKSpecialist.startTask", () => {
 })
 
 describe("createSDKSpecialist.fetchMessages", () => {
-  it("calls session.messages with { path: { id } } and projects to only the LAST message (PERF-001)", async () => {
+  it("calls session.messages with { path: { id } } and projects to only the LAST message", async () => {
     const fake = makeFakeClient({
       messagesResponses: {
         "sess-child-1": {
@@ -209,8 +209,8 @@ describe("createSDKSpecialist.fetchMessages", () => {
     expect(fake.calls.sessionMessages).toHaveLength(1)
     expect(fake.calls.sessionMessages[0]).toEqual({ path: { id: "sess-child-1" } })
 
-    // PERF-001: the adapter must project to `[last]` only — `pollUntilIdle`
-    // inspects `messages[last]` exclusively, and holding the full transcript
+    // The adapter must project to `[last]` only — `pollUntilIdle` inspects
+    // `messages[last]` exclusively, and holding the full transcript
     // (~300 polls per 5-minute task) is unbounded by `maxBytes`. Returning a
     // singleton bounds per-poll memory to O(1) entries.
     expect(messages).toHaveLength(1)

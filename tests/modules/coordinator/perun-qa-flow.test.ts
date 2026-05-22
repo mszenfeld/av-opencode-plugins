@@ -289,7 +289,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     // Result shape: ordered, with status/result/duration_ms. Three tasks ⇒
     // three results in input order.
     //
-    // MAINT-001: `result.name` is normalised from the internal variant
+    // `result.name` is normalised from the internal variant
     // (`qa-tester-fe` / `qa-tester-be`) to the logical agent name
     // (`qa-tester`) inside `dispatchParallel`. The TS-level surface still
     // *receives* the variant names — see `sessionPrompt[…].body.agent`

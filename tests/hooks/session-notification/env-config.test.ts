@@ -109,9 +109,9 @@ describe("readConfigFromEnv", () => {
     expect(c.soundPath).toBe("/tmp/ding.aiff")
   })
 
-  // SEC-001: env-var interpolations into console.warn must strip C0/C1 control
-  // bytes and BiDi overrides — they're developer-controlled, but the rest of
-  // the plugin neutralises log/console sinks consistently.
+  // env-var interpolations into console.warn must strip C0/C1 control bytes
+  // and BiDi overrides — they're developer-controlled, but the rest of the
+  // plugin neutralises log/console sinks consistently.
   it("strips control bytes from the warning when delay env var contains them", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "\x1b[31mabc\x1b[0m‮" })

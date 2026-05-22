@@ -339,7 +339,7 @@ describe("dispatchParallel", () => {
     expect(results[0]?.duration_ms).toBeGreaterThan(0)
   })
 
-  it("neutralizes specialist output before returning (SEC-001: prompt re-injection defense)", async () => {
+  it("neutralizes specialist output before returning (prompt re-injection defense)", async () => {
     // Hostile specialist output containing ANSI sequences, control chars, and
     // angle-bracketed pseudo-directives. The dispatch layer must scrub these
     // before the string flows back into @perun's prompt context.
@@ -478,7 +478,7 @@ describe("dispatchParallel", () => {
     await dispatchParallel({ tasks, agentRegistry, specialist: recorder.specialist })
     // Upper bound: pool must never exceed DISPATCH_CONCURRENCY.
     expect(inFlight.peak).toBeLessThanOrEqual(DISPATCH_CONCURRENCY)
-    // Lower bound (MAINT-006): pool must actually parallelise. Without this,
+    // Lower bound: pool must actually parallelise. Without this,
     // a regression that serialises the pool (e.g. workerCount = 1) would still
     // satisfy the upper bound. With 8 tasks each holding for 50ms and 4
     // workers, all 4 slots are guaranteed to be in-flight before any resolves.
@@ -620,7 +620,7 @@ describe("dispatchParallel", () => {
     expect(calls.startTask).toHaveLength(2)
   })
 
-  describe("MAINT-001: variant-suffix normalisation on DispatchResult", () => {
+  describe("variant-suffix normalisation on DispatchResult", () => {
     // Registry uses the real internal variant names: agent-registry validation
     // still receives the unmodified `task.name` (`qa-tester-fe` / `qa-tester-be`),
     // so the input side of the contract is unchanged. Only the OUTPUT

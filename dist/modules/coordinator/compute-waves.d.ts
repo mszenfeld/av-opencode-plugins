@@ -9,8 +9,7 @@
  * dispatch order deterministic and matches what Perun emits in `tasks[]`.
  *
  * Extracted from Perun's prompt (steps 5d–5e) so the cycle/wave logic is
- * pure TypeScript that can be unit-tested. See MAINT-002 in
- * `docs/reviews/2026-05-19-feature-harness-2.md`.
+ * pure TypeScript that can be unit-tested.
  */
 interface Scenario {
     id: string;

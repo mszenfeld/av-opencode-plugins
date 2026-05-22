@@ -3,7 +3,7 @@ import type { SessionNotificationConfig } from "./session-notification.js"
 // Neutralises terminal control bytes and BiDi overrides before interpolating a
 // developer-controlled env var into a warning. Self-inflicted-only threat
 // surface (env vars aren't remote input), but keeps log output consistent with
-// the rest of the plugin's sink-specific neutralisation (SEC-001 / CWE-117).
+// the rest of the plugin's sink-specific neutralisation (CWE-117).
 function safeForLog(s: string): string {
   return s
     .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "?")
