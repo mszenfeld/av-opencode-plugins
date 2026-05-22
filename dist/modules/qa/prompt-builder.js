@@ -24,10 +24,10 @@ function getOverlay(stack) {
 }
 function buildQATesterAgent(stack) {
   const tools = toolsForVariant(stack).join(", ");
-  const description = `QA tester \u2014 ${stack.toUpperCase()} scenarios (internal variant of qa-tester)`;
+  const description = `Zmora \u2014 ${stack.toUpperCase()} QA scenarios (internal variant of zmora)`;
   const frontmatter = [
     "---",
-    `name: qa-tester-${stack}`,
+    `name: zmora-${stack}`,
     `description: ${description}`,
     "mode: subagent",
     `allowed-tools: ${tools}`,
