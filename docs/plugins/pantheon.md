@@ -15,7 +15,7 @@ as native macOS banners:
 
 Subagents spawned via `dispatch_parallel` (`@perun` coordinator) do **not**
 trigger notifications — the user cannot interact with them directly. This
-covers every per-scenario `qa-tester` task dispatched during a `/run-qa`
+covers every per-scenario `zmora` task dispatched during a `/run-qa`
 flow as well as every `fix-auto` worker, regardless of how many run
 concurrently through `dispatch_parallel`'s 4-worker pool: only the main
 `@perun` (or other primary) session can produce idle/question/permission
