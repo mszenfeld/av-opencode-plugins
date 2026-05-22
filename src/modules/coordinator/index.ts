@@ -15,7 +15,11 @@ import {
   loadAgentRegistry,
   toPollerMessage,
 } from "./sdk-specialist.js"
-import { loadPantheonConfig } from "../pantheon-config/index.js"
+import {
+  getLoadErrors,
+  loadPantheonConfig,
+  pantheonConfigEmpty,
+} from "../pantheon-config/index.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
 // imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
@@ -46,6 +50,7 @@ function getPerunPrompt(): string {
 
 export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
   const { client } = input
+  let toastShown = false
 
   const dispatchParallelTool = tool({
     description:
@@ -237,6 +242,34 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,
       compute_waves: computeWavesTool,
+    },
+    event: async ({ event }) => {
+      if (event.type !== "session.created") return
+      if (toastShown) return
+      toastShown = true
+
+      const errors = getLoadErrors()
+      try {
+        if (errors.length > 0) {
+          await client.tui.showToast({
+            body: {
+              variant: "warning",
+              title: "Pantheon",
+              message: "pantheon.json parse error — check console for details",
+            },
+          })
+        } else if (pantheonConfigEmpty()) {
+          await client.tui.showToast({
+            body: {
+              variant: "info",
+              title: "Pantheon",
+              message: "pantheon.json not found — using default models",
+            },
+          })
+        }
+      } catch {
+        // best-effort: headless / non-TUI OpenCode invocations must not crash
+      }
     },
   }
 }
