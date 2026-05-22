@@ -45,10 +45,10 @@ export interface BuiltAgent {
 
 export function buildQATesterAgent(stack: QaTesterStack): BuiltAgent {
   const tools = toolsForVariant(stack).join(", ")
-  const description = `QA tester — ${stack.toUpperCase()} scenarios (internal variant of qa-tester)`
+  const description = `Zmora — ${stack.toUpperCase()} QA scenarios (internal variant of zmora)`
   const frontmatter = [
     "---",
-    `name: qa-tester-${stack}`,
+    `name: zmora-${stack}`,
     `description: ${description}`,
     "mode: subagent",
     `allowed-tools: ${tools}`,

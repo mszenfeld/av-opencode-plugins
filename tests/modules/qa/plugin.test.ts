@@ -15,8 +15,8 @@ describe("AppVerkQAPlugin", () => {
     expect(typeof AppVerkQAPlugin).toBe("function")
   })
 
-  const EXPECTED_VARIANTS = ["qa-tester-fe", "qa-tester-be"]
-  const REMOVED_AGENTS = ["qa-fe-tester", "qa-be-tester", "qa-tester"]
+  const EXPECTED_VARIANTS = ["zmora-fe", "zmora-be"]
+  const REMOVED_AGENTS = ["qa-tester-fe", "qa-tester-be", "qa-tester", "qa-fe-tester", "qa-be-tester"]
   const EXPECTED_COMMANDS = ["create-qa-plan", "run-qa"]
 
   it.each(EXPECTED_VARIANTS)("registers %s variant", async (name) => {
@@ -44,7 +44,7 @@ describe("AppVerkQAPlugin", () => {
 describe("buildQATesterAgent", () => {
   it("produces fe variant with FE tools and no BE tools", () => {
     const { prompt } = buildQATesterAgent("fe")
-    expect(prompt).toContain("name: qa-tester-fe")
+    expect(prompt).toContain("name: zmora-fe")
     expect(prompt).toContain("mode: subagent")
     for (const t of FE_TOOLS) expect(prompt).toContain(t)
     for (const t of BE_TOOLS) expect(prompt).not.toContain(t)
@@ -54,7 +54,7 @@ describe("buildQATesterAgent", () => {
 
   it("produces be variant with BE tools and no FE tools", () => {
     const { prompt } = buildQATesterAgent("be")
-    expect(prompt).toContain("name: qa-tester-be")
+    expect(prompt).toContain("name: zmora-be")
     for (const t of BE_TOOLS) expect(prompt).toContain(t)
     for (const t of FE_TOOLS) expect(prompt).not.toContain(t)
     expect(prompt).toContain("BE variant — HTTP + DB")

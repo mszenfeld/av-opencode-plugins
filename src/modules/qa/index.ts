@@ -32,7 +32,7 @@ const COMMANDS = [
   {
     name: "run-qa",
     description:
-      "Execute a QA test plan — Perun dispatches one qa-tester variant per scenario through dispatch_parallel.",
+      "Execute a QA test plan — Perun dispatches one zmora variant per scenario through dispatch_parallel.",
     file: "run-qa.md",
   },
 ]
@@ -43,8 +43,8 @@ export const AppVerkQAPlugin: Plugin = async () => ({
     for (const stack of VARIANTS) {
       // Per-variant lazy cache: build the markdown once per variant at first access.
       let cached: string | undefined
-      config.agent[`qa-tester-${stack}`] = {
-        description: `QA tester — ${stack.toUpperCase()} scenarios (internal variant of qa-tester)`,
+      config.agent[`zmora-${stack}`] = {
+        description: `Zmora — ${stack.toUpperCase()} QA scenarios (internal variant of zmora)`,
         get prompt() {
           cached ??= buildQATesterAgent(stack).prompt
           return cached
