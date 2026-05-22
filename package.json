@@ -17,7 +17,8 @@
     "packages/*"
   ],
   "dependencies": {
-    "@opencode-ai/plugin": "^1.14.19"
+    "@opencode-ai/plugin": "^1.14.19",
+    "jsonc-parser": "^3.3.1"
   },
   "overrides": {
     "uuid": ">=14.0.0"
