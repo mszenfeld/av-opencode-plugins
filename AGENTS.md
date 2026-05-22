@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, a QA testing workflow (`/create-qa-plan`, `/run-qa`), a Pantheon coordinator plugin (`@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools), and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `qa-tester` logical agent, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -13,9 +13,9 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `packages/frontend-developer` | Frontend-developer plugin source, tests, skills, build scripts. Output shipped at `packages/frontend-developer/dist/`. |
 | `packages/skill-utils` | Shared helpers for creating skill-based plugins. Output shipped at `packages/skill-utils/dist/`. |
 | `packages/skill-registry` | Global skill registry — scans skill folders, parses frontmatter, registers unified `load_appverk_skill` tool, injects activation rules into every agent's system prompt. Output shipped at `packages/skill-registry/dist/`. |
-| `packages/qa` | QA plugin — end-to-end testing workflow. Registers `/create-qa-plan` and `/run-qa` commands, plus `qa-fe-tester` and `qa-be-tester` subagents. Ships with test-plan-format, report-format, fe-testing, and be-testing skills. Output shipped at `packages/qa/dist/`. |
+| `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/*.md`. Registers two `qa-tester-{fe,be}` subagent variants composed via `prompt-builder.ts`; logical name `qa-tester` everywhere user-facing. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
 | `packages/swift-developer` | Swift-developer plugin source, tests, skills, build scripts. Output shipped at `packages/swift-developer/dist/`. |
-| `packages/coordinator` | Coordinator plugin source — Pantheon `@perun` primary agent, `dispatch_parallel` and `assign_issue_ids` tools. Output shipped at `packages/coordinator/dist/`. |
+| `src/modules/coordinator/` | Absorbed coordinator plugin — TS source only. Asset: `src/agents/perun.md`. Registers `dispatch_parallel` (worker pool, concurrency 4, cap 50) and `assign_issue_ids` tools alongside the `@perun` primary agent. Tests: `tests/modules/coordinator/`. Built into `dist/modules/coordinator/` and `dist/agents/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
 | `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
@@ -50,7 +50,7 @@ Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **roo
 - **Package builds:** `tsup src/index.ts --format esm --dts`.
 - **Post-build asset copying:** Each package runs a Node script to copy markdown templates/skills into `dist/` (e.g., `dist/commands/commit.md`, `dist/skills/*.md`).
 - **Root entrypoint:** `src/index.ts` is the typed source. The root build (`npm run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
-- **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets) plus the eight remaining `packages/*/dist/` directories for each workspace plugin (see root `package.json` `files`).
+- **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets — this is where every absorbed module under `src/modules/` lands) plus the remaining `packages/*/dist/` directories for each workspace plugin — see root `package.json` `files` for the canonical list.
 
 ### Tracked dist paths in CI
 
@@ -219,6 +219,24 @@ If a user reports missing commands after an update, instruct them to either:
   ```bash
   rm -rf ~/.cache/opencode/packages/av-opencode-plugins*
   ```
+
+## Code Review Artefacts
+
+**Never write code-review issue IDs into source or test files.** IDs like `SEC-001`, `MAINT-006`, `PERF-001`, `ARCH-002`, `COMPOSITE-3` are generated per-review by the `/review` workflow and live in `docs/reviews/*.md`. They are context-bound to a single report and become noise the moment that report is archived, regenerated, or deleted.
+
+When applying a fix from a review:
+
+- **Keep the technical rationale** ("treat specialist output as untrusted, then truncate by UTF-8 byte length…"). The *why* belongs in the code.
+- **Drop the issue ID** ("SEC-001 / MAINT-006"). The *which-report* belongs in git history, not in the comment.
+- **Keep standardised external identifiers** like `CWE-117`, `CVE-2023-…`, `OWASP A03:2025` — those are stable, cross-project references, not per-review labels.
+
+Exceptions (these IDs are *system documentation*, not review residue, and may stay):
+
+- `docs/plugins/code-review.md`, `README.md` — describe the ID format the plugin emits.
+- `tests/modules/coordinator/assign-issue-ids.test.ts` — fixtures for the function that *generates* these IDs.
+- `src/skills/qa/report-format/SKILL.md` — illustrative examples for `/fix` routing.
+
+When in doubt: if removing the ID would make the comment less useful, the ID was load-bearing and the comment is wrong; rewrite the prose to stand on its own.
 
 ## Common Pitfalls
 

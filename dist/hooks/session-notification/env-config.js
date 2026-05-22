@@ -1,3 +1,6 @@
+function safeForLog(s) {
+  return s.replace(/[\x00-\x1F\x7F-\x9F]/g, "?").replace(/[‪-‮⁦-⁩]/g, "");
+}
 const DEFAULT_SESSION_NOTIFICATION_CONFIG = {
   title: "AppVerk",
   idleMessage: "Agent is ready for input",
@@ -30,7 +33,7 @@ function readConfigFromEnv(env) {
         config.idleConfirmationDelayMs = parsed;
       } else {
         console.warn(
-          `[pantheon/session-notification] invalid AV_PANTHEON_NOTIFY_DELAY_MS="${raw}"; using default ${DEFAULT_SESSION_NOTIFICATION_CONFIG.idleConfirmationDelayMs}ms`
+          `[pantheon/session-notification] invalid AV_PANTHEON_NOTIFY_DELAY_MS="${safeForLog(raw)}"; using default ${DEFAULT_SESSION_NOTIFICATION_CONFIG.idleConfirmationDelayMs}ms`
         );
       }
     }
@@ -41,7 +44,7 @@ function readConfigFromEnv(env) {
       config.playSound = true;
     } else if (raw !== "" && raw !== "0") {
       console.warn(
-        `[pantheon/session-notification] unrecognized AV_PANTHEON_NOTIFY_SOUND="${raw}"; expected "1" to enable; treating as disabled`
+        `[pantheon/session-notification] unrecognized AV_PANTHEON_NOTIFY_SOUND="${safeForLog(raw)}"; expected "1" to enable; treating as disabled`
       );
     }
   }

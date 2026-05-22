@@ -4,7 +4,7 @@
 
 OpenCode plugin packages for AppVerk. The root plugin loads the AppVerk plugin bundle from this repository, which currently provides:
 
-> **Plugin count:** The badge above reflects every plugin registered in `defaultPluginFactories` (`src/index.ts`). This includes both `packages/*` workspaces and harness-resident plugins under `src/hooks/` (e.g. Pantheon). Keep it in sync whenever a new plugin is added or removed there.
+> **Plugin count:** The badge above reflects every plugin registered in `defaultPluginFactories` (`src/index.ts`). This includes `packages/*` workspaces, absorbed modules under `src/modules/` (e.g. `commit`, `qa`, `coordinator`), and harness-resident plugins under `src/hooks/` (e.g. Pantheon). Keep it in sync whenever a new plugin is added or removed there.
 
 - A **controlled commit workflow** (`/commit`) that enforces AppVerk git policies.
 - A **Python development workflow** (`/python`) with TDD, coding standards, and stack-specific patterns (FastAPI, Django, Celery, SQLAlchemy, Pydantic).
@@ -129,7 +129,7 @@ Delegate QA, review, and fix workflows to specialist subagents through the Panth
 The `@perun` agent:
 
 1. Parses the referenced plan, review report, or QA report
-2. Dispatches specialist subagents in parallel via the global `dispatch_parallel` tool (e.g., `@qa-fe-tester` + `@qa-be-tester`, or `@fix-auto` workers)
+2. Dispatches specialist subagents in parallel via the global `dispatch_parallel` tool (one `@qa-tester` task per scenario, or `@fix-auto` workers). `dispatch_parallel` runs a 4-wide worker pool internally, so a 30-scenario plan drains through 4 workers concurrently without the caller composing waves manually.
 3. Assigns deterministic issue IDs across aggregated results via the global `assign_issue_ids` tool
 4. Synthesizes a unified report and returns control to the user
 
@@ -221,20 +221,12 @@ Run a saved test plan or perform an ad-hoc QA check:
 The `/run-qa` command:
 
 1. Loads the test plan or creates a quick checklist for the given path
-2. Detects whether the scope is frontend, backend, or both
-3. Launches testing agents in parallel when both scopes exist (`@qa-fe-tester` and/or `@qa-be-tester`)
-4. Executes tests using native Playwright tools (frontend) or native HTTP and DB CLI tools (backend)
+2. Routes each scenario to `@qa-tester` based on its `FE-`/`BE-` prefix
+3. Dispatches one `@qa-tester` task per scenario through `dispatch_parallel`'s 4-wide worker pool — scenarios with `**Depends-on:**` declarations are grouped into sequential waves via topological sort
+4. Executes tests using native Playwright tools (frontend scenarios) or native HTTP and DB CLI tools (backend scenarios)
 5. Collects results into a markdown report with pass/fail status
 
-You can also invoke testing agents directly:
-
-```bash
-opencode agent qa-fe-tester "Run accessibility checks on the checkout page"
-```
-
-```bash
-opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
-```
+The `@qa-tester` agent is a single logical agent registered as two variants (`qa-tester-fe`, `qa-tester-be`) so the FE and BE tool allowlists stay separate at the OpenCode runtime layer. Perun routes each scenario to the right variant, but every user-facing surface (TUI, report, tab-completion display) shows just `qa-tester`. See [docs/plugins/qa.md](docs/plugins/qa.md) for the variant-split rationale.
 
 ## Available Commands & Agents
 
@@ -264,8 +256,7 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 | `@cross-verifier`        | Cross-domain correlation agent — finds intersections between findings.                                                            | `subagent` | [Guide](docs/plugins/code-review.md)        |
 | `@challenger`            | Adversarial review agent — challenges findings for false positives.                                                               | `subagent` | [Guide](docs/plugins/code-review.md)        |
 | `@synthesis-agent`       | **Planned** — deduplicates and groups findings into actionable PRs. Not yet implemented.                                          | `subagent` | [Guide](docs/plugins/code-review.md)        |
-| `@qa-fe-tester`          | Frontend testing subagent — runs Playwright tests, accessibility checks, and visual regression.                                   | `subagent` | [Guide](docs/plugins/qa.md)                 |
-| `@qa-be-tester`          | Backend testing subagent — tests API endpoints and validates database state via HTTP + DB CLI.                                    | `subagent` | [Guide](docs/plugins/qa.md)                 |
+| `@qa-tester`             | QA testing subagent — executes a single scenario per dispatch (FE via Playwright, BE via HTTP + DB CLI). Registered as variants `qa-tester-fe` and `qa-tester-be` in `/agents` for runtime tool-allowlist isolation; presented as the single logical name everywhere user-facing — see [qa.md](docs/plugins/qa.md). | `subagent` | [Guide](docs/plugins/qa.md)                 |
 | `@feedback-analyzer`     | Per-comment classification agent for PR feedback analysis.                                                                        | `subagent` | [Guide](docs/plugins/code-review.md)        |
 | `@fix-auto`              | Auto-fix subagent — performs fixes without user confirmation.                                                                     | `subagent` | [Guide](docs/plugins/code-review.md)        |
 
@@ -285,11 +276,11 @@ opencode agent qa-be-tester "Test GET /api/v1/orders with pagination"
 - `docs/plugins/frontend-developer.md` - package-level behavior and usage guide.
 - `packages/skill-registry` - global skill registry source, tests, and build scripts.
 - `docs/plugins/skill-registry.md` - package-level behavior and usage guide.
-- `packages/qa` - QA plugin source, tests, command templates, agent prompts, skills, and build scripts.
+- `src/modules/qa/` - absorbed QA plugin source (TypeScript only). Registers the `qa-tester-fe` / `qa-tester-be` subagent variants composed via `prompt-builder.ts`. Assets live under `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, and `src/modules/qa/prompt-sections/*.md`. Tests in `tests/modules/qa/`.
 - `docs/plugins/qa.md` - package-level behavior and usage guide.
 - `packages/swift-developer` - plugin source, tests, skill files, and build scripts for the Swift development workflow.
 - `docs/plugins/swift-developer.md` - package-level behavior and usage guide.
-- `packages/coordinator` - Pantheon coordinator source, tests, `@perun` agent prompt, and build scripts for the `dispatch_parallel` and `assign_issue_ids` global tools.
+- `src/modules/coordinator/` - absorbed Pantheon coordinator source (TypeScript only). Registers `@perun`, `dispatch_parallel` (4-worker pool, cap 50), and `assign_issue_ids`. Asset: `src/agents/perun.md`. Tests in `tests/modules/coordinator/`.
 - `docs/plugins/coordinator.md` - package-level behavior and usage guide.
 - `src/hooks/session-notification` - harness-resident Pantheon plugin (session-notification hook) wired in directly from `src/index.ts` rather than as a `packages/*` workspace.
 - `docs/plugins/pantheon.md` - plugin-level behavior and configuration guide.

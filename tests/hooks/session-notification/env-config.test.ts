@@ -108,4 +108,44 @@ describe("readConfigFromEnv", () => {
     const c = readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND_PATH: "/tmp/ding.aiff" })
     expect(c.soundPath).toBe("/tmp/ding.aiff")
   })
+
+  // env-var interpolations into console.warn must strip C0/C1 control bytes
+  // and BiDi overrides — they're developer-controlled, but the rest of the
+  // plugin neutralises log/console sinks consistently.
+  it("strips control bytes from the warning when delay env var contains them", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "\x1b[31mabc\x1b[0m‮" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\x1b")
+    expect(msg).not.toContain("‮")
+  })
+
+  it("strips control bytes from the warning when sound env var contains them", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_SOUND: "\x1b[2J\x07hostile" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\x1b")
+    expect(msg).not.toContain("\x07")
+  })
+
+  // CWE-117: an embedded \n in a developer-set env var would split the
+  // warning into two log lines and fabricate a second log entry — the
+  // canonical log-forging vector that safeForLog exists to prevent.
+  it("strips newlines from the warning to prevent log line-splitting (CWE-117)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "bad\n[FAKE_LOG] critical" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\n")
+  })
+
+  it("strips tabs from the warning when env var contains them", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "bad\tvalue" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\t")
+  })
 })
