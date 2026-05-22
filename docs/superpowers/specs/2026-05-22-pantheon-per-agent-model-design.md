@@ -1,6 +1,6 @@
 # Pantheon — Per-Agent Model Configuration (Design)
 
-**Status:** Draft
+**Status:** Draft (revision 2, post sequential-thinking verification)
 **Date:** 2026-05-22
 **Owner:** Marian Szenfeld
 **Scope:** MVP — Perun + Zmora (renamed from `qa-tester`); `pantheon.json` as the first piece of harness-resident configuration.
@@ -69,6 +69,16 @@ tests/modules/pantheon-config/
 - For each project-level file found (from furthest ancestor to closest), perform a **shallow merge keyed by `agents.<name>`** — the entire per-agent object replaces any prior value; no deep merge of inner fields.
 - Result: `{ [agentName: string]: { model: string } }`.
 
+### 4.2.1 Precedence vs. `opencode.json`
+
+`pantheon.json` is consumed inside our plugin's `config` hook, which contributes to the OpenCode config tree. Standard OpenCode config-resolution rules apply afterwards: user-supplied `agent.<name>.model` in `opencode.json` (project or global) **overrides** what our plugin sets. Effective precedence (lowest → highest):
+
+1. OpenCode built-in default model (`config.model`)
+2. **`pantheon.json` via our plugin** (the layer this spec adds)
+3. User-supplied `agent.<name>.model` in `opencode.json`
+
+This must be called out in `docs/configuring-agents.md` so users understand why a model set in `opencode.json` wins over `pantheon.json`. We are **augmenting**, not replacing, the OpenCode override chain.
+
 ### 4.3 Schema
 
 ```typescript
@@ -120,33 +130,35 @@ We use the [`jsonc-parser`](https://www.npmjs.com/package/jsonc-parser) npm pack
 
 ## 5. Data Flow
 
+Plugin factory order in `src/index.ts` puts `AppVerkQAPlugin` **before** `AppVerkCoordinatorPlugin`. Correctness does not depend on this order — `loadPantheonConfig()` is idempotent and module-scope cached, so whichever plugin's `config` hook fires first performs I/O and the rest hit the cache.
+
 ```
 OpenCode start
-  └─ AppVerkPlugins → plugin factories
-      ├─ AppVerkCoordinatorPlugin.config(config)
+  └─ AppVerkPlugins → plugin factories iterated in defaultPluginFactories order
+      ├─ AppVerkQAPlugin.config(config)
       │    ├─ loadPantheonConfig()     ← first call, performs I/O
       │    │    ├─ paths.userGlobalPath()      → ~/.config/opencode/pantheon.json
       │    │    ├─ paths.walkUpProjectPaths()  → ordered list
       │    │    ├─ for each path: readFileSync + jsonc-parse + schema-validate
       │    │    ├─ merge (closest-wins, per agentName)
-      │    │    └─ cache result
-      │    ├─ const model = cfg.agents.perun?.model
-      │    └─ if model: config.agent["Perun - Coordinator"].model = model
-      │
-      ├─ AppVerkQAPlugin.config(config)
-      │    ├─ loadPantheonConfig()     ← CACHED, zero I/O
+      │    │    └─ cache result (module-scope)
       │    ├─ const model = cfg.agents.zmora?.model
       │    └─ if model: set on BOTH config.agent["zmora-fe"].model and
       │                config.agent["zmora-be"].model
       │
+      ├─ AppVerkCoordinatorPlugin.config(config)
+      │    ├─ loadPantheonConfig()     ← CACHED, zero I/O
+      │    ├─ const model = cfg.agents.perun?.model
+      │    └─ if model: config.agent["Perun - Coordinator"].model = model
+      │
       └─ OpenCode TUI ready
 
-User opens session with @perun
-  └─ event hook fires (session.created)
-      └─ if pantheonConfigEmpty() && !toastShown:
-          client.tui.showToast({ variant: "info", title: "Pantheon",
-                                 message: "…" })
+First session.created event (any session, main or subagent — we do not filter)
+  └─ event hook fires
+      └─ if !toastShown:
           toastShown = true   ← module-scope flag, once per process
+          if loadErrors > 0  → warning toast
+          else if empty config → info toast
 ```
 
 **Runtime dispatch (unchanged):** `dispatch_parallel({ tasks: [{ name: "zmora-fe", … }] })` flows through `dispatch.ts` → `sdk-specialist.startTask("zmora-fe", …)` → `client.session.prompt({ body: { agent: "zmora-fe", parts } })`. OpenCode looks up `AgentConfig.model` for `zmora-fe` and applies it. No changes required in `dispatch.ts` or `sdk-specialist.ts`.
@@ -175,27 +187,30 @@ The info toast fires **only when `agents` is empty after merging all sources** �
 
 ### 6.3 Notification mechanism
 
-`coordinator/index.ts` registers an `event` hook that fires on `session.created`. On the first such event:
+`coordinator/index.ts` registers an `event` hook that fires on the first `session.created` (we do **not** filter main vs subagent — globally one toast per process). The `client.tui.showToast` SDK signature requires the parameters wrapped in `body`:
 
 ```typescript
 async event({ event }) {
   if (event.type !== "session.created") return
   if (toastShown) return
   toastShown = true
-  const cfg = loadPantheonConfig()
   const errors = getLoadErrors()
   try {
     if (errors.length > 0) {
       await client.tui.showToast({
-        variant: "warning",
-        title: "Pantheon",
-        message: "pantheon.json parse error — check console for details",
+        body: {
+          variant: "warning",
+          title: "Pantheon",
+          message: "pantheon.json parse error — check console for details",
+        },
       })
     } else if (pantheonConfigEmpty()) {
       await client.tui.showToast({
-        variant: "info",
-        title: "Pantheon",
-        message: "pantheon.json not found — using default models",
+        body: {
+          variant: "info",
+          title: "Pantheon",
+          message: "pantheon.json not found — using default models",
+        },
       })
     }
   } catch {
@@ -204,7 +219,9 @@ async event({ event }) {
 }
 ```
 
-`toastShown` is a module-scope flag so subsequent sessions in the same process do not retrigger.
+`toastShown` is a module-scope flag so subsequent sessions in the same process do not retrigger. The toast is fired on **any** first `session.created` (main or subagent) — for a one-shot informational message this is acceptable and avoids duplicating the main-session-detection heuristic already in `src/hooks/session-notification/`.
+
+> **SDK signature reference:** `client.tui.showToast` is the `@opencode-ai/sdk` v1 client method. Its signature is `(options: { body: { title?, message, variant, duration? } })`. `message` and `variant` are required; `title` and `duration` are optional.
 
 ### 6.4 What does NOT crash the plugin
 - Missing file
@@ -221,22 +238,55 @@ Breaking change. Hard rename, no compatibility shim. Version bump `0.2.16` → `
 
 ### 7.1 Touchpoints
 
+Sourced from a project-wide `grep -rn "qa-tester"`. Anything that survives the rename here is a runtime or documentation bug.
+
+**Source — functional code (must be in lockstep with the rename):**
+
 | File | Change |
 |---|---|
 | `src/modules/qa/index.ts` | Registry keys: `qa-tester-${stack}` → `zmora-${stack}`. Description updated. |
 | `src/modules/qa/prompt-builder.ts` | `frontmatter.name = "zmora-${stack}"`; description updated. Allowed-tools logic unchanged. |
-| `src/modules/qa/prompt-sections/core.md`, `overlay-fe.md`, `overlay-be.md` | Replace user-facing "qa-tester" mentions with "Zmora"; technical variants → `zmora-fe`/`zmora-be`. |
 | `src/modules/qa/allowed-tools.ts` | Update comments referencing the old name. |
+| `src/modules/coordinator/sanitize.ts` | **Functional regex**: `VARIANT_SUFFIX_PATTERN = /\bqa-tester-(?:fe|be)\b/g` → `/\bzmora-(?:fe|be)\b/g`; replacement string `"qa-tester"` → `"zmora"`. `normalizeVariantSuffix` rewrites internal variant names in untrusted specialist output before it surfaces in reports — leaving the old regex in place silently breaks sanitization after the registry rename. |
+| `src/modules/coordinator/dispatch.ts` | Update inline comments that reference `qa-tester-fe` / `qa-tester-be` (no functional change, but the comments document the variant convention and should stay accurate). |
+| `src/modules/coordinator/index.ts` | Update the `dispatch_parallel` tool description string (currently mentions `qa-tester` → `qa-tester-fe` + `qa-tester-be` as the canonical logical-agent example). This string is user-facing in the OpenCode TUI tool list. |
+
+**Source — prompts and command templates:**
+
+| File | Change |
+|---|---|
+| `src/modules/qa/prompt-sections/core.md` (and overlays if they reference the name) | Replace user-facing "qa-tester" mentions with "Zmora"; technical variants → `zmora-fe`/`zmora-be`. |
 | `src/agents/perun.md` | Workflow 1 routing references; "Available Specialists" table. FE/BE prefix routing logic unchanged — only target names change. |
 | `src/commands/run-qa.md` | Replace agent name in dispatch instructions and `dispatch_parallel` label conventions. |
-| `src/commands/create-qa-plan.md` | Replace agent-name references if any. |
-| `tests/modules/qa/*.test.ts` | Update fixtures and assertions. |
-| `tests/modules/coordinator/*.test.ts` | Update assertions referencing `qa-tester*`. |
-| `tests/root-plugin.test.ts` | Update agent-name assertions; ensure new `dist/modules/pantheon-config/*` paths are listed. |
+| `src/commands/create-qa-plan.md` | Verify and update agent-name references if any (grep currently finds none — guard against regressions). |
+
+**Tests:**
+
+| File | Change |
+|---|---|
+| `tests/modules/qa/plugin.test.ts` | Update fixtures and assertions. |
+| `tests/modules/coordinator/sanitize.test.ts` | Update fixtures for the new regex / replacement string. |
+| `tests/modules/coordinator/dispatch.test.ts` | Rename `qa-tester*` in assertions. |
+| `tests/modules/coordinator/perun-qa-flow.test.ts` | Rename `qa-tester*` in assertions. |
+| `tests/root-plugin.test.ts` | **Add** assertions for `dist/modules/pantheon-config/*.js` in the packaging check. Note: today this file does **not** reference `qa-tester` directly — this row is about the *new* paths, not a rename. |
+
+**Documentation (root):**
+
+| File | Change |
+|---|---|
 | `AGENTS.md` | Update `src/modules/qa/` row; add `src/modules/pantheon-config/` row. |
-| `docs/plugins/qa.md` | Update for consistency (legacy doc; will be removed in harness migration). |
 | `README.md` | Tables and prose. |
 | `docs/configuring-agents.md` | **NEW** — see §8. |
+
+**Documentation (legacy `docs/plugins/`):**
+
+The `docs/plugins/` tree is slated for removal once harness migration completes (§8.4). Until then it is still in-source, still referenced by users, and still must be coherent with the rename. The grep counts make this non-trivial:
+
+| File | Mentions | Change |
+|---|---|---|
+| `docs/plugins/qa.md` | many | Replace user-facing "qa-tester" mentions with "Zmora"; variants → `zmora-fe`/`zmora-be`. |
+| `docs/plugins/coordinator.md` | 16 | Same — many mentions in Workflow 1 explanation, sample dispatch labels, and the "logical agents with variants" subsection. **High effort** — easy to miss spots. Use grep+replace then re-grep. |
+| `docs/plugins/pantheon.md` | 1 | Single mention; update for consistency. |
 
 ### 7.2 What stays the same
 - Slash commands: `/run-qa` and `/create-qa-plan` keep their names. The commands are user-facing contracts; only the *agent* name changes.
@@ -315,10 +365,10 @@ tests/modules/pantheon-config/schema.test.ts    (~6 cases)
 
 ### 9.2 Modifications to existing tests
 
-- `tests/modules/coordinator/*.test.ts` — add test that `config.agent["Perun - Coordinator"].model` is set when `pantheon.json` provides `perun.model`, and absent otherwise. Use vi.mock or fs fixture to inject config.
-- `tests/modules/qa/*.test.ts` — analogous test for **both** `zmora-fe` and `zmora-be`. Rename every `qa-tester` → `zmora` in assertions and fixtures.
-- `tests/modules/coordinator/notify-on-empty-config.test.ts` (NEW) — verify toast fires once, faking `client.tui.showToast`; second event does not retrigger.
-- `tests/root-plugin.test.ts` — assert `dist/modules/pantheon-config/*.js` appear in `npm pack --dry-run` output; rename `qa-tester` references.
+- `tests/modules/coordinator/*.test.ts` — add a test that `config.agent["Perun - Coordinator"].model` is set when `pantheon.json` provides `perun.model`, and absent otherwise. Use `vi.mock` or an fs fixture to inject config. Also rename every `qa-tester` → `zmora` in existing assertions (`sanitize.test.ts`, `dispatch.test.ts`, `perun-qa-flow.test.ts`). Update `sanitize.test.ts` fixtures for the new regex literal.
+- `tests/modules/qa/plugin.test.ts` — add an analogous test for **both** `zmora-fe` and `zmora-be` (one model applied to both variants). Rename existing `qa-tester` assertions and fixtures.
+- `tests/modules/coordinator/notify-on-empty-config.test.ts` (NEW) — verify toast fires once, faking `client.tui.showToast` (note: the call signature wraps args in `body`); second event does not retrigger.
+- `tests/root-plugin.test.ts` — assert `dist/modules/pantheon-config/*.js` paths appear in `npm pack --dry-run` output (does **not** currently reference `qa-tester`, so no rename needed there).
 
 ### 9.3 New dependency
 
@@ -345,6 +395,9 @@ tests/modules/pantheon-config/schema.test.ts    (~6 cases)
 | Renaming `qa-tester` → `zmora` is a breaking change. | Plugin is internal/early-stage; no external consumers. Bump major, document in changelog, update `.opencode/opencode.json` reference. |
 | Sync `fs.readFileSync` in a hot path. | Plugin boot is one-shot at OpenCode start; multiple-MB JSONC parsing is not anticipated. Measured cost expected `<10ms` cold. |
 | Walk-up could theoretically include a sensitive `.opencode/pantheon.json` from a parent directory the user didn't expect. | Document the walk-up rule prominently in `docs/configuring-agents.md`. Stop walking at `os.homedir()`. |
+| User's `agent.<name>.model` in `opencode.json` silently overrides `pantheon.json`. | Document the precedence (§4.2.1) prominently in `docs/configuring-agents.md` FAQ. Not a bug — augmenting the existing OpenCode chain is the only sane shape. |
+| `normalizeVariantSuffix` in `coordinator/sanitize.ts` carries a hard-coded `qa-tester` regex + replacement and must be updated in lockstep with the registry rename. If forgotten, sanitization silently no-ops on the new variant names and `zmora-fe`/`zmora-be` can leak into reports. | Listed explicitly in §7.1 functional-code table. Test in `sanitize.test.ts` is the safety net. |
+| Module-scope cache in `loadPantheonConfig` complicates tests (a first test pollutes subsequent ones). | Loader module exports a `__resetCacheForTests()` symbol used by `beforeEach` in unit tests. Plan-level concern; called out here so the implementation surfaces it. |
 
 ## 11. Future Work (out of scope for this spec)
 
