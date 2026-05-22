@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `qa-tester` logical agent, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `zmora` logical agent, `pantheon-config` — the harness configuration library, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -13,13 +13,18 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `packages/frontend-developer` | Frontend-developer plugin source, tests, skills, build scripts. Output shipped at `packages/frontend-developer/dist/`. |
 | `packages/skill-utils` | Shared helpers for creating skill-based plugins. Output shipped at `packages/skill-utils/dist/`. |
 | `packages/skill-registry` | Global skill registry — scans skill folders, parses frontmatter, registers unified `load_appverk_skill` tool, injects activation rules into every agent's system prompt. Output shipped at `packages/skill-registry/dist/`. |
-| `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/*.md`. Registers two `qa-tester-{fe,be}` subagent variants composed via `prompt-builder.ts`; logical name `qa-tester` everywhere user-facing. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
+| `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/*.md`. Registers two `zmora-{fe,be}` subagent variants composed via `prompt-builder.ts`; logical agent name `zmora` everywhere user-facing. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
 | `packages/swift-developer` | Swift-developer plugin source, tests, skills, build scripts. Output shipped at `packages/swift-developer/dist/`. |
 | `src/modules/coordinator/` | Absorbed coordinator plugin — TS source only. Asset: `src/agents/perun.md`. Registers `dispatch_parallel` (worker pool, concurrency 4, cap 50) and `assign_issue_ids` tools alongside the `@perun` primary agent. Tests: `tests/modules/coordinator/`. Built into `dist/modules/coordinator/` and `dist/agents/`. |
+| `src/modules/pantheon-config/` | Harness-resident **library** (no plugin export) — reads `pantheon.json` (user-global + per-project walk-up, closest-wins merge) and exposes `loadPantheonConfig()` / `getLoadErrors()` / `pantheonConfigEmpty()`. Consumed by `coordinator/` and `qa/` in their `config` hooks. Tests: `tests/modules/pantheon-config/`. Built into `dist/modules/pantheon-config/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
 | `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
 **Important:** `dist/` is usually ignored, but the **root `dist/`** and **`packages/*/dist/`** are committed and published (see `.gitignore`). Do not delete those `dist/` trees.
+
+## Pantheon harness configuration
+
+Per-agent model selection lives in `pantheon.json`. See [`docs/configuring-agents.md`](docs/configuring-agents.md) for the user-facing reference; see [`docs/superpowers/specs/2026-05-22-pantheon-per-agent-model-design.md`](docs/superpowers/specs/2026-05-22-pantheon-per-agent-model-design.md) for the design rationale.
 
 ## Commands
 
@@ -133,28 +138,18 @@ When adding a new plugin, you MUST update both top-level and per-plugin document
 
 ### `README.md` (root)
 
-Update these sections:
+The README is harness-first (Pantheon agents + configuration). When you add a new piece:
 
-1. **Plugin count badge** — increment the number: `[![Plugins](https://img.shields.io/badge/plugins-N-blue.svg)]`
-2. **Introduction paragraph** — add a one-line description of the new plugin
-3. **Usage section** — add a subsection with `/command` example and what it does
-4. **Available Commands & Agents table** — add rows for the new command and
-   any agents. Verify each agent has the correct `mode` (`"primary"` for
-   user-facing agents, `"subagent"` for background/skill agents).
-5. **Repository Structure** — add `packages/<name>` and `docs/plugins/<name>.md` entries
-6. **Documentation list** — add link to the new plugin guide
+1. **If it is user-facing in the harness** (a new primary agent, a new subagent surfaced through Perun, or a new configuration surface), add a short entry under "What you get today" and link to its detailed reference under `docs/`.
+2. **If it is plumbing** (a new library module like `pantheon-config`, a new dispatch primitive, a hook), update `AGENTS.md`'s monorepo-layout table — do not add to the README. The README is not a system-architecture diagram.
 
-### `docs/plugins/<name>.md` (per-plugin guide)
+Do **not** maintain a plugin badge, a comprehensive command/agent table, or per-plugin marketing copy. Those constructs were retired with the harness pivot.
 
-Create a dedicated guide with:
+### `docs/<topic>.md` (harness reference)
 
-1. **Installation** — "The root plugin bundle includes this package automatically."
-2. **Usage** — `/command <args>` syntax with examples
-3. **What it does** — step-by-step breakdown of the workflow
-4. **Direct agent use** — `opencode agent <agent-name> "..."` examples (if applicable)
-5. **Architecture** — table of registered elements (commands, agents, tools) and their purposes
-6. **Limitations** — known MVP limitations or deferred features
-7. **Project Structure** — list of key source files
+For user-facing harness concerns (e.g. configuration, agent reference, workflow guides), write a dedicated topic doc directly under `docs/`. `docs/configuring-agents.md` is the first of these.
+
+> Do **not** add new files under `docs/plugins/`. That tree is legacy and will be removed once the harness migration completes.
 
 ---
 
