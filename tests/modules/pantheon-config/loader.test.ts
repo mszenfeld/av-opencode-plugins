@@ -3,6 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { tmpdir } from "node:os"
 import { loadFresh } from "../../../src/modules/pantheon-config/loader.js"
+import {
+  __resetCacheForTests,
+  loadPantheonConfig,
+  pantheonConfigEmpty,
+} from "../../../src/modules/pantheon-config/index.js"
 
 describe("loadFresh", () => {
   let tmpHome: string
@@ -135,5 +140,24 @@ describe("loadFresh", () => {
     const result = loadFresh({ startDir: projectDir, homedir: tmpHome })
     expect(result.config.agents.perun).toEqual({ model: "anthropic/claude-opus-4-7" })
     expect(result.errors.some((e) => /unknown field "agents\.perun\.temperature"/.test(e))).toBe(true)
+  })
+})
+
+describe("module-scope cache (index.ts)", () => {
+  beforeEach(() => {
+    __resetCacheForTests()
+  })
+
+  it("caches the loaded config across calls", () => {
+    const a = loadPantheonConfig()
+    const b = loadPantheonConfig()
+    expect(a).toBe(b) // same object reference
+  })
+
+  it("reflects emptiness via pantheonConfigEmpty()", () => {
+    // No pantheon.json anywhere under tmp — but the real cwd could have one.
+    // We assert the API exists and returns a boolean; the strict empty check
+    // lives in tests that control startDir via loadFresh.
+    expect(typeof pantheonConfigEmpty()).toBe("boolean")
   })
 })
