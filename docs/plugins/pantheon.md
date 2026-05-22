@@ -98,4 +98,3 @@ Invalid numeric values fall back to the default and emit a one-time warning.
   flip a previously-registered session's role once `parentSessionID`
   detection lands)
 
-See `docs/superpowers/specs/2026-05-19-session-notification-hook-design.md` for the design and `docs/superpowers/plans/2026-05-19-session-notification-hook.md` for the implementation plan.

@@ -48,8 +48,8 @@ Per-agent model selection lives in `pantheon.json`:
 {
   "agents": {
     "perun": { "model": "anthropic/claude-opus-4-7" },
-    "zmora": { "model": "anthropic/claude-sonnet-4-6" }
-  }
+    "zmora": { "model": "anthropic/claude-sonnet-4-6" },
+  },
 }
 ```
 
@@ -59,8 +59,6 @@ The full reference (locations, precedence, schema, FAQ) is in [`docs/configuring
 
 - [`docs/configuring-agents.md`](docs/configuring-agents.md) — per-agent model configuration via `pantheon.json`.
 - [`AGENTS.md`](AGENTS.md) — repository contributor guide.
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) — design specs.
-- [`docs/superpowers/plans/`](docs/superpowers/plans/) — implementation plans.
 
 ## Repository layout
 

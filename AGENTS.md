@@ -24,7 +24,7 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 
 ## Pantheon harness configuration
 
-Per-agent model selection lives in `pantheon.json`. See [`docs/configuring-agents.md`](docs/configuring-agents.md) for the user-facing reference; see [`docs/superpowers/specs/2026-05-22-pantheon-per-agent-model-design.md`](docs/superpowers/specs/2026-05-22-pantheon-per-agent-model-design.md) for the design rationale.
+Per-agent model selection lives in `pantheon.json`. See [`docs/configuring-agents.md`](docs/configuring-agents.md) for the user-facing reference.
 
 ## Commands
 
@@ -176,11 +176,10 @@ For user-facing harness concerns (e.g. configuration, agent reference, workflow 
 
 For small absorbed modules (no separate workspace), follow this pattern instead:
 
-> **Canonical reference:** The `src/` TypeScript absorption program is documented in
-> [`docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md`](docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md)
-> (design rationale: `bundle: false`, build-order constraints, `tsup.root.config.ts` filename) and
-> [`docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md`](docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md)
-> (staged execution plan — Stage 1 of N is the `commit` pilot). Read both before starting a new absorption stage so future work does not re-derive or contradict these decisions.
+> **Design constraints carried over from the original src/ absorption program:**
+> - **`bundle: false`** in `tsup.root.config.ts` — each module is compiled standalone so relative imports between modules keep working at runtime.
+> - **Build-order matters:** the root build (`npm run build:root`) emits `dist/` from `src/` first; workspace package builds run afterwards. Modules that read assets from `dist/` (via `import.meta.url` resolution) rely on this ordering.
+> - **The config filename is `tsup.root.config.ts`** (not the default `tsup.config.ts`) — this is intentional so workspace `tsup.config.ts` files are not picked up by the root build.
 
 1. Create `src/modules/<name>/` with `index.ts` and supporting `.ts` modules.
 2. Place `.md` assets under `src/commands/`, `src/agents/`, or `src/skills/` (the layout `scripts/copy-root-assets.mjs` knows about).
@@ -213,6 +212,17 @@ If a user reports missing commands after an update, instruct them to either:
   ```bash
   rm -rf ~/.cache/opencode/packages/av-opencode-plugins*
   ```
+
+## Superpowers Artefacts
+
+**Never link to anything under `docs/superpowers/` from source, tests, or any other documentation file.** That tree (`docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`) holds *temporary working artefacts* produced by the brainstorming / writing-plans skills. Specs and plans get archived or deleted once their work has shipped — every link to them becomes a broken reference the moment that happens.
+
+If a design decision needs to stay reachable after the spec is gone:
+
+- **Inline the decision and its rationale** in the permanent doc that needs it (e.g. `AGENTS.md` for contributor patterns, `docs/<topic>.md` for user-facing reference). The *why* should live in the doc that survives.
+- **Use git history** for the audit trail — `git log --follow <file>` and `git blame` are the durable record of when and why a decision was made.
+
+Exceptions: cross-references *within* `docs/superpowers/` (a plan linking to its spec, etc.) are fine — those files are temporary together.
 
 ## Code Review Artefacts
 

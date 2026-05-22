@@ -122,5 +122,4 @@ A: No. The walk stops at your home directory. If your `cwd` is outside `$HOME` e
 
 ## See also
 
-- [Spec — Pantheon Per-Agent Model Configuration](superpowers/specs/2026-05-22-pantheon-per-agent-model-design.md)
-- `AGENTS.md` — repository contributor guide
+- [`AGENTS.md`](../AGENTS.md) — repository contributor guide
