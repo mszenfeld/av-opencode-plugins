@@ -6,6 +6,10 @@
 import { execSync } from "node:child_process"
 import process from "node:process"
 
+// Root `dist/` covers `dist/modules/*` (commit, qa, coordinator,
+// pantheon-config), `dist/agents/`, `dist/commands/`, `dist/skills/`,
+// `dist/hooks/` — everything the root tsup config emits. Per-package paths
+// are listed individually below.
 const trackedDistPaths = [
   "dist",
   "packages/python-developer/dist",
