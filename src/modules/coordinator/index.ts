@@ -15,6 +15,7 @@ import {
   loadAgentRegistry,
   toPollerMessage,
 } from "./sdk-specialist.js"
+import { loadPantheonConfig } from "../pantheon-config/index.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
 // imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
@@ -220,6 +221,13 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         get prompt() {
           return getPerunPrompt()
         },
+      }
+      // Inject model AFTER registration so we don't have to merge it into the
+      // object literal above — the non-null assertion is safe because we just
+      // set the key on the line above.
+      const perunModel = loadPantheonConfig().agents.perun?.model
+      if (perunModel !== undefined) {
+        config.agent["Perun - Coordinator"]!.model = perunModel
       }
     },
     // IMPORTANT: Tool names "dispatch_parallel", "assign_issue_ids", and "compute_waves" must
