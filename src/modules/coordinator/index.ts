@@ -76,7 +76,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         .describe(
           "REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n" +
             "- single agent: bare name (e.g. \"code-reviewer\")\n" +
-            "- N copies of one agent: \"name ×N\" (e.g. \"code-reviewer ×3\")\n" +
+            "- N copies of one agent (total dispatched; ≤4 run concurrently): \"name ×N\" (e.g. \"code-reviewer ×3\" or \"code-reviewer ×10\")\n" +
             "- different agents: comma-joined names (e.g. \"code-reviewer, security-auditor\")\n" +
             "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
             "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.\n\n" +
