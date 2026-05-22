@@ -129,4 +129,23 @@ describe("readConfigFromEnv", () => {
     expect(msg).not.toContain("\x1b")
     expect(msg).not.toContain("\x07")
   })
+
+  // CWE-117: an embedded \n in a developer-set env var would split the
+  // warning into two log lines and fabricate a second log entry — the
+  // canonical log-forging vector that safeForLog exists to prevent.
+  it("strips newlines from the warning to prevent log line-splitting (CWE-117)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "bad\n[FAKE_LOG] critical" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\n")
+  })
+
+  it("strips tabs from the warning when env var contains them", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    readConfigFromEnv({ AV_PANTHEON_NOTIFY_DELAY_MS: "bad\tvalue" })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const msg = String(warn.mock.calls[0]?.[0] ?? "")
+    expect(msg).not.toContain("\t")
+  })
 })

@@ -1,5 +1,5 @@
 function safeForLog(s) {
-  return s.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "?").replace(/[‪-‮⁦-⁩]/g, "");
+  return s.replace(/[\x00-\x1F\x7F-\x9F]/g, "?").replace(/[‪-‮⁦-⁩]/g, "");
 }
 const DEFAULT_SESSION_NOTIFICATION_CONFIG = {
   title: "AppVerk",

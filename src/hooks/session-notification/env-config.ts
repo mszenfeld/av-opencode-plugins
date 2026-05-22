@@ -6,7 +6,7 @@ import type { SessionNotificationConfig } from "./session-notification.js"
 // the rest of the plugin's sink-specific neutralisation (CWE-117).
 function safeForLog(s: string): string {
   return s
-    .replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, "?")
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, "?")
     .replace(/[‪-‮⁦-⁩]/g, "")
 }
 
