@@ -3,6 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Plugin } from "@opencode-ai/plugin"
 import { buildQATesterAgent } from "./prompt-builder.js"
+import { loadPantheonConfig } from "../pantheon-config/index.js"
 
 export { buildQATesterAgent }
 export { FE_TOOLS, BE_TOOLS, SHARED_TOOLS, toolsForVariant } from "./allowed-tools.js"
@@ -50,6 +51,13 @@ export const AppVerkQAPlugin: Plugin = async () => ({
           return cached
         },
         mode: "subagent",
+      }
+    }
+
+    const zmoraModel = loadPantheonConfig().agents.zmora?.model
+    if (zmoraModel !== undefined) {
+      for (const stack of VARIANTS) {
+        config.agent[`zmora-${stack}`]!.model = zmoraModel
       }
     }
 
