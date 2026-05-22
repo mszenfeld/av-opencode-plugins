@@ -80,7 +80,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
             "- different agents: comma-joined names (e.g. \"code-reviewer, security-auditor\")\n" +
             "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
             "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.\n\n" +
-            "Exception for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `qa-tester` → `qa-tester-fe` + `qa-tester-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent's prompt.",
+            "Exception for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `zmora` → `zmora-fe` + `zmora-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent's prompt.",
         ),
       summary: tool.schema
         .string()

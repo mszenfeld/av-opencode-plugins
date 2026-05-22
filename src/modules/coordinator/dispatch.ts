@@ -130,9 +130,9 @@ export async function dispatchParallel(
 
   // Convert the variant-suffix invariant from a prompt-only convention into
   // a code-enforced one. The agent registry still validates input task names
-  // as the original variants (qa-tester-fe / qa-tester-be); only the OUTPUT
+  // as the original variants (zmora-fe / zmora-be); only the OUTPUT
   // `name` and `error` strings are normalised, so prompt drift or partial
-  // injection cannot leak `qa-tester-fe` / `qa-tester-be` into reports.
+  // injection cannot leak `zmora-fe` / `zmora-be` into reports.
   for (const r of results) {
     r.name = normalizeVariantSuffix(r.name)
     if (r.error !== undefined) {
