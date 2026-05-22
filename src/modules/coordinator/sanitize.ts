@@ -73,31 +73,24 @@ export function neutralizeUntrustedOutput(s: string): string {
 }
 
 /**
- * Rewrites the internal `qa-tester` variant suffix into the logical agent name
- * in any user-facing string. The TS surface registers two physical variants —
- * `qa-tester-fe` and `qa-tester-be` — but `docs/plugins/qa.md` and the Perun
- * prompt both promise that only the logical `qa-tester` name appears in
- * reports, scenario references, and error strings.
+ * Rewrites the internal `zmora` variant suffix into the logical agent name
+ * before it surfaces in user-facing output. Internally Zmora is two
+ * subagents — `zmora-fe` and `zmora-be` — but `docs/configuring-agents.md`
+ * and the Perun prompt both promise that only the logical `zmora` name
+ * appears in reports, dispatch labels, and report paths.
  *
- * Until this helper existed the rule lived solely inside the Perun prompt,
- * which is a defense-in-depth gap: model drift or a partial prompt-injection
- * could leak the variant suffix into the report. This converts a prompt-only
- * invariant into a code-enforced invariant — `dispatchParallel` calls it on
- * every `DispatchResult.name` / `.error` before returning, so the suffix
- * cannot reach the user even if the model misbehaves.
- *
- * NOTE: the input task name is still validated as the original variant
- * (`qa-tester-fe` / `qa-tester-be`) against the agent registry — only the
- * OUTPUT fields are normalised. Internal log/debug strings that retain
- * variant names are unaffected.
+ * The variant suffix is internal scaffolding; sanitization is what keeps
+ * that promise. We still validate the un-rewritten variant names
+ * (`zmora-fe` / `zmora-be`) against the agent registry — only the
+ * stringification for human eyes is normalized here.
  */
-const VARIANT_SUFFIX_PATTERN = /\bqa-tester-(?:fe|be)\b/g
+const VARIANT_SUFFIX_PATTERN = /\bzmora-(?:fe|be)\b/g
 
 export function normalizeVariantSuffix(s: string): string {
   if (s.length === 0) {
     return s
   }
-  return s.replace(VARIANT_SUFFIX_PATTERN, "qa-tester")
+  return s.replace(VARIANT_SUFFIX_PATTERN, "zmora")
 }
 
 const PLAN_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}-/
