@@ -5,23 +5,20 @@
 </p>
 
 <p align="center">
-  <em>An OpenCode-based harness for orchestrating AI agents on AppVerk workflows.</em>
+  <em>An OpenCode-based harness for orchestrating AI agents.</em>
 </p>
 
 ---
 
 Pantheon provides a coordinator agent that delegates work to specialists, a QA agent for executing test plans, and per-agent model configuration.
 
-## What's inside
+## Primary agents
 
-- **`@perun`** — the coordinator. Primary agent. Delegates work to specialist subagents, computes dispatch waves with dependency awareness, and synthesizes results.
-- **`@zmora`** — QA tester. Executes a single QA scenario (FE or BE). Internally split into two subagent variants (`zmora-fe`, `zmora-be`) routed by scenario prefix; users interact with the logical `zmora` name via Perun.
-- **`pantheon.json`** — per-agent model configuration. User-global and per-project, closest-wins. See [Configuring agents](#configuring-agents).
+- **Perun** — the coordinator. Delegates work to specialists, computes dispatch waves with dependency awareness, and synthesizes results.
 
-The QA workflow is exposed via two slash commands:
+## Subagents
 
-- `/create-qa-plan` — analyzes recent changes and generates a structured QA plan.
-- `/run-qa` — executes a plan via Perun, dispatching each scenario to the appropriate Zmora variant.
+- **Zmora** — QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun.
 
 ## Installation
 
