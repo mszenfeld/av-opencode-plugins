@@ -1,14 +1,16 @@
 <p align="center">
-  <img src="docs/assets/image.png" alt="" width="220" />
+  <img src="docs/assets/image.png" alt="" width="280" />
+  <br />
+  <img src="docs/assets/text.png" alt="Pantheon — AI Harness" width="380" />
 </p>
 
 <p align="center">
-  <img src="docs/assets/text.png" alt="Pantheon — AI Harness" width="440" />
+  <em>An OpenCode-based harness for orchestrating AI agents on AppVerk workflows.</em>
 </p>
 
-# Pantheon — Agent Harness
+---
 
-Pantheon is an OpenCode-based harness for orchestrating AI agents on AppVerk workflows. It provides a coordinator agent that delegates work to specialists, a QA agent for executing test plans, and per-agent model configuration.
+Pantheon provides a coordinator agent that delegates work to specialists, a QA agent for executing test plans, and per-agent model configuration.
 
 ## What's inside
 
