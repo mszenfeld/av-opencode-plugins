@@ -30,6 +30,41 @@ Add to your OpenCode config:
 
 Restart OpenCode after installation or any config change.
 
+## Upgrading from v0.2.x
+
+`v0.3.0` renames the QA subagent registry keys:
+
+| Before (v0.2.x) | After (v0.3.0) |
+|---|---|
+| `qa-tester-fe` | `zmora-fe` |
+| `qa-tester-be` | `zmora-be` |
+
+This is a hard rename — there is no compatibility shim, and the loader does not emit a warning when the old keys are present. If your personal `opencode.json` overrides the model for these agents, e.g.:
+
+```json
+{
+  "agent": {
+    "qa-tester-fe": { "model": "anthropic/claude-sonnet-4-6" },
+    "qa-tester-be": { "model": "anthropic/claude-sonnet-4-6" }
+  }
+}
+```
+
+…those entries become inert on upgrade. You have two options:
+
+1. **Rename in place** — change the keys to `agent."zmora-fe".model` and `agent."zmora-be".model`.
+2. **Migrate to `pantheon.json`** (recommended) — a single `agents.zmora.model` entry covers both subagent variants:
+   ```jsonc
+   // ~/.config/opencode/pantheon.json
+   {
+     "agents": {
+       "zmora": { "model": "anthropic/claude-sonnet-4-6" }
+     }
+   }
+   ```
+
+See [`docs/configuring-agents.md`](docs/configuring-agents.md) for the full `pantheon.json` reference.
+
 ## Quick start
 
 ```text

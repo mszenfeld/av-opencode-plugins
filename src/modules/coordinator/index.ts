@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { dispatchParallel } from "./dispatch.js"
 import { assignIssueIds } from "./assign-issue-ids.js"
@@ -20,24 +17,16 @@ import {
   loadPantheonConfig,
   pantheonConfigEmpty,
 } from "../pantheon-config/index.js"
+import { loadModuleAsset } from "../_shared/load-asset.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
-// imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
-// from `../src/index.js`).
+// imports (e.g. `tests/modules/coordinator/to-poller-message.test.ts` imports
+// `toPollerMessage` from `../../../src/modules/coordinator/index.js`).
 export { createSDKSpecialist, loadAgentRegistry, toPollerMessage }
 export { neutralizeUntrustedOutput, deriveReportPath, normalizeVariantSuffix }
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-
 function loadAgentPrompt(name: string): string {
-  // After absorption into src/modules/coordinator/, this file is compiled
-  // standalone (root tsup uses `bundle: false`) so `moduleDir` resolves to:
-  //   Production:                dist/modules/coordinator/  → reads dist/agents/<name>.md
-  //   Dev (tests against src):   src/modules/coordinator/   → reads src/agents/<name>.md
-  // Both resolve via the same `../../agents/<name>.md` relative to moduleDir.
-  // Agent prompts land at dist/agents/<name>.md via copy-root-assets.mjs.
-  const filePath = path.resolve(moduleDir, "../../agents", `${name}.md`)
-  return readFileSync(filePath, "utf8")
+  return loadModuleAsset(import.meta.url, `../../agents/${name}.md`)
 }
 
 let cachedPerunPrompt: string | undefined
@@ -246,16 +235,33 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
     event: async ({ event }) => {
       if (event.type !== "session.created") return
       if (toastShown) return
-      toastShown = true
 
-      const errors = getLoadErrors()
+      // Everything that can throw lives INSIDE the try:
+      //  - `getLoadErrors()` / `pantheonConfigEmpty()` both call
+      //    `ensureLoaded()`, which used to be able to throw on hostile input
+      //    (RangeError from deeply-nested JSONC). It now degrades to an
+      //    error entry, but we still defend the event handler in depth.
+      //  - `client.tui.showToast` rejects in headless / non-TUI invocations.
+      // `toastShown` is flipped only AFTER a successful toast attempt, so a
+      // transient TUI failure on the first session does not permanently
+      // suppress the warning for the rest of the process lifetime. The
+      // `catch` clause flips it too: we give up after one in-band attempt to
+      // avoid spamming the user on every subsequent `session.created`.
       try {
+        const errors = getLoadErrors()
+        // Honour the docs contract: "Check the OpenCode console output for
+        // the specific parse error". Without this, the warning toast points
+        // users at a console that has no diagnostic written to it.
+        // `console.error` is the right channel for genuine plugin-level
+        // diagnostics — it goes to stderr and is visible in `opencode` runs.
+        for (const e of errors) console.error(e)
+
         if (errors.length > 0) {
           await client.tui.showToast({
             body: {
               variant: "warning",
               title: "Pantheon",
-              message: "pantheon.json parse error — check console for details",
+              message: errors[0] ?? "pantheon.json parse error — check console for details",
             },
           })
         } else if (pantheonConfigEmpty()) {
@@ -267,8 +273,11 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
             },
           })
         }
+        toastShown = true
       } catch {
-        // best-effort: headless / non-TUI OpenCode invocations must not crash
+        // best-effort: headless / non-TUI OpenCode invocations must not crash.
+        // Flip the latch so we don't keep retrying on every session.created.
+        toastShown = true
       }
     },
   }

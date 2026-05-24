@@ -1,13 +1,9 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { buildQATesterAgent } from "./prompt-builder.js";
 import { loadPantheonConfig } from "../pantheon-config/index.js";
+import { loadModuleAsset } from "../_shared/load-asset.js";
 import { FE_TOOLS, BE_TOOLS, SHARED_TOOLS, toolsForVariant } from "./allowed-tools.js";
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 function loadCommandMarkdown(name) {
-  const filePath = path.resolve(moduleDir, "../../commands", name);
-  return readFileSync(filePath, "utf8");
+  return loadModuleAsset(import.meta.url, `../../commands/${name}`);
 }
 const VARIANTS = ["fe", "be"];
 const COMMANDS = [

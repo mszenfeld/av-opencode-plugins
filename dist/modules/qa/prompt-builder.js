@@ -1,11 +1,7 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { toolsForVariant } from "./allowed-tools.js";
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+import { loadModuleAsset } from "../_shared/load-asset.js";
 function loadSection(name) {
-  const filePath = path.resolve(moduleDir, "prompt-sections", name);
-  return readFileSync(filePath, "utf8");
+  return loadModuleAsset(import.meta.url, `prompt-sections/${name}`);
 }
 let cachedCore;
 let cachedOverlayFe;

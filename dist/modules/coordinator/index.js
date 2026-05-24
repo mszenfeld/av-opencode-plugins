@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import { dispatchParallel } from "./dispatch.js";
 import { assignIssueIds } from "./assign-issue-ids.js";
@@ -20,10 +17,9 @@ import {
   loadPantheonConfig,
   pantheonConfigEmpty
 } from "../pantheon-config/index.js";
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+import { loadModuleAsset } from "../_shared/load-asset.js";
 function loadAgentPrompt(name) {
-  const filePath = path.resolve(moduleDir, "../../agents", `${name}.md`);
-  return readFileSync(filePath, "utf8");
+  return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
 }
 let cachedPerunPrompt;
 function getPerunPrompt() {
@@ -180,15 +176,15 @@ const AppVerkCoordinatorPlugin = async (input) => {
     event: async ({ event }) => {
       if (event.type !== "session.created") return;
       if (toastShown) return;
-      toastShown = true;
-      const errors = getLoadErrors();
       try {
+        const errors = getLoadErrors();
+        for (const e of errors) console.error(e);
         if (errors.length > 0) {
           await client.tui.showToast({
             body: {
               variant: "warning",
               title: "Pantheon",
-              message: "pantheon.json parse error \u2014 check console for details"
+              message: errors[0] ?? "pantheon.json parse error \u2014 check console for details"
             }
           });
         } else if (pantheonConfigEmpty()) {
@@ -200,7 +196,9 @@ const AppVerkCoordinatorPlugin = async (input) => {
             }
           });
         }
+        toastShown = true;
       } catch {
+        toastShown = true;
       }
     }
   };

@@ -1,24 +1,13 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import type { Plugin } from "@opencode-ai/plugin"
 import { buildQATesterAgent } from "./prompt-builder.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
+import { loadModuleAsset } from "../_shared/load-asset.js"
 
 export { buildQATesterAgent }
 export { FE_TOOLS, BE_TOOLS, SHARED_TOOLS, toolsForVariant } from "./allowed-tools.js"
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-
 function loadCommandMarkdown(name: string): string {
-  // After absorption into src/modules/qa/, this file is compiled standalone
-  // (root tsup uses `bundle: false`) so `moduleDir` resolves to:
-  //   Production:                dist/modules/qa/  → reads dist/commands/<name>
-  //   Dev (tests against src):   src/modules/qa/   → reads src/commands/<name>
-  // Both resolve via the same `../../commands/<name>` relative to moduleDir.
-  // Command files land at dist/commands/<name> via copy-root-assets.mjs.
-  const filePath = path.resolve(moduleDir, "../../commands", name)
-  return readFileSync(filePath, "utf8")
+  return loadModuleAsset(import.meta.url, `../../commands/${name}`)
 }
 
 const VARIANTS = ["fe", "be"] as const
@@ -54,6 +43,11 @@ export const AppVerkQAPlugin: Plugin = async () => ({
       }
     }
 
+    // Inject model AFTER registration so we don't merge it into every literal
+    // above — the non-null assertion is safe because the loop above just set
+    // each `zmora-${stack}` key. The model string is also restricted to a
+    // printable-ASCII allow-list by `MODEL_REGEX` in pantheon-config/schema.ts,
+    // so no control characters can reach this TUI sink (CWE-117).
     const zmoraModel = loadPantheonConfig().agents.zmora?.model
     if (zmoraModel !== undefined) {
       for (const stack of VARIANTS) {

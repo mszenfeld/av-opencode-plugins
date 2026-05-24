@@ -67,10 +67,25 @@ describe("validateConfigFile", () => {
     expect(result.errors).toHaveLength(1)
   })
 
-  it("warns on unknown top-level section but does not fail", () => {
+  it("silently skips unknown top-level sections (forward-compatible per docs)", () => {
     const result = validateConfigFile({ dispatch: { maxParallel: 4 } })
     expect(result.config).toEqual({ agents: {} })
-    expect(result.errors.some((e) => /unknown section "dispatch"/.test(e))).toBe(true)
+    // Per docs/configuring-agents.md FAQ, unknown sections are ignored
+    // without surfacing to the user — `errors[]` triggers a warning toast,
+    // and a documented forward-compat feature must not produce a warning.
+    expect(result.errors).toEqual([])
+  })
+
+  it("silently skips unknown top-level sections alongside valid agents", () => {
+    const result = validateConfigFile({
+      dispatch: { maxParallel: 4 },
+      logging: { level: "debug" },
+      agents: { perun: { model: "anthropic/claude-opus-4-7" } },
+    })
+    expect(result.config.agents).toEqual({
+      perun: { model: "anthropic/claude-opus-4-7" },
+    })
+    expect(result.errors).toEqual([])
   })
 
   it("warns on unknown field under agent but keeps model", () => {

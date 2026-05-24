@@ -1,29 +1,23 @@
-const MODEL_REGEX = /^[^/]+\/[^/]+$/;
-const KNOWN_TOP_LEVEL = /* @__PURE__ */ new Set(["agents"]);
+const MODEL_REGEX = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const KNOWN_AGENT_FIELDS = /* @__PURE__ */ new Set(["model"]);
 function prefix(sourcePath) {
   return sourcePath !== void 0 ? `[pantheon] ${sourcePath}: ` : "[pantheon] ";
 }
 function validateConfigFile(raw, sourcePath) {
   const errors = [];
-  const out = { agents: {} };
+  const result = { agents: {} };
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     errors.push(`${prefix(sourcePath)}top-level must be object`);
-    return { config: out, errors };
+    return { config: result, errors };
   }
   const obj = raw;
-  for (const key of Object.keys(obj)) {
-    if (!KNOWN_TOP_LEVEL.has(key)) {
-      errors.push(`${prefix(sourcePath)}unknown section "${key}" \u2014 ignoring`);
-    }
-  }
   const agents = obj.agents;
   if (agents === void 0) {
-    return { config: out, errors };
+    return { config: result, errors };
   }
   if (agents === null || typeof agents !== "object" || Array.isArray(agents)) {
     errors.push(`${prefix(sourcePath)}agents must be object \u2014 ignoring`);
-    return { config: out, errors };
+    return { config: result, errors };
   }
   for (const [name, agentRaw] of Object.entries(agents)) {
     if (agentRaw === null || typeof agentRaw !== "object" || Array.isArray(agentRaw)) {
@@ -47,9 +41,9 @@ function validateConfigFile(raw, sourcePath) {
       );
       continue;
     }
-    out.agents[name] = { model };
+    result.agents[name] = { model };
   }
-  return { config: out, errors };
+  return { config: result, errors };
 }
 export {
   validateConfigFile

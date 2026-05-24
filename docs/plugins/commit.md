@@ -9,7 +9,7 @@ The AppVerk commit plugin adds an OpenCode-native commit workflow with policy en
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.2.8"]
+  "plugin": ["av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.3.0"]
 }
 ```
 

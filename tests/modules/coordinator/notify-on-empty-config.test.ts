@@ -87,4 +87,58 @@ describe("AppVerkCoordinatorPlugin toast notification", () => {
       plugin.event?.({ event: { type: "session.created" } } as never),
     ).resolves.not.toThrow()
   })
+
+  it("writes parse errors to console.error so the toast's 'check console' guidance pays off", async () => {
+    const dir = path.join(tmpHome, ".config", "opencode")
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, "pantheon.json"), `{ malformed`)
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const plugin = await AppVerkCoordinatorPlugin({ client } as never)
+      await plugin.event?.({ event: { type: "session.created" } } as never)
+      expect(consoleErrorSpy).toHaveBeenCalled()
+      const allArgs = consoleErrorSpy.mock.calls.map((c) => String(c[0]))
+      expect(allArgs.some((m) => /\[pantheon\].*failed to parse/.test(m))).toBe(true)
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
+  it("does not crash when pantheon.json contains deeply-nested JSON (regression)", async () => {
+    const dir = path.join(tmpHome, ".config", "opencode")
+    mkdirSync(dir, { recursive: true })
+    const depth = 10_000
+    writeFileSync(
+      path.join(dir, "pantheon.json"),
+      "[".repeat(depth) + "1" + "]".repeat(depth),
+    )
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const plugin = await AppVerkCoordinatorPlugin({ client } as never)
+      await expect(
+        plugin.event?.({ event: { type: "session.created" } } as never),
+      ).resolves.not.toThrow()
+      // The warning toast is the user-facing surface; it must still fire.
+      expect(showToast).toHaveBeenCalledTimes(1)
+      expect(showToast.mock.calls[0]![0].body.variant).toBe("warning")
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
+  it("does not surface a warning toast for unknown top-level sections (forward-compat per docs)", async () => {
+    const dir = path.join(tmpHome, ".config", "opencode")
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, "pantheon.json"),
+      `{
+        "dispatch": { "maxParallel": 4 },
+        "logging": { "level": "debug" },
+        "agents": { "perun": { "model": "anthropic/claude-opus-4-7" } }
+      }`,
+    )
+    const plugin = await AppVerkCoordinatorPlugin({ client } as never)
+    await plugin.event?.({ event: { type: "session.created" } } as never)
+    expect(showToast).not.toHaveBeenCalled()
+  })
 })

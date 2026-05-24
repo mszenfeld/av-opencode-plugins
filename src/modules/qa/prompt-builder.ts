@@ -1,21 +1,8 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { toolsForVariant, type QaTesterStack } from "./allowed-tools.js"
-
-const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+import { loadModuleAsset } from "../_shared/load-asset.js"
 
 function loadSection(name: string): string {
-  // After absorption into src/modules/qa/, this file is compiled standalone
-  // (root tsup uses `bundle: false`) so `moduleDir` resolves to:
-  //   Production:                dist/modules/qa/
-  //   Dev (tests against src):   src/modules/qa/
-  // Section files land at moduleDir/prompt-sections/<name> via the post-build
-  // `copy-root-assets.mjs` step (production) and live alongside the source in
-  // dev. If this read fails, either the build script didn't copy the assets
-  // or someone moved them — fix the build, not this resolver.
-  const filePath = path.resolve(moduleDir, "prompt-sections", name)
-  return readFileSync(filePath, "utf8")
+  return loadModuleAsset(import.meta.url, `prompt-sections/${name}`)
 }
 
 let cachedCore: string | undefined

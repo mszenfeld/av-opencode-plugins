@@ -157,6 +157,8 @@ describe("AppVerkPlugins", () => {
         "dist/modules/qa/prompt-sections/core.md",
         "dist/modules/qa/prompt-sections/overlay-fe.md",
         "dist/modules/qa/prompt-sections/overlay-be.md",
+        "dist/modules/_shared/load-asset.js",
+        "dist/modules/_shared/load-asset.d.ts",
         "dist/modules/pantheon-config/index.js",
         "dist/modules/pantheon-config/index.d.ts",
         "dist/modules/pantheon-config/loader.js",
