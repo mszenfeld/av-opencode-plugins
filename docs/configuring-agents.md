@@ -88,7 +88,7 @@ Effective configuration when running inside `/my-project`:
 }
 ```
 
-Model strings follow OpenCode's native convention: `<providerID>/<modelID>` (exactly one slash). The same value you would put in `opencode.json` `agent.<name>.model`.
+Model strings follow OpenCode's native convention: `<providerID>/<modelID>`. Aggregator providers like OpenRouter use a three-segment form (`openrouter/openai/gpt-5.5`), and that is accepted too. The same value you would put in `opencode.json` `agent.<name>.model`.
 
 JSONC support: comments (`//` and `/* */`) and trailing commas are allowed.
 
@@ -117,10 +117,13 @@ Changes to `pantheon.json` only take effect after restarting OpenCode. There is 
 ## FAQ
 
 **Q: What model strings are valid?**
-A: Anything in the form `<providerID>/<modelID>` with exactly one slash. Examples:
+A: Anything in the form `<providerID>/<modelID>` with at least one slash. Aggregator providers may publish models under a nested path — those are accepted as long as each segment uses only alphanumerics, dot, dash, or underscore. Examples:
 - `anthropic/claude-opus-4-7`
 - `anthropic/claude-sonnet-4-6`
 - `anthropic/claude-haiku-4-5-20251001`
+- `openrouter/openai/gpt-5.5`
+- `openrouter/anthropic/claude-3.5-sonnet`
+- `opencode-go/kimi-k2.6`
 
 **Q: I set `agent.zmora.model` in `opencode.json` but it's not used. Why?**
 A: The OpenCode registry key is `zmora-fe` / `zmora-be`, not `zmora`. The `zmora` key only exists inside `pantheon.json` as the logical agent name. To override in `opencode.json`, set `agent."zmora-fe".model` and `agent."zmora-be".model` separately.
