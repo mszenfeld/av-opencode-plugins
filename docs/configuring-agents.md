@@ -17,17 +17,6 @@ Create `~/.config/opencode/pantheon.json`:
 
 Restart OpenCode. Perun will run on Opus, Zmora on Sonnet.
 
-## Upgrading from v0.2.x
-
-`v0.3.0` renamed the QA subagent registry keys from `qa-tester-fe` / `qa-tester-be` to `zmora-fe` / `zmora-be`. This is a hard rename with no compatibility shim — if your personal `opencode.json` overrides `agent."qa-tester-fe".model` or `agent."qa-tester-be".model`, those entries become inert silently after upgrading.
-
-You have two options:
-
-1. **Rename in place** in `opencode.json` — change the keys to `agent."zmora-fe".model` and `agent."zmora-be".model`.
-2. **Migrate to `pantheon.json`** (recommended) — a single `agents.zmora.model` entry covers both subagent variants, as shown in the TL;DR above.
-
-See also the [README upgrade section](../README.md#upgrading-from-v02x).
-
 ## Where the file lives
 
 Pantheon looks in two places, in this order:
@@ -113,29 +102,3 @@ If your `pantheon.json` exists but fails to parse, you'll see a warning toast in
 ## Restart required
 
 Changes to `pantheon.json` only take effect after restarting OpenCode. There is no hot-reload in the current version.
-
-## FAQ
-
-**Q: What model strings are valid?**
-A: Anything in the form `<providerID>/<modelID>` with at least one slash. Aggregator providers may publish models under a nested path — those are accepted as long as each segment uses only alphanumerics, dot, dash, or underscore. Examples:
-- `anthropic/claude-opus-4-7`
-- `anthropic/claude-sonnet-4-6`
-- `anthropic/claude-haiku-4-5-20251001`
-- `openrouter/openai/gpt-5.5`
-- `openrouter/anthropic/claude-3.5-sonnet`
-- `opencode-go/kimi-k2.6`
-
-**Q: I set `agent.zmora.model` in `opencode.json` but it's not used. Why?**
-A: The OpenCode registry key is `zmora-fe` / `zmora-be`, not `zmora`. The `zmora` key only exists inside `pantheon.json` as the logical agent name. To override in `opencode.json`, set `agent."zmora-fe".model` and `agent."zmora-be".model` separately.
-
-> **Note (upgraders from v0.2.x):** these keys were previously named `qa-tester-fe` and `qa-tester-be`. They were renamed to `zmora-fe` / `zmora-be` in `v0.3.0` with no compatibility shim — if your `opencode.json` still uses the old names, the overrides are silently ignored. See [Upgrading from v0.2.x](#upgrading-from-v02x).
-
-**Q: I added a section like `dispatch` or `logging` to `pantheon.json`. What happens?**
-A: The loader silently ignores unknown top-level sections — no error, no warning toast. Future Pantheon versions may add such sections; your file is forward-compatible. Note that unknown **fields under a known agent** (e.g. `agents.perun.temperture`) are still surfaced as errors, because those are almost always typos rather than forward-compat use.
-
-**Q: The walk-up scares me. Will Pantheon read configs from outside my home directory?**
-A: No. The walk stops at your home directory. If your `cwd` is outside `$HOME` entirely (uncommon), the walk continues to the filesystem root — in that case, audit the paths it would visit before adding any sensitive content.
-
-## See also
-
-- [`AGENTS.md`](../AGENTS.md) — repository contributor guide
