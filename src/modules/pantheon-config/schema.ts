@@ -15,15 +15,18 @@ export type ValidationResult = {
   errors: string[]
 }
 
-// Printable-ASCII allow-list — `<providerID>/<modelID>` with exactly one
-// slash, where each segment is non-empty and uses only the characters
-// observed in real OpenCode model identifiers (alphanumerics, dot, dash,
-// underscore). This is deliberately stricter than `[^/]+` so untrusted
-// control sequences (ESC `\x1b`, BiDi `U+202E`, `\r\n`, zero-width chars)
-// cannot reach the TUI sinks at `coordinator/index.ts` and `qa/index.ts`
-// via `config.agent[...]!.model` — same CWE-117 class addressed for
-// session-notification in commit 392b781.
-const MODEL_REGEX = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
+// Printable-ASCII allow-list — `<providerID>/<modelID>` with at least one
+// slash and two or more non-empty segments. Aggregator providers like
+// OpenRouter use a three-segment form (`openrouter/openai/gpt-5.5`), so
+// the structure is "two-or-more segments", not "exactly two". Each segment
+// uses only the characters observed in real OpenCode model identifiers
+// (alphanumerics, dot, dash, underscore). This is deliberately stricter
+// than `[^/]+` so untrusted control sequences (ESC `\x1b`, BiDi `U+202E`,
+// `\r\n`, zero-width chars) cannot reach the TUI sinks at
+// `coordinator/index.ts` and `qa/index.ts` via `config.agent[...]!.model`
+// — same CWE-117 class addressed for session-notification in commit
+// 392b781.
+const MODEL_REGEX = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/
 
 // Unknown top-level sections are silently ignored (forward-compat per
 // docs/configuring-agents.md FAQ), so there is no allow-list to maintain
@@ -87,7 +90,7 @@ export function validateConfigFile(raw: unknown, sourcePath?: string): Validatio
     if (typeof model !== "string" || !MODEL_REGEX.test(model)) {
       const shown = typeof model === "string" ? `"${model}"` : String(model)
       errors.push(
-        `${prefix(sourcePath)}invalid model ${shown} for agent "${name}" — must match <providerID>/<modelID>`,
+        `${prefix(sourcePath)}invalid model ${shown} for agent "${name}" — must match <providerID>/<modelID> (aggregator paths like openrouter/openai/gpt-5.5 are allowed)`,
       )
       continue
     }

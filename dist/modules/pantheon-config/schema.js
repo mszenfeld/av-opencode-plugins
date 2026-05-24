@@ -1,4 +1,4 @@
-const MODEL_REGEX = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const MODEL_REGEX = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
 const KNOWN_AGENT_FIELDS = /* @__PURE__ */ new Set(["model"]);
 function prefix(sourcePath) {
   return sourcePath !== void 0 ? `[pantheon] ${sourcePath}: ` : "[pantheon] ";
@@ -37,7 +37,7 @@ function validateConfigFile(raw, sourcePath) {
     if (typeof model !== "string" || !MODEL_REGEX.test(model)) {
       const shown = typeof model === "string" ? `"${model}"` : String(model);
       errors.push(
-        `${prefix(sourcePath)}invalid model ${shown} for agent "${name}" \u2014 must match <providerID>/<modelID>`
+        `${prefix(sourcePath)}invalid model ${shown} for agent "${name}" \u2014 must match <providerID>/<modelID> (aggregator paths like openrouter/openai/gpt-5.5 are allowed)`
       );
       continue;
     }

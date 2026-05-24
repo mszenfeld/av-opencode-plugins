@@ -38,12 +38,56 @@ describe("validateConfigFile", () => {
     expect(result.errors[0]).toMatch(/invalid model "no-slash-here"/)
   })
 
-  it("rejects model with more than one slash", () => {
+  it("accepts aggregator-prefixed model strings (e.g. openrouter)", () => {
+    // OpenRouter and similar aggregators publish models under a nested path
+    // like `openrouter/openai/gpt-5.5`. The schema must accept these even
+    // though they contain more than one slash.
     const result = validateConfigFile({
-      agents: { perun: { model: "a/b/c" } },
+      agents: {
+        perun: { model: "openrouter/openai/gpt-5.5" },
+        zmora: { model: "openrouter/anthropic/claude-3.5-sonnet" },
+      },
     })
-    expect(result.config.agents).toEqual({})
-    expect(result.errors[0]).toMatch(/invalid model "a\/b\/c"/)
+    expect(result.config.agents).toEqual({
+      perun: { model: "openrouter/openai/gpt-5.5" },
+      zmora: { model: "openrouter/anthropic/claude-3.5-sonnet" },
+    })
+    expect(result.errors).toEqual([])
+  })
+
+  it("rejects empty segments in multi-slash paths", () => {
+    // CWE-117 protection — empty segments would produce ambiguous identifiers
+    // and may indicate malformed input. Allowed structure: 2+ non-empty
+    // segments separated by single slashes.
+    const cases = ["a//b", "/leading", "trailing/", "a/b/", "//"]
+    for (const model of cases) {
+      const result = validateConfigFile({
+        agents: { perun: { model } },
+      })
+      expect(result.config.agents, `should reject ${model}`).toEqual({})
+      expect(result.errors[0], `should reject ${model}`).toMatch(/invalid model/)
+    }
+  })
+
+  it("rejects models containing control characters or whitespace (CWE-117)", () => {
+    // The `[A-Za-z0-9._-]` allow-list intentionally excludes ESC, newlines,
+    // BiDi marks, zero-width chars, and tabs — none of which appear in real
+    // OpenCode model identifiers but all of which could corrupt downstream
+    // TUI logs if allowed through.
+    const cases = [
+      "anthropic/claude\x1b[31m-opus",
+      "anthropic/claude\nopus",
+      "anthropic/claude‮opus",
+      "anthropic/claude opus",
+      "anthropic/claude\topus",
+    ]
+    for (const model of cases) {
+      const result = validateConfigFile({
+        agents: { perun: { model } },
+      })
+      expect(result.config.agents, `should reject ${JSON.stringify(model)}`).toEqual({})
+      expect(result.errors[0], `should reject ${JSON.stringify(model)}`).toMatch(/invalid model/)
+    }
   })
 
   it("rejects non-string model", () => {
