@@ -8,6 +8,7 @@ function loadSection(name: string): string {
 let cachedCore: string | undefined
 let cachedOverlayFe: string | undefined
 let cachedOverlayBe: string | undefined
+let cachedOverlaySetup: string | undefined
 
 function getCore(): string {
   cachedCore ??= loadSection("core.md")
@@ -15,12 +16,17 @@ function getCore(): string {
 }
 
 function getOverlay(stack: QaTesterStack): string {
-  if (stack === "fe") {
-    cachedOverlayFe ??= loadSection("overlay-fe.md")
-    return cachedOverlayFe
+  switch (stack) {
+    case "fe":
+      cachedOverlayFe ??= loadSection("overlay-fe.md")
+      return cachedOverlayFe
+    case "be":
+      cachedOverlayBe ??= loadSection("overlay-be.md")
+      return cachedOverlayBe
+    case "setup":
+      cachedOverlaySetup ??= loadSection("overlay-setup.md")
+      return cachedOverlaySetup
   }
-  cachedOverlayBe ??= loadSection("overlay-be.md")
-  return cachedOverlayBe
 }
 
 export interface BuiltAgent {

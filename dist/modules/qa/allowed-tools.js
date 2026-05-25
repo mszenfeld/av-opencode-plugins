@@ -48,13 +48,26 @@ const BE_TOOLS = [
   "Bash(head:./*)",
   "Bash(tail:./*)"
 ];
+const SETUP_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "execute_recipe"
+];
 function toolsForVariant(stack) {
-  const stackTools = stack === "fe" ? FE_TOOLS : BE_TOOLS;
-  return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...stackTools]));
+  switch (stack) {
+    case "fe":
+      return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...FE_TOOLS]));
+    case "be":
+      return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...BE_TOOLS]));
+    case "setup":
+      return SETUP_TOOLS;
+  }
 }
 export {
   BE_TOOLS,
   FE_TOOLS,
+  SETUP_TOOLS,
   SHARED_TOOLS,
   toolsForVariant
 };
