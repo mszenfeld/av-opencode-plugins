@@ -40,7 +40,7 @@ For your assigned `BE-XX:` block:
 
 4. If DB Check is specified: run the query, compare against expected.
 
-   **If the DB connection fails with an authentication error**, return `NEED_INFO` with `kind: "service"`, `missing: [<DSN host:port>]`, `hint: "Verify database credentials (auth failure on <DSN>); re-set in shell and reply 'resume'."`.
+   **If the DB connection fails with an authentication error** (the host is reachable but rejects the credentials), return `NEED_INFO` with `kind: "credentials"`, `missing: [<env var name(s) used to source the DB credentials>]`, `hint: "Verify <names> value (auth failure on <DSN>); re-set in shell that launches OpenCode and reply 'resume'."`. Reserve `kind: "service"` for the case where the DB host is unreachable (connection refused, DNS failure, timeout) — see the connection-failure branch in the be-testing skill.
 
 5. Execute each edge case as a sub-test.
 6. Save response dumps to `docs/testing/reports/dumps/<ID>-response.json` when needed.
