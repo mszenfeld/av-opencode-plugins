@@ -159,8 +159,6 @@ activation: When to load the skill
 
 `/run-qa` performs a **preflight check** before dispatching any scenarios, and individual scenarios can pause the run mid-flight via `NEED_INFO` when a prerequisite turns out to be missing. Both mechanisms are driven by an optional `## Setup` block in the test plan.
 
-A full hand-written example lives at [`docs/testing/plans/example-with-setup.md`](../testing/plans/example-with-setup.md).
-
 ### Credentials and secrets
 
 Read this **before** your first `/run-qa`. The rules below are not optional — they apply to every run, every plan, and every reply during a `NEED_INFO` pause.
