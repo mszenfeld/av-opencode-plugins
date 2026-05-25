@@ -16,7 +16,7 @@ If the scenario's DB Check is specified but the DB client is unavailable, perfor
 
 ### Step 2.5: Pre-flight required env vars
 
-Before sending any request, identify which env vars the scenario depends on. These are usually referenced via shell expansion in the scenario's `curl` / `psql` commands (e.g. `$TEST_USER_EMAIL`, `${API_KEY}`).
+Before sending any request, identify which env vars the scenario depends on. These are usually referenced via shell expansion in the scenario's `curl` / `psql` commands (e.g. `$TEST_USER_EMAIL`, `${API_KEY}`). Scan the entire scenario block for every `$NAME` or `${NAME}` token regardless of quoting context — including inside `-d`/`--data` JSON payloads, heredoc bodies, and connection strings. Each unique NAME (matching `[A-Z_][A-Z0-9_]*`) is a required env var.
 
 For every such VAR, check whether it is set in the current process:
 
@@ -40,7 +40,7 @@ For your assigned `BE-XX:` block:
 
 4. If DB Check is specified: run the query, compare against expected.
 
-   **If the DB connection fails with an authentication error** (the host is reachable but rejects the credentials), return `NEED_INFO` with `kind: "credentials"`, `missing: [<env var name(s) used to source the DB credentials>]`, `hint: "Verify <names> value (auth failure on <DSN>); re-set in shell that launches OpenCode and reply 'resume'."`. Reserve `kind: "service"` for the case where the DB host is unreachable (connection refused, DNS failure, timeout) — see the connection-failure branch in the be-testing skill.
+   **If the DB connection fails with an authentication error** (the host is reachable but rejects the credentials), return `NEED_INFO` with `kind: "credentials"`, `missing: [<env var name(s) used to source the DB credentials>]`, `hint: "Verify <names> value (auth failure on <DSN>); re-set in shell that launches OpenCode and reply 'resume'."`. Authentication failure looks like: `FATAL: password authentication failed`, `Access denied for user`, `authentication failed for user`. Connection failure looks like: `could not connect to server`, `Connection refused`, `could not translate host name`, `timeout expired`. Use the first set for `kind: "credentials"`, the second for `kind: "service"`. Reserve `kind: "service"` for the case where the DB host is unreachable (connection refused, DNS failure, timeout) — see the connection-failure branch in the be-testing skill. If the connection uses a single DSN env var (e.g. `psql "$DATABASE_URL"`), list that one name. If it uses discrete vars (e.g. `psql -h $DB_HOST -U $DB_USER` with `PGPASSWORD=$DB_PASS`), list every env var that contributed to the connection so the user can audit all of them.
 
 5. Execute each edge case as a sub-test.
 6. Save response dumps to `docs/testing/reports/dumps/<ID>-response.json` when needed.
