@@ -28,6 +28,17 @@ declare class BindingsStore {
     releaseSnapshot(id: string): void;
     isPinned(parentID: string, name: string): boolean;
     writeBinding(parentID: string, name: string, value: string, type: BindingType, source: BindingSource): WriteResult;
+    /**
+     * Purge entries older than TTL (excluding pinned). Returns count purged.
+     * Called periodically from the plugin sweep timer.
+     */
+    sweepExpired(nowMs: number, ttlMs: number): number;
+    /**
+     * Purge all bindings for a parent session (called on session.deleted /
+     * QA-run completion / abort). Pinned entries are still purged — the caller
+     * has decided the parent's lifecycle is over.
+     */
+    clearParent(parentID: string): number;
 }
 
 export { type BindingEntry, type BindingSnapshot, type BindingSource, type BindingType, BindingsStore, type WriteResult };

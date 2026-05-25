@@ -12,6 +12,8 @@ function loadCommandMarkdown(name) {
   return loadModuleAsset(import.meta.url, `../../commands/${name}`);
 }
 const VARIANTS = ["fe", "be", "setup"];
+const TTL_MS = 60 * 60 * 1e3;
+const SWEEP_INTERVAL_MS = 5 * 60 * 1e3;
 const COMMANDS = [
   {
     name: "create-qa-plan",
@@ -76,6 +78,13 @@ const AppVerkQAPlugin = async ({ client }) => {
     nowMs: () => Date.now()
   });
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID });
+  const sweepTimer = setInterval(() => {
+    try {
+      store.sweepExpired(Date.now(), TTL_MS);
+    } catch {
+    }
+  }, SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
   return {
     config: async (config) => {
       config.agent ??= {};
@@ -168,7 +177,19 @@ const AppVerkQAPlugin = async ({ client }) => {
         }
       })
     },
-    "shell.env": shellEnvHook
+    "shell.env": shellEnvHook,
+    event: async ({ event }) => {
+      if (event.type !== "session.deleted") return;
+      const deletedID = event.properties?.info?.id;
+      if (typeof deletedID !== "string" || deletedID.length === 0) return;
+      store.clearParent(deletedID);
+      state.clearRun(deletedID);
+      registry.unregister(deletedID);
+      parentIDCache.delete(deletedID);
+      for (const [childID, parentID] of parentIDCache.entries()) {
+        if (parentID === deletedID) parentIDCache.delete(childID);
+      }
+    }
   };
 };
 var qa_default = AppVerkQAPlugin;

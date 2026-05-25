@@ -23,6 +23,9 @@ export interface BindingSnapshot {
 const QA_BIND_RE = /^QA_BIND_[A-Z][A-Z0-9_]*$/
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
+const PER_PARENT_CAP = 32
+const GLOBAL_CAP = 256
+
 /**
  * Process-control env names that are NEVER acceptable as binding names —
  * overriding any of these would compromise the host shell environment for
@@ -68,6 +71,7 @@ export class BindingsStore {
   readonly #pinCounts = new Map<string, Map<string, number>>()  // parentID → name → count
   readonly #snapshotIds = new Map<string, { parentID: string; names: string[] }>()
   #snapshotCounter = 0
+  #globalCount = 0
 
   listForParent(parentID: string): ReadonlyMap<string, BindingEntry> {
     return this.#map.get(parentID) ?? new Map()
@@ -154,12 +158,56 @@ export class BindingsStore {
     if (parentMap.has(name)) {
       return { status: "duplicate" }
     }
+    if (parentMap.size >= PER_PARENT_CAP) {
+      return { status: "error", reason: `per-parent cap of ${PER_PARENT_CAP} reached` }
+    }
+    if (this.#globalCount >= GLOBAL_CAP) {
+      return { status: "error", reason: `global cap of ${GLOBAL_CAP} reached` }
+    }
     parentMap.set(name, {
       value: new Secret(stored),
       type,
       source,
       createdAt: Date.now(),
     })
+    this.#globalCount++
     return { status: "ok" }
+  }
+
+  /**
+   * Purge entries older than TTL (excluding pinned). Returns count purged.
+   * Called periodically from the plugin sweep timer.
+   */
+  sweepExpired(nowMs: number, ttlMs: number): number {
+    let purged = 0
+    for (const [parentID, parentMap] of this.#map.entries()) {
+      for (const [name, entry] of parentMap.entries()) {
+        if (this.isPinned(parentID, name)) continue
+        if (nowMs - entry.createdAt < ttlMs) continue
+        parentMap.delete(name)
+        purged++
+        this.#globalCount--
+      }
+      if (parentMap.size === 0) {
+        this.#map.delete(parentID)
+      }
+    }
+    return purged
+  }
+
+  /**
+   * Purge all bindings for a parent session (called on session.deleted /
+   * QA-run completion / abort). Pinned entries are still purged — the caller
+   * has decided the parent's lifecycle is over.
+   */
+  clearParent(parentID: string): number {
+    const parentMap = this.#map.get(parentID)
+    if (parentMap === undefined) return 0
+    const purged = parentMap.size
+    this.#globalCount -= purged
+    this.#map.delete(parentID)
+    // Also clear any lingering pin counts for safety.
+    this.#pinCounts.delete(parentID)
+    return purged
   }
 }

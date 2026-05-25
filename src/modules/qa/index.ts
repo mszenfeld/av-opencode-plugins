@@ -17,6 +17,9 @@ function loadCommandMarkdown(name: string): string {
 
 const VARIANTS = ["fe", "be", "setup"] as const
 
+const TTL_MS = 60 * 60 * 1000  // 1 hour
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000  // 5 minutes
+
 const COMMANDS = [
   {
     name: "create-qa-plan",
@@ -97,6 +100,19 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
   })
 
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID })
+
+  // Periodic TTL sweep: purges binding entries older than TTL_MS. Skips pinned
+  // entries (active snapshots). Wrapped in try/catch — a background timer must
+  // never throw an unhandled rejection into the OpenCode process. `unref` lets
+  // Node exit if this is the only remaining handle.
+  const sweepTimer = setInterval(() => {
+    try {
+      store.sweepExpired(Date.now(), TTL_MS)
+    } catch {
+      // Never throw from a background timer.
+    }
+  }, SWEEP_INTERVAL_MS)
+  sweepTimer.unref?.()
 
   return {
     config: async (config) => {
@@ -205,6 +221,24 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }),
     },
     "shell.env": shellEnvHook,
+    event: async ({ event }) => {
+      // Defensive cleanup: when a parent session is deleted in the SDK, drop
+      // any in-memory state still keyed by that ID (bindings, attempt counters,
+      // child→agent registrations). Bounded by sweepExpired, but explicit
+      // cleanup avoids waiting up to TTL_MS for the next periodic pass.
+      if (event.type !== "session.deleted") return
+      const deletedID = event.properties?.info?.id
+      if (typeof deletedID !== "string" || deletedID.length === 0) return
+      store.clearParent(deletedID)
+      state.clearRun(deletedID)
+      registry.unregister(deletedID)
+      parentIDCache.delete(deletedID)
+      // Also drop any child entries that resolved to this parent — they're
+      // stale now that the parent is gone.
+      for (const [childID, parentID] of parentIDCache.entries()) {
+        if (parentID === deletedID) parentIDCache.delete(childID)
+      }
+    },
   }
 }
 

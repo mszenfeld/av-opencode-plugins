@@ -111,3 +111,94 @@ describe("BindingsStore — snapshot pin/release", () => {
     expect(store.isPinned("perun1", "QA_BIND_X")).toBe(false)
   })
 })
+
+describe("BindingsStore — caps", () => {
+  let store: BindingsStore
+  beforeEach(() => { store = new BindingsStore() })
+
+  it("rejects 33rd write to same parent", () => {
+    for (let i = 0; i < 32; i++) {
+      const r = store.writeBinding("p1", `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+      expect(r.status).toBe("ok")
+    }
+    const r33 = store.writeBinding("p1", "QA_BIND_OVERFLOW", "v", "plain", "minted-recipe")
+    expect(r33.status).toBe("error")
+    if (r33.status === "error") {
+      expect(r33.reason).toMatch(/cap|limit/i)
+    }
+  })
+
+  it("global cap blocks 257th entry across many parents", () => {
+    // 256 entries spread across 8 parents (32 each = at-cap).
+    for (let p = 0; p < 8; p++) {
+      for (let i = 0; i < 32; i++) {
+        store.writeBinding(`p${p}`, `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+      }
+    }
+    // New parent's first write fails — global cap reached, nothing expired to evict.
+    const r = store.writeBinding("p99", "QA_BIND_NEW", "v", "plain", "minted-recipe")
+    expect(r.status).toBe("error")
+    if (r.status === "error") {
+      expect(r.reason).toMatch(/global|cap|limit/i)
+    }
+  })
+})
+
+describe("BindingsStore — TTL sweep + clearParent", () => {
+  let store: BindingsStore
+  beforeEach(() => { store = new BindingsStore() })
+
+  it("sweep purges entries past TTL", () => {
+    store.writeBinding("p1", "QA_BIND_X", "v", "plain", "minted-recipe")
+    const created = store.getBinding("p1", "QA_BIND_X")!.createdAt
+    // Sweep at T = created + ttl + 1
+    const purged = store.sweepExpired(created + 1001, 1000)
+    expect(purged).toBe(1)
+    expect(store.getBinding("p1", "QA_BIND_X")).toBeUndefined()
+  })
+
+  it("sweep skips pinned entries", () => {
+    store.writeBinding("p1", "QA_BIND_X", "v", "plain", "minted-recipe")
+    const snap = store.pinSnapshot("p1")
+    const created = store.getBinding("p1", "QA_BIND_X")!.createdAt
+    const purged = store.sweepExpired(created + 9999, 1000)
+    expect(purged).toBe(0)
+    expect(store.getBinding("p1", "QA_BIND_X")).toBeDefined()
+    store.releaseSnapshot(snap.id)
+  })
+
+  it("sweep does NOT purge entries within TTL window", () => {
+    store.writeBinding("p1", "QA_BIND_X", "v", "plain", "minted-recipe")
+    const created = store.getBinding("p1", "QA_BIND_X")!.createdAt
+    const purged = store.sweepExpired(created + 500, 1000)
+    expect(purged).toBe(0)
+  })
+
+  it("clearParent purges all bindings for that parent", () => {
+    store.writeBinding("p1", "QA_BIND_X", "v", "plain", "minted-recipe")
+    store.writeBinding("p1", "QA_BIND_Y", "v", "plain", "minted-recipe")
+    store.writeBinding("p2", "QA_BIND_Z", "v", "plain", "minted-recipe")
+    const purged = store.clearParent("p1")
+    expect(purged).toBe(2)
+    expect(store.getBinding("p1", "QA_BIND_X")).toBeUndefined()
+    expect(store.getBinding("p2", "QA_BIND_Z")).toBeDefined()
+  })
+
+  it("clearParent decrements global count so new parent can write", () => {
+    // Fill near cap.
+    for (let p = 0; p < 7; p++) {
+      for (let i = 0; i < 32; i++) {
+        store.writeBinding(`p${p}`, `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+      }
+    }
+    // 7*32 = 224. Add 32 more for p7 → 256 (at cap).
+    for (let i = 0; i < 32; i++) {
+      store.writeBinding("p7", `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+    }
+    // Refused at cap.
+    expect(store.writeBinding("p99", "QA_BIND_NEW", "v", "plain", "minted-recipe").status).toBe("error")
+    // Clear one parent's 32 — now room.
+    expect(store.clearParent("p0")).toBe(32)
+    expect(store.writeBinding("p99", "QA_BIND_NEW", "v", "plain", "minted-recipe").status).toBe("ok")
+  })
+})
