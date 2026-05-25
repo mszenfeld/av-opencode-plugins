@@ -454,12 +454,13 @@ describe("dispatchParallel", () => {
     expect(calls.abortTask.map((c) => c.sessionId)).toEqual(["s-abort"])
   })
 
-  it("runs at most DISPATCH_CONCURRENCY tasks in flight at any moment", async () => {
-    // Use 8 tasks, each holds for 50ms before resolving. With pool=4 and serial
-    // batching, total wall-clock should be ~2 batches × 50ms = ~100ms, not 50ms.
+  it("runs every task in flight at once when tasks.length == DISPATCH_CONCURRENCY", async () => {
+    // With DISPATCH_MAX_TASKS == DISPATCH_CONCURRENCY == 4, the public API can
+    // never submit more than `concurrency` tasks. A full-cap call should fan
+    // out all four immediately — no serialisation across batches.
     const inFlight = { count: 0, peak: 0 }
     const recorder = makeSpecialistRecorder({
-      sessionIdSequence: ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7"],
+      sessionIdSequence: ["s0", "s1", "s2", "s3"],
       fetchMessagesHandler: async () => {
         inFlight.count++
         inFlight.peak = Math.max(inFlight.peak, inFlight.count)
@@ -469,7 +470,7 @@ describe("dispatchParallel", () => {
       },
     })
 
-    const tasks: DispatchTask[] = Array.from({ length: 8 }, (_, i) => ({
+    const tasks: DispatchTask[] = Array.from({ length: DISPATCH_CONCURRENCY }, (_, i) => ({
       name: "worker",
       prompt: `t${i}`,
     }))
@@ -478,32 +479,34 @@ describe("dispatchParallel", () => {
     await dispatchParallel({ tasks, agentRegistry, specialist: recorder.specialist })
     // Upper bound: pool must never exceed DISPATCH_CONCURRENCY.
     expect(inFlight.peak).toBeLessThanOrEqual(DISPATCH_CONCURRENCY)
-    // Lower bound: pool must actually parallelise. Without this,
-    // a regression that serialises the pool (e.g. workerCount = 1) would still
-    // satisfy the upper bound. With 8 tasks each holding for 50ms and 4
-    // workers, all 4 slots are guaranteed to be in-flight before any resolves.
+    // Lower bound: pool must actually parallelise. With `tasks.length ==
+    // DISPATCH_CONCURRENCY` and each task holding for 50ms, all slots are
+    // guaranteed to be in-flight before any resolve.
     expect(inFlight.peak).toBe(DISPATCH_CONCURRENCY)
   })
 
   it("rejects tasks.length > DISPATCH_MAX_TASKS before any session spawns", async () => {
     const recorder = makeSpecialistRecorder()
-    const tasks: DispatchTask[] = Array.from({ length: 51 }, (_, i) => ({
+    const overLimit = DISPATCH_MAX_TASKS + 1
+    const tasks: DispatchTask[] = Array.from({ length: overLimit }, (_, i) => ({
       name: "worker",
       prompt: `t${i}`,
     }))
     const agentRegistry: Record<string, AgentInfo> = { worker: { mode: "subagent" } }
     await expect(
       dispatchParallel({ tasks, agentRegistry, specialist: recorder.specialist }),
-    ).rejects.toThrow(/exceeds DISPATCH_MAX_TASKS \(50\)/)
+    ).rejects.toThrow(
+      new RegExp(`exceeds DISPATCH_MAX_TASKS \\(${DISPATCH_MAX_TASKS}\\)`),
+    )
     expect(recorder.calls.startTask).toHaveLength(0) // no sessions spawned
   })
 
-  it("completes 50 tasks (the cap) through the pool", async () => {
+  it("completes DISPATCH_MAX_TASKS tasks (the cap) through the pool", async () => {
     const recorder = makeSpecialistRecorder({
-      sessionIdSequence: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      sessionIdSequence: Array.from({ length: DISPATCH_MAX_TASKS }, (_, i) => `s${i}`),
       fetchMessagesHandler: async () => [finishedMessage("ok")],
     })
-    const tasks: DispatchTask[] = Array.from({ length: 50 }, (_, i) => ({
+    const tasks: DispatchTask[] = Array.from({ length: DISPATCH_MAX_TASKS }, (_, i) => ({
       name: "worker",
       prompt: `t${i}`,
     }))
@@ -513,69 +516,26 @@ describe("dispatchParallel", () => {
       agentRegistry,
       specialist: recorder.specialist,
     })
-    expect(results).toHaveLength(50)
+    expect(results).toHaveLength(DISPATCH_MAX_TASKS)
     expect(results.every((r) => r.status === "success")).toBe(true)
   })
 
-  it("drains remaining tasks when one in the middle hangs", async () => {
-    const completionOrder: number[] = []
-    const recorder = makeSpecialistRecorder({
-      sessionIdSequence: ["s0", "s1", "s2", "s3", "s4", "s5"],
-      fetchMessagesHandler: async (sessionId) => {
-        const i = Number(sessionId.slice(1))
-        if (i === 2) {
-          await new Promise((r) => setTimeout(r, 200))
-        }
-        completionOrder.push(i)
-        return [finishedMessage(`done-${i}`)]
-      },
-    })
-    const tasks: DispatchTask[] = Array.from({ length: 6 }, (_, i) => ({
-      name: "worker",
-      prompt: `t${i}`,
-    }))
-    const agentRegistry: Record<string, AgentInfo> = { worker: { mode: "subagent" } }
-    const results = await dispatchParallel({
-      tasks,
-      agentRegistry,
-      specialist: recorder.specialist,
-    })
-    expect(results).toHaveLength(6)
-    expect(results.every((r) => r.status === "success")).toBe(true)
-    // Tasks 4, 5 must complete before task 2 (which is artificially slow).
-    expect(completionOrder.indexOf(4)).toBeLessThan(completionOrder.indexOf(2))
-  })
+  // NOTE: the historic "drains remaining tasks when one hangs" test required
+  // tasks.length > DISPATCH_CONCURRENCY to exercise the worker pool's queue.
+  // With DISPATCH_MAX_TASKS == DISPATCH_CONCURRENCY, that path is unreachable
+  // through the public API — workers each claim exactly one task and exit, so
+  // there is nothing to drain. The pool's queue logic is retained for safety
+  // (defense-in-depth if the constants ever diverge again), but is no longer
+  // covered by an end-to-end test through `dispatchParallel`.
 
-  it("does not start new tasks after abort signal fires", async () => {
-    const controller = new AbortController()
-    let started = 0
-    const recorder = makeSpecialistRecorder({
-      sessionIdSequence: Array.from({ length: 10 }, (_, i) => `s${i}`),
-      fetchMessagesHandler: async () => {
-        started++
-        // Abort right after the first batch starts; remaining slots must abort.
-        if (started === 4) controller.abort()
-        await new Promise((r) => setTimeout(r, 50))
-        return [finishedMessage("ok")]
-      },
-    })
-    const tasks: DispatchTask[] = Array.from({ length: 10 }, (_, i) => ({
-      name: "worker",
-      prompt: `t${i}`,
-    }))
-    const agentRegistry: Record<string, AgentInfo> = { worker: { mode: "subagent" } }
-    const results = await dispatchParallel({
-      tasks,
-      agentRegistry,
-      specialist: recorder.specialist,
-      signal: controller.signal,
-    })
-    // First 4 ran (each may be success or aborted depending on timing of in-flight signal).
-    // Tasks 4..9 must be "aborted" with duration_ms === 0.
-    const aborted = results.filter((r) => r.status === "aborted")
-    expect(aborted.length).toBeGreaterThanOrEqual(6)
-    expect(aborted.every((r) => r.error?.includes("aborted") ?? false)).toBe(true)
-  })
+  // NOTE: the historic "does not start new tasks after abort signal fires" test
+  // required tasks.length > DISPATCH_CONCURRENCY so the worker pool would have
+  // a queued cohort to never-start when the signal fired. With DISPATCH_MAX_TASKS
+  // == DISPATCH_CONCURRENCY, there is no queued cohort — every submitted task
+  // is in-flight from the start, and abort propagation through the poller is
+  // covered by the single-task `propagates AbortSignal: aborting mid-poll …`
+  // test above. The multi-task queue-position case is unreachable via the
+  // public API.
 
   // The "all starts before any fetch" invariant only holds when `tasks.length <=
   // DISPATCH_CONCURRENCY` — at higher fan-out, a later task's `startTask`

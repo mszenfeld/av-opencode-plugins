@@ -60,7 +60,14 @@ export interface DispatchParallelInput {
 export const DEFAULT_POLL_INTERVAL_MS = 1000
 export const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
 export const DEFAULT_RESULT_MAX_BYTES = 100 * 1024
-export const DISPATCH_MAX_TASKS = 50
+// Aligned with DISPATCH_CONCURRENCY so the per-call cap matches the worker
+// pool size. The label `×N` rendered by the caller (e.g. Perun) now always
+// equals the concurrent burst, and callers with more than 4 tasks must chunk
+// into multiple sequential dispatch_parallel calls. This also caps the number
+// of child sessions a single call can spawn, bounding cost-DoS via crafted
+// plans (the worker pool throttles wall-clock concurrency, the cap throttles
+// per-call session count).
+export const DISPATCH_MAX_TASKS = 4
 export const DISPATCH_CONCURRENCY = 4
 
 export async function dispatchParallel(

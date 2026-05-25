@@ -45,7 +45,7 @@ interface DispatchParallelInput {
 declare const DEFAULT_POLL_INTERVAL_MS = 1000;
 declare const DEFAULT_TASK_TIMEOUT_MS: number;
 declare const DEFAULT_RESULT_MAX_BYTES: number;
-declare const DISPATCH_MAX_TASKS = 50;
+declare const DISPATCH_MAX_TASKS = 4;
 declare const DISPATCH_CONCURRENCY = 4;
 declare function dispatchParallel(input: DispatchParallelInput): Promise<DispatchResult[]>;
 

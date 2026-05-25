@@ -8,7 +8,7 @@ import { truncateBytes } from "./truncate-bytes.js";
 const DEFAULT_POLL_INTERVAL_MS = 1e3;
 const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
 const DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
-const DISPATCH_MAX_TASKS = 50;
+const DISPATCH_MAX_TASKS = 4;
 const DISPATCH_CONCURRENCY = 4;
 async function dispatchParallel(input) {
   const {

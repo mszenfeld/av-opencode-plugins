@@ -47,8 +47,8 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
         "",
         "Guarantees and limits:",
-        "- Maximum 50 tasks per call (over-limit calls are rejected before any session is created).",
-        "- Internally throttled to a 4-worker pool: tasks beyond the first 4 wait until a slot frees up. Result order is preserved.",
+        "- Maximum 4 tasks per call (aligned with the worker pool size; over-limit calls are rejected before any session is created). For larger workloads, chunk into multiple sequential dispatch_parallel calls.",
+        "- A 4-worker pool runs every task in this call in parallel. `tasks.length ≤ 4` is enforced, so concurrency equals the call size. Result order is preserved.",
         "- Each task has a 5-minute hard timeout; on expiry the task is returned with status \"timeout\" and the partial result is discarded.",
         "- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker \"[…truncated…]\" — synthesize what is present, do not retry.",
         "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent, a `mode: primary` agent, or a `mode: all` agent are rejected with a thrown error and no work is dispatched.",
@@ -71,7 +71,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         .describe(
           "REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n" +
             "- single agent: bare name (e.g. \"code-reviewer\")\n" +
-            "- N copies of one agent (total dispatched; ≤4 run concurrently): \"name ×N\" (e.g. \"code-reviewer ×3\" or \"code-reviewer ×10\")\n" +
+            "- N copies of one agent (2 ≤ N ≤ 4): \"name ×N\" (e.g. \"code-reviewer ×3\", \"code-reviewer ×4\"). N == 1 uses the bare name. N is capped at 4 — the per-call task limit; chunk larger workloads into multiple sequential calls.\n" +
             "- different agents: comma-joined names (e.g. \"code-reviewer, security-auditor\")\n" +
             "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
             "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.\n\n" +
