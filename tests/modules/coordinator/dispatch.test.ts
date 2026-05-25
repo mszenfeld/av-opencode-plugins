@@ -727,4 +727,56 @@ describe("dispatchParallel", () => {
       expect(results[0]?.name).toBe("fix-auto")
     })
   })
+
+  describe("sessionAgentRegistry + scrubber integration", () => {
+    it("registers child sessionID→agent in SessionAgentRegistry on dispatch", async () => {
+      // Plumbing check for the QA `shell.env` hook: every dispatched task
+      // must surface (childSessionID → agent name) in the registry so the
+      // hook can resolve which agent owns a given session.
+      const { SessionAgentRegistry } = await import(
+        "../../../src/modules/qa/shell-env-hook.js"
+      )
+      const registry = new SessionAgentRegistry()
+      const { specialist } = makeSpecialistRecorder({
+        sessionIdSequence: ["s1"],
+        fetchMessagesHandler: async () => [finishedMessage("ok")],
+      })
+
+      await dispatchParallel({
+        tasks: [{ name: "qa-fe-tester", prompt: "p" }],
+        agentRegistry: defaultRegistry,
+        specialist,
+        pollIntervalMs: 10,
+        sessionAgentRegistry: registry,
+      })
+
+      expect(registry.lookup("s1")).toBe("qa-fe-tester")
+    })
+
+    it("applies scrubber to task result when configured", async () => {
+      // The scrubber runs between `neutralizeUntrustedOutput` and the byte
+      // truncation step, so callers (e.g. Perun) can redact known secret
+      // values from Zmora output before it lands in the report or TUI.
+      const { specialist } = makeSpecialistRecorder({
+        sessionIdSequence: ["s1"],
+        fetchMessagesHandler: async () => [
+          finishedMessage("token=eyJSECRET happened"),
+        ],
+      })
+      const scrubber = (text: string, _parent: string): string =>
+        text.replace("eyJSECRET", "[REDACTED]")
+
+      const results = await dispatchParallel({
+        tasks: [{ name: "qa-be-tester", prompt: "p" }],
+        agentRegistry: defaultRegistry,
+        specialist,
+        pollIntervalMs: 10,
+        scrubber,
+        parentSessionID: "perun-1",
+      })
+
+      expect(results[0]?.result).toContain("[REDACTED]")
+      expect(results[0]?.result).not.toContain("eyJSECRET")
+    })
+  })
 })

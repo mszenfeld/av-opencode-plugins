@@ -18,7 +18,10 @@ async function dispatchParallel(input) {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS,
     resultMaxBytes = DEFAULT_RESULT_MAX_BYTES,
-    signal
+    signal,
+    sessionAgentRegistry,
+    scrubber,
+    parentSessionID
   } = input;
   if (tasks.length > DISPATCH_MAX_TASKS) {
     throw new Error(
@@ -49,7 +52,10 @@ async function dispatchParallel(input) {
         pollIntervalMs,
         taskTimeoutMs,
         resultMaxBytes,
-        signal
+        signal,
+        sessionAgentRegistry,
+        scrubber,
+        parentSessionID
       });
     }
   }
@@ -103,6 +109,7 @@ async function runTask(task, specialist, options) {
 ${task.context}` : task.prompt;
     const id = await specialist.startTask(task.name, fullPrompt);
     sessionId = id;
+    options.sessionAgentRegistry?.register(id, task.name);
     const rawResult = await pollUntilIdle({
       fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
@@ -113,7 +120,9 @@ ${task.context}` : task.prompt;
       // truncation pass below.
       maxBytes: options.resultMaxBytes
     });
-    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes);
+    const neutralized = neutralizeUntrustedOutput(rawResult);
+    const scrubbed = options.scrubber !== void 0 && options.parentSessionID !== void 0 ? options.scrubber(neutralized, options.parentSessionID) : neutralized;
+    const result = truncateBytes(scrubbed, options.resultMaxBytes);
     return {
       name: task.name,
       status: "success",

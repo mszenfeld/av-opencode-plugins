@@ -1,3 +1,4 @@
+import type { SessionAgentRegistry } from "../qa/shell-env-hook.js"
 import {
   pollUntilIdle,
   PollerAbortError,
@@ -52,6 +53,26 @@ export interface DispatchParallelInput {
    * called best-effort so the child session is cancelled server-side.
    */
   signal?: AbortSignal
+  /**
+   * Optional registry that records (childSessionID → task.name) at dispatch
+   * time. Consumed by plugin hooks (e.g. shell.env) that need to know which
+   * agent is running in a given session. Registration persists for the
+   * OpenCode session lifetime; cleanup is the plugin's session.deleted
+   * handler — not unregistered inside dispatch.
+   */
+  sessionAgentRegistry?: SessionAgentRegistry
+  /**
+   * Optional log-scrubber applied to every task result after the untrusted-
+   * output neutraliser, before truncation. Receives (text, parentSessionID)
+   * and returns redacted text. Used by the QA bindings flow to redact known
+   * secret values from Zmora results before they reach the report or TUI.
+   */
+  scrubber?: (text: string, parentSessionID: string) => string
+  /**
+   * Parent (Perun) session ID — passed to the scrubber. Required if scrubber
+   * is set; ignored otherwise.
+   */
+  parentSessionID?: string
 }
 
 // 1 s tail-latency budget on completion observation. `session.prompt` in the
@@ -81,6 +102,9 @@ export async function dispatchParallel(
     taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS,
     resultMaxBytes = DEFAULT_RESULT_MAX_BYTES,
     signal,
+    sessionAgentRegistry,
+    scrubber,
+    parentSessionID,
   } = input
 
   if (tasks.length > DISPATCH_MAX_TASKS) {
@@ -128,6 +152,9 @@ export async function dispatchParallel(
         taskTimeoutMs,
         resultMaxBytes,
         signal,
+        sessionAgentRegistry,
+        scrubber,
+        parentSessionID,
       })
     }
   }
@@ -225,6 +252,9 @@ async function runTask(
     taskTimeoutMs: number
     resultMaxBytes: number
     signal?: AbortSignal
+    sessionAgentRegistry?: SessionAgentRegistry
+    scrubber?: (text: string, parentSessionID: string) => string
+    parentSessionID?: string
   },
 ): Promise<DispatchResult> {
   const startTime = Date.now()
@@ -237,6 +267,12 @@ async function runTask(
     // see the session id even when failure occurs after `startTask` resolves.
     sessionId = id
 
+    // Register (childSessionID → agent name) so plugin hooks (e.g. shell.env)
+    // can resolve which agent owns a given session. Registration persists for
+    // the OpenCode session lifetime; cleanup is the plugin's `session.deleted`
+    // handler, not this dispatcher.
+    options.sessionAgentRegistry?.register(id, task.name)
+
     const rawResult = await pollUntilIdle({
       fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
@@ -248,9 +284,17 @@ async function runTask(
       maxBytes: options.resultMaxBytes,
     })
 
-    // Treat specialist output as untrusted, then truncate by UTF-8 byte
-    // length, not UTF-16 code units.
-    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes)
+    // Treat specialist output as untrusted, then optionally redact known
+    // secret values via the scrubber, then truncate by UTF-8 byte length
+    // (not UTF-16 code units). Scrubber runs AFTER neutralisation so its
+    // input is already control-byte-free, and BEFORE truncation so a long
+    // redacted token cannot be split mid-marker.
+    const neutralized = neutralizeUntrustedOutput(rawResult)
+    const scrubbed =
+      options.scrubber !== undefined && options.parentSessionID !== undefined
+        ? options.scrubber(neutralized, options.parentSessionID)
+        : neutralized
+    const result = truncateBytes(scrubbed, options.resultMaxBytes)
 
     return {
       name: task.name,

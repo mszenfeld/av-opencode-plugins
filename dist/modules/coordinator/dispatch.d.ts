@@ -1,4 +1,7 @@
+import { SessionAgentRegistry } from '../qa/shell-env-hook.js';
 import { PollerMessage } from './poller.js';
+import '../qa/bindings-store.js';
+import '../qa/secret.js';
 
 interface DispatchTask {
     name: string;
@@ -41,6 +44,26 @@ interface DispatchParallelInput {
      * called best-effort so the child session is cancelled server-side.
      */
     signal?: AbortSignal;
+    /**
+     * Optional registry that records (childSessionID → task.name) at dispatch
+     * time. Consumed by plugin hooks (e.g. shell.env) that need to know which
+     * agent is running in a given session. Registration persists for the
+     * OpenCode session lifetime; cleanup is the plugin's session.deleted
+     * handler — not unregistered inside dispatch.
+     */
+    sessionAgentRegistry?: SessionAgentRegistry;
+    /**
+     * Optional log-scrubber applied to every task result after the untrusted-
+     * output neutraliser, before truncation. Receives (text, parentSessionID)
+     * and returns redacted text. Used by the QA bindings flow to redact known
+     * secret values from Zmora results before they reach the report or TUI.
+     */
+    scrubber?: (text: string, parentSessionID: string) => string;
+    /**
+     * Parent (Perun) session ID — passed to the scrubber. Required if scrubber
+     * is set; ignored otherwise.
+     */
+    parentSessionID?: string;
 }
 declare const DEFAULT_POLL_INTERVAL_MS = 1000;
 declare const DEFAULT_TASK_TIMEOUT_MS: number;
