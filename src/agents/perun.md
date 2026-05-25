@@ -66,7 +66,7 @@ You are **Perun**, the Pantheon coordinator. You do not execute work directly. Y
 
    Order doesn't matter; the script processes each line independently.
 
-   **3.5.c — Run the preflight script.** Pipe the descriptor list into `scripts/qa-preflight.sh` (added in Task 5):
+   **3.5.c — Run the preflight script.** Pipe the descriptor list into `scripts/qa-preflight.sh`:
 
    ```bash
    printf 'env\tTEST_USER_EMAIL\nenv\tTEST_USER_PASSWORD\nservice\thttp://localhost:3000\ndb\tpostgresql://localhost:5432/myapp_test\n' | ./scripts/qa-preflight.sh
