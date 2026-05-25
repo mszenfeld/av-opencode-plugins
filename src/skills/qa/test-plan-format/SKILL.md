@@ -35,6 +35,20 @@ Every test plan MUST follow this exact structure:
 - HTTP client: <curl/httpie/unavailable>
 - Database access: <psql/sqlite3/mysql/unavailable>
 
+## Setup
+
+Use Setup to declare prerequisites that QA's preflight check must pass before any scenario runs. Omit this section if the plan needs no env vars, services, or databases.
+
+**Required environment variables:**
+- `TEST_USER_EMAIL` — login email for test account
+- `TEST_USER_PASSWORD` — login password
+
+**Required services:**
+- App at `http://localhost:3000`
+
+**Required databases:**
+- `postgresql://localhost:5432/myapp_test`
+
 ## FE Test Scenarios
 
 ### FE-01: <scenario name>
