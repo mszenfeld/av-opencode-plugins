@@ -15,6 +15,11 @@ export type WriteResult =
   | { status: "duplicate" }
   | { status: "error"; reason: string }
 
+export interface BindingSnapshot {
+  readonly id: string
+  readonly entries: ReadonlyMap<string, BindingEntry>
+}
+
 const QA_BIND_RE = /^QA_BIND_[A-Z][A-Z0-9_]*$/
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
@@ -60,6 +65,9 @@ function valueIsValid(value: string): { ok: true } | { ok: false; reason: string
 
 export class BindingsStore {
   readonly #map = new Map<string, Map<string, BindingEntry>>()
+  readonly #pinCounts = new Map<string, Map<string, number>>()  // parentID → name → count
+  readonly #snapshotIds = new Map<string, { parentID: string; names: string[] }>()
+  #snapshotCounter = 0
 
   listForParent(parentID: string): ReadonlyMap<string, BindingEntry> {
     return this.#map.get(parentID) ?? new Map()
@@ -67,6 +75,49 @@ export class BindingsStore {
 
   getBinding(parentID: string, name: string): BindingEntry | undefined {
     return this.#map.get(parentID)?.get(name)
+  }
+
+  pinSnapshot(parentID: string): BindingSnapshot {
+    const live = this.#map.get(parentID) ?? new Map()
+    const snapshotEntries = new Map(live)
+    const id = `snap-${++this.#snapshotCounter}`
+
+    let parentPinCounts = this.#pinCounts.get(parentID)
+    if (parentPinCounts === undefined) {
+      parentPinCounts = new Map()
+      this.#pinCounts.set(parentID, parentPinCounts)
+    }
+    const names: string[] = []
+    for (const name of snapshotEntries.keys()) {
+      parentPinCounts.set(name, (parentPinCounts.get(name) ?? 0) + 1)
+      names.push(name)
+    }
+    this.#snapshotIds.set(id, { parentID, names })
+    return { id, entries: snapshotEntries }
+  }
+
+  releaseSnapshot(id: string): void {
+    const record = this.#snapshotIds.get(id)
+    if (record === undefined) return
+    this.#snapshotIds.delete(id)
+    const parentPinCounts = this.#pinCounts.get(record.parentID)
+    if (parentPinCounts === undefined) return
+    for (const name of record.names) {
+      const c = parentPinCounts.get(name)
+      if (c === undefined) continue
+      if (c <= 1) {
+        parentPinCounts.delete(name)
+      } else {
+        parentPinCounts.set(name, c - 1)
+      }
+    }
+    if (parentPinCounts.size === 0) {
+      this.#pinCounts.delete(record.parentID)
+    }
+  }
+
+  isPinned(parentID: string, name: string): boolean {
+    return (this.#pinCounts.get(parentID)?.get(name) ?? 0) > 0
   }
 
   writeBinding(
