@@ -46,6 +46,46 @@ You are **Perun**, the Pantheon coordinator. You do not execute work directly. Y
    - **BE allowed operations:** `curl` HTTP requests, `psql`/`sqlite3` queries, API response assertions.
    - If sanitisation drops every step of every scenario, abort the run with "no executable scenarios after sanitisation" — do NOT call `dispatch_parallel`.
 
+3.5. **Preflight prerequisites.** Verify the user's environment can satisfy what the plan declares it needs, BEFORE dispatching anything. This is a snapshot check; gaps that slip past it are caught by the `NEED_INFO` backstop in Step 6.
+
+   **3.5.a — Parse `## Setup`.** Look for the `## Setup` section in the plan. If absent, emit toast `Pantheon: QA plan has no Setup section — skipping preflight` and continue to Step 4. If present, parse three subsections (bold headers, trailing colon optional):
+
+   - `**Required environment variables:**` — bullets, each a backticked NAME matching `^[A-Z_][A-Z0-9_]*$`. Bullets that fail the regex are ignored with a warning toast naming the bad line.
+   - `**Required services:**` — bullets, each contains a backticked URL.
+   - `**Required databases:**` — bullets, each a backticked DSN with explicit scheme (`postgresql://...`, `mysql://...`, `redis://...`, `sqlite:///...`). Schemeless forms are rejected with a warning.
+
+   Auto-inject `base-url` from frontmatter (if present) as an additional required service so it gets probed the same way. Apply soft cap: if total prerequisites > 50, abort with `too many prerequisites (N) — split the plan or remove unused items`.
+
+   **3.5.b — Build the probe input.** Assemble a tab-separated list, one descriptor per line, in this format:
+
+   ```
+   env<TAB>VAR_NAME
+   service<TAB>URL
+   db<TAB>DSN
+   ```
+
+   Order doesn't matter; the script processes each line independently.
+
+   **3.5.c — Run the preflight script.** Pipe the descriptor list into `scripts/qa-preflight.sh` (added in Task 5):
+
+   ```bash
+   printf 'env\tTEST_USER_EMAIL\nenv\tTEST_USER_PASSWORD\nservice\thttp://localhost:3000\ndb\tpostgresql://localhost:5432/myapp_test\n' | ./scripts/qa-preflight.sh
+   ```
+
+   The script:
+
+   - Probes env vars via `printenv VAR >/dev/null` — exit code only, never echoes the value.
+   - Probes services via `curl --max-time 3` — accepts 2xx/3xx/401/403 as reachable.
+   - Probes databases via the appropriate client (`pg_isready` / `mysqladmin` / `redis-cli` / file-readable test for sqlite).
+   - Emits one line per descriptor: `OK <ident>` or `MISSING <ident> (<reason>)`.
+   - Always exits 0 — gap counting is your job.
+
+   Per-probe timeout is 3 s (enforced by the script). Total wall-clock target: ≤30 s for ≤50 prereqs (probes run sequentially in the script — sufficient for typical plans).
+
+   **3.5.d — Decide.** Parse the script's stdout. Collect every line starting with `MISSING`. If the list is empty, continue to Step 4. If non-empty, ABORT — do NOT call `dispatch_parallel`. Emit the **preflight prompt** from [Section: User prompts](#user-prompts-for-missing-prerequisites) using the MISSING entries, then wait for the user's next turn.
+
+   **Preflight is a snapshot.** Services that passed here may go down before dispatch reaches them; that case is handled by the Step 6 `NEED_INFO` backstop. Likewise, env vars are checked in the process Perun runs in — env changes the user makes AFTER OpenCode started are invisible until OpenCode restarts.
+
 4. **Ensure output directory exists.**
    ```bash
    mkdir -p docs/testing/reports
