@@ -177,7 +177,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       if (event.type !== "session.created") return;
       if (toastShown) return;
       try {
-        const errors = getLoadErrors();
+        const errors = getLoadErrors().map(neutralizeUntrustedOutput);
         for (const e of errors) console.error(e);
         if (errors.length > 0) {
           await client.tui.showToast({

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import * as jsoncParser from "jsonc-parser";
+import { neutralizeUntrustedOutput } from "../coordinator/sanitize.js";
 import { validateConfigFile } from "./schema.js";
 import { userGlobalPath, walkUpProjectPaths } from "./paths.js";
 const MAX_PANTHEON_FILE_BYTES = 1024 * 1024;
@@ -41,9 +42,8 @@ function loadFresh(options = {}) {
     try {
       raw = readFileSync(filePath, "utf8");
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to read \u2014 ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      errors.push(`[pantheon] ${filePath}: failed to read \u2014 ${neutralizeUntrustedOutput(detail)}`);
       continue;
     }
     let parsed;
@@ -51,9 +51,8 @@ function loadFresh(options = {}) {
     try {
       parsed = jsoncParser.parse(raw, parseErrors, { allowTrailingComma: true });
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to parse \u2014 ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      errors.push(`[pantheon] ${filePath}: failed to parse \u2014 ${neutralizeUntrustedOutput(detail)}`);
       continue;
     }
     if (parseErrors.length > 0) {

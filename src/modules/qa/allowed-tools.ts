@@ -8,7 +8,11 @@ export const SHARED_TOOLS = [
   "skill",
   "Bash(mkdir:*)",
   "Bash(command:*)",
-  "Bash(echo:*)",
+  // Bash(echo:*) intentionally removed — shell var-expansion can leak secret
+  // values (e.g. `echo "credentials: $TEST_USER_PASSWORD"` would persist to
+  // the QA report). Use `Bash(printf:*)` for status reporting instead.
+  // See SEC-002 (CWE-532, OWASP A09:2025).
+  "Bash(printf:*)",
 ]
 
 export const FE_TOOLS = [

@@ -44,7 +44,7 @@ Restart OpenCode after installation or any config change.
 | Command | Description |
 |---|---|
 | `/create-qa-plan` | Analyzes recent changes and generates a structured QA plan in `docs/testing/plans/`. |
-| `/run-qa` | Executes the most recent plan via Perun — dispatches FE/BE scenarios to Zmora and aggregates results into `docs/testing/reports/`. |
+| `/run-qa` | Executes the most recent plan via Perun — dispatches FE/BE scenarios to Zmora and aggregates results into `docs/testing/reports/`. Runs a preflight check on env vars, services, and databases declared in the plan's `## Setup` block (aborts before dispatch on missing items) and pauses mid-run with a resume prompt if a scenario reports `NEED_INFO`. |
 
 ## Configuring agents
 

@@ -73,10 +73,13 @@ describe("dispatchParallel — payload passthrough", () => {
     expect(results[0]?.result).toBe(needInfoPayload)
 
     // Round-trip parse — guards Step 6.5's JSON.parse contract.
-    const parsed = JSON.parse(results[0]!.result) as {
-      status: string
-      missing: string[]
+    const firstResult = results[0]
+    if (firstResult === undefined) {
+      throw new Error("expected at least one result")
     }
+    const parsed: { status: string; missing: string[] } = JSON.parse(
+      firstResult.result,
+    )
     expect(parsed.status).toBe("NEED_INFO")
     expect(parsed.missing).toEqual(["STRIPE_TEST_KEY"])
   })

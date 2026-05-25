@@ -21,12 +21,12 @@ Identify the env vars the scenario depends on. FE scenarios usually consume thes
 For every such VAR, check whether it is set in the current process:
 
 ```bash
-[ -n "${VAR:-}" ] && echo "OK" || echo "MISSING"
+[ -n "${VAR:-}" ] && printf 'OK\n' || printf 'MISSING\n'
 ```
 
 If any required VAR is MISSING, return `NEED_INFO` with `kind: "credentials"`, `missing: [<list of missing names>]`, `hint: "Set <names> in the shell that launches OpenCode, restart OpenCode, then reply 'resume'."`. Do NOT proceed to Step 3.
 
-NEVER echo the VALUE of any env var — only the name and OK/MISSING.
+NEVER print the VALUE of any env var — only the name and OK/MISSING. Use `printf` (not `echo`) for status reporting; `echo` is not in the allowlist precisely because shell var-expansion (`echo "$VAR"`) would leak secrets to the persisted report.
 
 ### Step 3: Execute the scenario
 

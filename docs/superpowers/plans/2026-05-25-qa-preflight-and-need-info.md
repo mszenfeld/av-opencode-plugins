@@ -1,8 +1,8 @@
-# QA Preflight + `need_info` Implementation Plan
+# QA Preflight + `NEED_INFO` Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prevent silent QA-run failures caused by missing setup (env vars, services, databases) by adding (a) a `## Setup` contract to plans, (b) a Perun preflight step that aborts dispatch before any wave runs, and (c) a `need_info` exit status that Zmora returns when a scenario hits an undeclared gap, so Perun can pause + resume cleanly.
+**Goal:** Prevent silent QA-run failures caused by missing setup (env vars, services, databases) by adding (a) a `## Setup` contract to plans, (b) a Perun preflight step that aborts dispatch before any wave runs, and (c) a `NEED_INFO` exit status that Zmora returns when a scenario hits an undeclared gap, so Perun can pause + resume cleanly.
 
 **Architecture:** Prompt-driven change with one new shell script. No new TypeScript modules. Zmora's overlay prompts gain pre-flight env/tool checks and emit a structured `NEED_INFO` payload as their result; Perun's prompt gains a Step 3.5 preflight block that invokes `scripts/qa-preflight.sh` (the only narrow-allow-listed addition to Perun's bash surface), and a Step 6 extension that recognises `NEED_INFO` payloads, prints a status snapshot to the user, and resumes on the next turn by re-dispatching only the blocked scenarios. The Zmora `NEED_INFO` payload is delivered as the `result` field of a wave-status-`success` task, so `src/modules/coordinator/dispatch.ts` is unchanged.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## Task 1: Add `need_info` to Zmora core contract
+## Task 1: Add `NEED_INFO` to Zmora core contract
 
 **Files:**
 - Modify: `src/modules/qa/prompt-sections/core.md` (Result format section, lines 27-30)

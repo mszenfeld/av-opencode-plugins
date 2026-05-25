@@ -16,24 +16,17 @@ activation: Load when creating or formatting QA test plans
 
 ## Plan Structure
 
-Every test plan MUST follow this exact structure:
+Every test plan MUST follow this exact structure. Plan metadata lives in YAML frontmatter (parsed by Perun Step 2 — `source`, `branch`, `base-url`, `detected-tools`). There is no separate `## Source` or `## Detected Tools` body section; that metadata is the frontmatter.
 
 ~~~markdown
+---
+source: <PR #N / branch <name> / last N commits / staged changes>
+branch: <branch name>
+base-url: <http(s)://host:port>
+detected-tools: [<tool1>, <tool2>, ...]
+---
+
 # Test Plan: <title>
-
-## Source
-- Type: <PR #N / branch <name> / last N commits / staged changes>
-- Base: <main/master>
-- Date: <YYYY-MM-DD>
-
-## Changes Summary
-
-<Brief description of what changed and what needs testing. List affected areas.>
-
-## Detected Tools
-- Playwright: <available/unavailable>
-- HTTP client: <curl/httpie/unavailable>
-- Database access: <psql/sqlite3/mysql/unavailable>
 
 ## Setup
 
@@ -49,32 +42,74 @@ Use Setup to declare prerequisites that QA's preflight check must pass before an
 **Required databases:**
 - `postgresql://localhost:5432/myapp_test`
 
+## Changes Summary
+
+<Brief description of what changed and what needs testing. List affected areas.>
+
 ## FE Test Scenarios
 
 ### FE-01: <scenario name>
-- **Area:** <component/page>
-- **Preconditions:** <what must be true before test>
-- **Steps:**
-  1. <action>
-  2. <action>
-  3. <verification>
-- **Expected:** <expected result>
-- **Edge cases:**
-  - <edge case 1>
-  - <edge case 2>
+
+**Steps:**
+1. <action>
+2. <action>
+3. <verification>
+
+**Expected result:** <expected result>
+
+**Edge cases:**
+- <edge case 1>
+- <edge case 2>
 
 ## BE Test Scenarios
 
 ### BE-01: <scenario name>
-- **Area:** <endpoint/service>
-- **Method:** <HTTP method> <path>
-- **Headers:** <required headers, e.g. Authorization: Bearer TOKEN>
-- **Payload:** `<JSON body>`
-- **Expected:** <status code>, <response body description>
-- **DB Check:** `<SQL query>` — <expected state>
-- **Edge cases:**
-  - <edge case with expected response>
+
+**Method:** <HTTP method> <full URL or path>
+**Headers:** <required headers, e.g. Content-Type: application/json>
+**Payload:**
+```json
+<JSON body>
+```
+
+**Expected response:** status <code>, <response body description>.
+
+**DB Check:**
+```sql
+<SQL query>
+```
+<Expected state, e.g. "Expect `last_login_at` updated to within the last 60 seconds.">
+
+**Edge cases:**
+- <edge case with expected response>
 ~~~
+
+### Frontmatter fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `source` | yes | Human-readable origin: PR number, branch, "last N commits", "staged changes", "example", etc. |
+| `branch` | yes | Branch name; use `example` or `n/a` for hand-written reference plans. |
+| `base-url` | yes (when scenarios target a live host) | Used by Perun to inject as an additional required service and as the dispatch `Base URL` for Zmora. Omit only for plans with no live target. |
+| `detected-tools` | yes | YAML list of tool names actually present (e.g. `[playwright, curl, psql]`). Used to gate dependent scenarios. |
+
+### Section omission and placement
+
+- `## Setup` MUST appear after the page title and before the scenario sections — see `## Setup Rules` below for the full rule set.
+- `## Changes Summary` may appear before or after `## Setup`; both placements are accepted by the parser.
+- Scenario sections (`## FE Test Scenarios`, `## BE Test Scenarios`) are omitted when not applicable — see `## Section Omission Rules` below.
+
+---
+
+## Setup Rules
+
+- **Placement.** `## Setup` MUST appear after the YAML frontmatter and page title, and before `## FE Test Scenarios` / `## BE Test Scenarios`. `## Changes Summary` may appear before or after `## Setup`. The parser is single-pass.
+- **Soft cap.** ≤50 total prerequisites (env vars + services + databases combined). Plans exceeding this are rejected — split the plan or drop unused items.
+- **DSN scheme is required.** Databases must use an explicit scheme: `postgresql://`, `mysql://`, `redis://`, `sqlite:///`. Schemeless forms are rejected.
+- **sqlite DSNs must be project-relative (3 slashes); 4-slash absolute paths are rejected for safety.** SQLAlchemy's 4-slash form (`sqlite:////tmp/foo.db`) addresses an absolute filesystem path, which would let the preflight probe act as a file-existence oracle for arbitrary host paths (CWE-200). Use the 3-slash project-relative form (`sqlite:///var/test.db`) instead. Paths containing `..` are also rejected.
+- **IPv6 hosts are not yet supported in DSNs; use an IPv4 address or hostname.**
+- **Env var names.** Must match `^[A-Z_][A-Z0-9_]*$`. Bullets that fail the regex are ignored with a warning.
+- **Omit when unused.** A plan with no prerequisites can omit the entire `## Setup` section.
 
 ---
 
@@ -126,7 +161,7 @@ For EVERY scenario, consider and include relevant edge cases from:
 
 - If changes are **FE-only**: omit the `## BE Test Scenarios` section entirely
 - If changes are **BE-only**: omit the `## FE Test Scenarios` section entirely
-- If a tool is **unavailable**: note it in `## Detected Tools` and mark dependent scenarios with `(skip — <tool> unavailable)` in the scenario name
+- If a tool is **unavailable**: omit it from the frontmatter `detected-tools` list and mark dependent scenarios with `(skip — <tool> unavailable)` in the scenario name
 
 ---
 
@@ -138,8 +173,10 @@ Example:
 
 ~~~markdown
 ### BE-02: PUT /api/users updates the user created in BE-01
+
 **Depends-on:** BE-01
-- **Method:** PUT /api/users/<id>
+
+**Method:** PUT /api/users/<id>
 ...
 ~~~
 

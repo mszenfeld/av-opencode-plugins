@@ -181,4 +181,66 @@ describe("computeWaves", () => {
     ])
     expect(result.error?.kind).toBe("self-ref")
   })
+
+  // Contract documented in src/agents/perun.md (Resume Semantics, step 3).
+  // On resume, the re-dispatch set R = {NEED_INFO ∪ un-started}. Predecessors
+  // that already PASS-ed are NOT in R, so the agent must pre-filter each
+  // scenario's depends_on to drop entries pointing to PASS-ed predecessors
+  // before calling computeWaves. These tests pin both halves of that
+  // contract: the dangling error that motivates the pre-filter, and the
+  // correct waves the agent gets after applying it.
+  describe("resume re-dispatch pre-filter contract", () => {
+    it("reports dangling when R contains a scenario whose depends_on references a PASS-ed predecessor not in R", () => {
+      // Simulated resume state: BE-01 already PASS-ed (not in R). BE-02
+      // returned NEED_INFO and still lists BE-01 as a dep. If the agent
+      // forgets to pre-filter, computeWaves sees an unknown id and aborts.
+      const result = computeWaves([
+        scenario("BE-02", ["BE-01"], 0),
+        scenario("BE-03", ["BE-02"], 1),
+      ])
+      expect(result.waves).toEqual([])
+      expect(result.error).toEqual({
+        kind: "dangling",
+        details: "BE-02 depends on BE-01 which does not exist",
+      })
+    })
+
+    it("returns correct waves once the agent pre-filters PASS-ed predecessors out of depends_on", () => {
+      // Same resume state as above, but the agent applied step 3 of the
+      // resume contract: BE-01 is dropped from BE-02's depends_on because
+      // it already PASS-ed. computeWaves now sees a self-consistent R.
+      const result = computeWaves([
+        scenario("BE-02", [], 0),
+        scenario("BE-03", ["BE-02"], 1),
+      ])
+      expect(result.error).toBeUndefined()
+      expect(result.waves).toEqual([["BE-02"], ["BE-03"]])
+    })
+
+    it("keeps failed-predecessor edges intact after pre-filter (failures do not cascade)", () => {
+      // Contract step 4: predecessor FAIL/error/timeout does not block
+      // re-dispatch, but it also doesn't get dropped from depends_on the
+      // way PASS does — only PASS-ed predecessors are filtered out. Here
+      // BE-01 previously FAIL-ed and is being re-dispatched alongside its
+      // dependent BE-02, so BE-01 stays in R and the edge is preserved.
+      const result = computeWaves([
+        scenario("BE-01", [], 0),
+        scenario("BE-02", ["BE-01"], 1),
+      ])
+      expect(result.error).toBeUndefined()
+      expect(result.waves).toEqual([["BE-01"], ["BE-02"]])
+    })
+
+    it("handles partial pre-filter: one PASS-ed dep dropped, one re-dispatched dep kept", () => {
+      // BE-03 originally depended on both BE-01 (PASS-ed → dropped) and
+      // BE-02 (NEED_INFO → kept). After pre-filter, BE-03 still has BE-02
+      // as a dep, so computeWaves orders them across two waves.
+      const result = computeWaves([
+        scenario("BE-02", [], 0),
+        scenario("BE-03", ["BE-02"], 1),
+      ])
+      expect(result.error).toBeUndefined()
+      expect(result.waves).toEqual([["BE-02"], ["BE-03"]])
+    })
+  })
 })

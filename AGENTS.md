@@ -67,6 +67,14 @@ Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **roo
 
 When adding a new workspace plugin, update **all four** locations together. If any are out of sync, CI will either silently pass on dist drift (path missing from the script) or fail permanently (path tracked but never built/committed).
 
+### Working directory assumption for repo-relative script paths
+
+OpenCode must be started from the project root. The preflight script path `./scripts/qa-preflight.sh` declared in `@perun`'s `allowed-tools` (see `src/agents/perun.md`) is resolved against the shell CWD, so launching OpenCode from any other directory will cause that tool match to miss. The same assumption applies to the `scripts/qa-preflight.sh` path used by `tests/scripts/qa-preflight.test.ts` — vitest's default CWD is the project root, which keeps the existing relative path working.
+
+### QA preflight probe runner
+
+`scripts/qa-preflight.sh` is invoked by `@perun` Step 3.5 (preflight) via the allowed-tool match `Bash(./scripts/qa-preflight.sh:*)`. It reads probe descriptors (`env`, `service`, `db`) one-per-line from stdin and emits `OK <ident>` / `MISSING <ident> (<reason>)` lines to stdout — Perun parses that output to count gaps before dispatching `zmora` subagents. The script never echoes environment variable values; only names and OK/MISSING status appear on stdout, keeping secrets out of the session transcript.
+
 ## TypeScript Configuration
 
 - `tsconfig.base.json` sets `target: ES2022`, `module: NodeNext`, `strict: true`, `noUncheckedIndexedAccess: true`.

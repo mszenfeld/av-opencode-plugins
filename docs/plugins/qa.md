@@ -155,6 +155,103 @@ activation: When to load the skill
 - **`description`** — Brief explanation of the skill's purpose
 - **`activation`** — Rule for when the skill should be loaded (e.g., "Load when creating QA test plans")
 
+## Setup and preflight
+
+`/run-qa` performs a **preflight check** before dispatching any scenarios, and individual scenarios can pause the run mid-flight via `NEED_INFO` when a prerequisite turns out to be missing. Both mechanisms are driven by an optional `## Setup` block in the test plan.
+
+A full hand-written example lives at [`docs/testing/plans/example-with-setup.md`](../testing/plans/example-with-setup.md).
+
+### Credentials and secrets
+
+Read this **before** your first `/run-qa`. The rules below are not optional — they apply to every run, every plan, and every reply during a `NEED_INFO` pause.
+
+- **Put credentials in env vars, set them in the shell that launches OpenCode.** `export FOO=bar` (or `source .env`) in that shell, then start OpenCode from it. Both the preflight probe and every Zmora subagent read credentials only via `process.env` — never from `.env` files or other dotfiles at runtime.
+- **Never paste credential values into chat.** Not in the initial request, not as a reply to a `NEED_INFO` pause, not "just to test something quickly". The conversation transcript is persistent and may be reviewed later — treat it like a logfile that anyone with access to your OpenCode history can read. Perun will not echo a pasted value back, but it cannot remove it from the transcript; the exposure has already happened.
+- **If you change an env var, restart OpenCode.** Environment variables are captured at process start; running `export` after launch — even in OpenCode's own shell — does not update the running process's view. See [Why "restart OpenCode after env changes"](#why-restart-opencode-after-env-changes) for the full mechanics and the practical sequence.
+- **Reply `resume` (or `abort`), not the value.** When a `NEED_INFO` pause asks for a missing credential, the correct response is to fix the env var in the shell, restart OpenCode, and reply `resume`. Replying with the value itself leaks it into the transcript and still won't satisfy preflight on the next attempt (the process snapshot is unchanged until restart).
+
+If you do accidentally paste a secret, treat that credential as compromised: rotate it at the upstream service. The chat transcript cannot be redacted.
+
+### The `## Setup` section in plans
+
+`/create-qa-plan` emits a `## Setup` section after frontmatter and before the `## FE Test Scenarios` / `## BE Test Scenarios` blocks, declaring the env vars, services, and databases the run will need. You can also add or edit the section by hand.
+
+```markdown
+## Setup
+
+**Required environment variables:**
+- `TEST_USER_EMAIL` — login email for the test account
+- `TEST_USER_PASSWORD` — login password for the test account
+
+**Required services:**
+- App at `http://localhost:3000`
+
+**Required databases:**
+- `postgresql://localhost:5432/myapp_test`
+```
+
+Rules:
+
+- One backtick group per item: env var NAME, service URL, or DB DSN. DSNs must include an explicit scheme (`postgresql://…`, `mysql://…`, `redis://…`, `sqlite:///…`); schemeless forms are rejected by preflight.
+- Free text after the backtick group is for the human reader; preflight ignores it.
+- Omit the section entirely if a plan needs no prerequisites — preflight emits a "no Setup section, skipping" toast and the run proceeds as before.
+
+### Preflight abort prompt
+
+After parsing the plan, Perun pipes the declared prerequisites through `scripts/qa-preflight.sh`, which probes each env var, service, and DB. If any item is `MISSING`, **Perun aborts before any Zmora dispatch** and emits a prompt of the form:
+
+```
+⚠️ Cannot start QA — <N> prerequisite(s) missing:
+
+Environment variables not set in OpenCode's process:
+  • <NAME_1>
+Services not reachable:
+  • <URL> (<reason>)
+
+To proceed:
+  1. In the SAME shell that launches OpenCode, set the env vars:
+     `export <NAME_1>=…` (or `source .env` in that shell before starting OpenCode)
+  2. Start the missing services (e.g. `docker compose up -d`).
+  3. RESTART OpenCode if it's already running — env changes don't propagate live.
+
+Then re-run /run-qa.
+```
+
+This is not a bug — it means the plan declared a prerequisite the current process can't satisfy. Fix the gap and re-run `/run-qa` to retry; preflight runs again from scratch.
+
+### Mid-run `NEED_INFO` pause
+
+Preflight is a snapshot. A service that responded at preflight time may go down before its scenario runs, a credential may turn out to be expired, or a required CLI may be missing on `PATH` inside the Zmora subagent's allowlist. When a scenario detects such a runtime gap it returns status `NEED_INFO` (treated as `SKIP` for the report) with a structured payload classifying the gap by `kind`:
+
+| `kind` | Meaning | `missing` payload |
+|---|---|---|
+| `credentials` | Required env var is empty, or the upstream rejects its value (e.g. expired API key → 401) | Env var NAMES (never values) |
+| `service` | Upstream host is unreachable in a non-credential way: DNS failure, connection refused, persistent 5xx | Base URLs |
+| `fixture` | Required test data (seed row, file, record) is missing from the DB or filesystem | Fixture keys (table/row IDs or fixture names) |
+| `tool` | A required CLI binary is not on `PATH` | Binary names |
+
+After each wave, if any scenario returned `NEED_INFO`, Perun **pauses the run** (no further waves dispatched) and prints a `⏸ Pausing QA` prompt summarising what passed, what failed, what's blocked, and what's not yet dispatched. The prompt invites you to:
+
+1. Fix the missing items (set env vars, start services, install tools, seed fixtures), then **restart OpenCode**.
+2. Reply `resume` (or `continue`, `go`, `try again`…) to continue from where the run stopped — Perun re-runs preflight, re-dispatches only the `NEED_INFO` and not-yet-started scenarios, and merges results with the wave(s) that already ran.
+3. Reply `abort` (or `stop`, `cancel`…) to finalize the report immediately. Passing scenarios remain `PASS`, blocked ones report as `SKIP`.
+4. Re-run `/run-qa` from scratch to discard all in-progress state and start over.
+
+Ambiguous replies (`ok`, `cool`) trigger one clarifying question. Pasted credential values are never echoed back into chat.
+
+### Why "restart OpenCode after env changes"
+
+Both prompts insist on restarting OpenCode after setting env vars. The reason: **environment variables are captured at process start.** OpenCode reads its environment once when it launches; Perun and every Zmora subagent inherit that snapshot. Running `export FOO=bar` in another terminal — or even in OpenCode's own shell after launch — does not update the running process's view.
+
+Practical sequence:
+
+1. Stop OpenCode.
+2. In the shell where you'll start OpenCode, either `export FOO=bar` directly or `source .env`.
+3. Start OpenCode from that same shell.
+4. Re-run `/run-qa` (or reply `resume` if you were mid-run).
+
+If you change env vars and reply `resume` without restarting, preflight re-runs against the **old** process snapshot and will report the same `MISSING` items.
+
 ## Limitations
 
 - **No cross-scenario data isolation.** Concurrent scenarios touching shared state (the same DB row, the same user account, the same uploaded file) can still race under the 4-wide pool even when neither declares the other in `**Depends-on:**`. The dependency mechanism gives plan authors a knob to serialise *known* dependencies (create → update → delete on the same entity), but does not auto-detect accidental shared state. Plan authors must still design with concurrency in mind; transactional sandboxes / per-scenario data prefixes are deferred to a future revision.

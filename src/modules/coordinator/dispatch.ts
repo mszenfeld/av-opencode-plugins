@@ -261,7 +261,7 @@ async function runTask(
       status,
       result: "",
       duration_ms: Date.now() - startTime,
-      error: err instanceof Error ? err.message : String(err),
+      error: neutralizeUntrustedOutput(err instanceof Error ? err.message : String(err)),
     }
   }
 }

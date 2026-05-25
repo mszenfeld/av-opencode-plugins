@@ -1,4 +1,4 @@
-# QA Preflight + `need_info` — Design
+# QA Preflight + `NEED_INFO` — Design
 
 **Date:** 2026-05-25
 **Status:** Draft (pending review)
@@ -26,7 +26,7 @@ Two underlying defects:
 
 ## Decision
 
-Adopt a **hybrid**: structured `## Setup` declaration in plans + Perun preflight before dispatch + `need_info` exit status as backstop for gaps preflight missed. Resume across turns via conversation history.
+Adopt a **hybrid**: structured `## Setup` declaration in plans + Perun preflight before dispatch + `NEED_INFO` exit status as backstop for gaps preflight missed. Resume across turns via conversation history.
 
 Rejected alternatives:
 
@@ -128,12 +128,12 @@ Insert between current Step 3 (sanitization) and Step 4 (ensure output dir) in `
 
   Note: Preflight is a snapshot, not a guarantee. A service that responded
   in (c) may go down before dispatch reaches it; that case is handled by
-  Part D's need_info backstop.
+  Part D's NEED_INFO backstop.
 ```
 
 ## Part C — User-facing missing-prerequisites prompt
 
-When preflight (or post-dispatch `need_info` aggregation) finds gaps, Perun **responds in chat** — no toast, no question tool, no SDK primitive. Format:
+When preflight (or post-dispatch `NEED_INFO` aggregation) finds gaps, Perun **responds in chat** — no toast, no question tool, no SDK primitive. Format:
 
 **Preflight-stage prompt (no scenarios have run yet):**
 
@@ -157,7 +157,7 @@ To proceed:
 Then re-run /run-qa.
 ```
 
-**Mid-run prompt (some scenarios ran, others returned `need_info`):**
+**Mid-run prompt (some scenarios ran, others returned `NEED_INFO`):**
 
 ```
 ⏸ Pausing QA — {M} scenario(s) need additional setup.
@@ -185,13 +185,13 @@ Both prompts: name every gap, explain what user must do, and **never** ask the u
 
 If the user does paste a secret anyway, **Perun MUST NOT echo the value** in its response. It acknowledges generically: *"Got it — please ensure that env var is set in OpenCode's process; restart OpenCode if needed."*
 
-## Part D — Zmora `need_info` exit status
+## Part D — Zmora `NEED_INFO` exit status
 
 Extend the Zmora return contract in `src/modules/qa/prompt-sections/core.md`:
 
 ```json
 {
-  "status": "need_info",
+  "status": "NEED_INFO",
   "scenario": "BE-03",
   "kind": "credentials" | "service" | "fixture" | "tool",
   "missing": ["STRIPE_TEST_KEY"],
@@ -201,20 +201,20 @@ Extend the Zmora return contract in `src/modules/qa/prompt-sections/core.md`:
 
 **Triggers (in priority order):**
 
-1. **Primary, deterministic:** An env var declared in `## Setup` is empty at scenario runtime. Each overlay adds a check before the first request and returns `need_info` immediately.
+1. **Primary, deterministic:** An env var declared in `## Setup` is empty at scenario runtime. Each overlay adds a check before the first request and returns `NEED_INFO` immediately.
 2. **Primary, deterministic:** A required tool (`psql`, `redis-cli`, …) is not on PATH.
 3. **Secondary, heuristic (best-effort):** HTTP request returns 401/403, OR DB connection fails with an auth error. Zmora's `hint` field is best-effort here — the missing var name may be wrong; user judgment required.
 
-**Wave-status contract.** A `need_info` payload travels as the structured `result` of a **successful** task — the wave-level `DispatchResult.status` is `success`, and the JSON payload inside contains `"status": "need_info"`. Wave status `error`/`timeout` is treated as today (SKIP with error message as reason), not as `need_info`. This keeps `dispatch.ts` unchanged.
+**Wave-status contract.** A `NEED_INFO` payload travels as the structured `result` of a **successful** task — the wave-level `DispatchResult.status` is `success`, and the JSON payload inside contains `"status": "NEED_INFO"`. Wave status `error`/`timeout` is treated as today (SKIP with error message as reason), not as `NEED_INFO`. This keeps `dispatch.ts` unchanged.
 
-`dispatch_parallel` returns mixed payloads in a single wave (some `success`/success, some `success`/`need_info`, some `error`). Perun's wave-result loop (extending Step 6 / `perun.md:111-117`):
+`dispatch_parallel` returns mixed payloads in a single wave (some `success`/success, some `success`/`NEED_INFO`, some `error`). Perun's wave-result loop (extending Step 6 / `perun.md:111-117`):
 
 1. Categorize each result by parsing the JSON payload.
-2. If any payload has `"status": "need_info"`:
+2. If any payload has `"status": "NEED_INFO"`:
    - **Do not dispatch any subsequent wave** (Wave N+1 simply isn't started — nothing to "cancel" because dispatch is blocking-per-wave).
-   - Aggregate all `need_info` payloads across the current wave.
+   - Aggregate all `NEED_INFO` payloads across the current wave.
    - Emit the **mid-run prompt** from Part C with the full status snapshot.
-3. If no `need_info` → proceed to next wave as today.
+3. If no `NEED_INFO` → proceed to next wave as today.
 
 ## Part D.1 — Resume semantics
 
@@ -225,7 +225,7 @@ When the user replies after a Part C prompt, Perun treats the conversation as a 
 | State | On resume |
 |---|---|
 | `success` | keep result, do NOT re-dispatch |
-| `need_info` | re-dispatch (this is what the user just unblocked) |
+| `NEED_INFO` | re-dispatch (this is what the user just unblocked) |
 | Scenario in an un-started wave (cancelled) | re-dispatch |
 | `error` / `timeout` | do NOT auto-retry; surface to user with note "investigate before re-running" |
 | SKIP from sanitization (security-related) | do NOT re-dispatch; permanent for this plan |
@@ -233,13 +233,13 @@ When the user replies after a Part C prompt, Perun treats the conversation as a 
 **Resume procedure:**
 
 1. **Re-run preflight first.** If anything still MISSING → respond again with Part C (preflight prompt). Loop is bounded by user — every turn is one iteration.
-2. Build a re-dispatch list: `R = { scenarios that returned need_info } ∪ { scenarios from un-started waves }`.
+2. Build a re-dispatch list: `R = { scenarios that returned NEED_INFO } ∪ { scenarios from un-started waves }`.
 3. **Pre-filter dependencies.** For each scenario in `R`, drop entries from its `depends_on` that point to scenarios already in `success` state. Without this, `compute_waves` raises a "dangling reference" error when called on `R` alone (the satisfied predecessor isn't in `R`). Conceptual rule: passed predecessors are treated as implicit success-edges.
 4. **Predecessor failure does not block.** Scenarios in `R` whose `depends_on` includes an `error`/`timeout` predecessor are still dispatched. This matches the existing contract (`qa.md:135`: "predecessor failure does NOT block dependents") — Perun does not cascade failure.
 5. Recompute waves from the filtered re-dispatch list via `compute_waves`.
-6. Dispatch. Merge results: previously-passed scenarios keep their results; new dispatch overwrites their `need_info` predecessors.
-7. If the resume dispatch itself returns more `need_info` → repeat from step 1. No turn limit, but the user can say "abort" at any point.
-8. **Abort handling.** If the user says "abort" / "stop" / "skip remaining" → Perun writes the report with what it has (passing + failed + need_info-as-SKIP + un-started-as-SKIP), no further dispatch.
+6. Dispatch. Merge results: previously-passed scenarios keep their results; new dispatch overwrites their `NEED_INFO` predecessors.
+7. If the resume dispatch itself returns more `NEED_INFO` → repeat from step 1. No turn limit, but the user can say "abort" at any point.
+8. **Abort handling.** If the user says "abort" / "stop" / "skip remaining" → Perun writes the report with what it has (passing + failed + NEED_INFO-as-SKIP + un-started-as-SKIP), no further dispatch.
 
 **Confirmation gate.** Before re-dispatching, Perun explicitly asks: *"Resume QA with {M+K} scenarios? (M previously blocked + K never started)"* and waits for a yes-equivalent. This protects against ambiguous user replies like "ok cool" being read as "go" when the user only meant to acknowledge.
 
@@ -251,11 +251,11 @@ When the user replies after a Part C prompt, Perun treats the conversation as a 
 
 | File | Change | Est. lines |
 |---|---|---|
-| `src/agents/perun.md` | Insert Step 3.5 (preflight). Strip "fall back to env files" from Step 2. Extend Step 6 with `need_info` categorization and resume logic. | ~80 |
+| `src/agents/perun.md` | Insert Step 3.5 (preflight). Strip "fall back to env files" from Step 2. Extend Step 6 with `NEED_INFO` categorization and resume logic. | ~80 |
 | `src/commands/create-qa-plan.md` | Emit `## Setup` section. Inference rules for env vars / services / DBs from PR diff. Template update. | ~50 |
-| `src/modules/qa/prompt-sections/core.md` | Add `need_info` to status enum + JSON example. | ~15 |
-| `src/modules/qa/prompt-sections/overlay-fe.md` | Pre-flight env check; 401 detection → `need_info`. | ~15 |
-| `src/modules/qa/prompt-sections/overlay-be.md` | Pre-flight env + tool check; 401/403 + DB auth → `need_info`. | ~20 |
+| `src/modules/qa/prompt-sections/core.md` | Add `NEED_INFO` to status enum + JSON example. | ~15 |
+| `src/modules/qa/prompt-sections/overlay-fe.md` | Pre-flight env check; 401 detection → `NEED_INFO`. | ~15 |
+| `src/modules/qa/prompt-sections/overlay-be.md` | Pre-flight env + tool check; 401/403 + DB auth → `NEED_INFO`. | ~20 |
 | `docs/testing/plans/` (example plans) | One example plan with `## Setup` section, for documentation. | ~30 |
 
 **No new TypeScript modules.** All logic fits in prompts. `dispatch_parallel`, `compute_waves`, `assign_issue_ids` are unchanged.
@@ -265,7 +265,7 @@ When the user replies after a Part C prompt, Perun treats the conversation as a 
 | Scenario | Behavior |
 |---|---|
 | Old plan (no `## Setup`) | Preflight skipped with toast warning; dispatch as today. |
-| Old Zmora response without `need_info` (just `success`/`error`/`timeout`) | Treated as today. `need_info` is opt-in via new overlay prompts. |
+| Old Zmora response without `NEED_INFO` (just `success`/`error`/`timeout`) | Treated as today. `NEED_INFO` is opt-in via new overlay prompts. |
 | `## Setup` with unknown subsections | Ignored with warning toast. Forward-compat. |
 | Plan declares prereqs but user has them set anyway | Preflight passes silently; no UX change. |
 
@@ -283,11 +283,11 @@ When the user replies after a Part C prompt, Perun treats the conversation as a 
 | Risk | Mitigation |
 |---|---|
 | Preflight checks themselves require tools (`curl`, `pg_isready`) that aren't installed | Probe for the tool first; if missing, surface as a preflight gap with install hint. |
-| `/create-qa-plan` infers wrong prerequisites from diff (false positives → annoying prompts; false negatives → `need_info` at runtime) | False positives: user edits plan before run. False negatives: `need_info` backstop catches them. Both paths converge on the same Part C prompt. |
-| `## Setup` section drifts from reality (someone adds a test using `STRIPE_KEY` without updating Setup) | `need_info` from Zmora catches it. The drift becomes a soft warning, not a silent failure. |
+| `/create-qa-plan` infers wrong prerequisites from diff (false positives → annoying prompts; false negatives → `NEED_INFO` at runtime) | False positives: user edits plan before run. False negatives: `NEED_INFO` backstop catches them. Both paths converge on the same Part C prompt. |
+| `## Setup` section drifts from reality (someone adds a test using `STRIPE_KEY` without updating Setup) | `NEED_INFO` from Zmora catches it. The drift becomes a soft warning, not a silent failure. |
 | User pastes secrets into chat anyway despite our prompt asking them not to | Conversation history is the user's terminal — we can't prevent this. Part C wording asks them to set in shell instead. |
 | Endless resume loop (user keeps providing partial info) | Each turn is one iteration; user can `abort` at any point. No silent retry. |
-| Service preflight succeeds but service crashes between preflight and dispatch | Dispatched scenario gets connection-refused → `need_info`. Backstop catches it. |
+| Service preflight succeeds but service crashes between preflight and dispatch | Dispatched scenario gets connection-refused → `NEED_INFO`. Backstop catches it. |
 
 ## Part I — Open questions
 
@@ -296,7 +296,7 @@ None blocking after the 2026-05-25 sequential-thinking revision. Ambiguities res
 - DSN format requires explicit scheme (`postgresql://`, `mysql://`, `redis://`, `sqlite:///`).
 - `base-url` from frontmatter is auto-injected as a required service in preflight.
 - Service preflight treats 401/403 as "reachable" (auth-walled but up).
-- `need_info` travels inside `success`-status wave results; dispatch.ts unchanged.
+- `NEED_INFO` travels inside `success`-status wave results; dispatch.ts unchanged.
 - Resume pre-filters `depends_on` to drop satisfied predecessors before `compute_waves`.
 - Mid-run prompt must enumerate every scenario by ID — that listing is the resume state.
 - Plan modification between turns is undefined behavior; recommend `/run-qa` from scratch.
@@ -306,7 +306,7 @@ None blocking after the 2026-05-25 sequential-thinking revision. Ambiguities res
 
 A QA run with broken setup should:
 
-1. Detect the gap in ≤30 s (preflight) **or** at most one wasted wave (`need_info` backstop).
+1. Detect the gap in ≤30 s (preflight) **or** at most one wasted wave (`NEED_INFO` backstop).
 2. Tell the user **exactly which** env vars / services / DBs are missing.
 3. Never read `.env` (or any dotfile) from Perun's side.
 4. Resume cleanly: scenarios that passed pre-resume appear `success` in the final report and are NOT re-dispatched.

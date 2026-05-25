@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs"
 import os from "node:os"
 import * as jsoncParser from "jsonc-parser"
+import { neutralizeUntrustedOutput } from "../coordinator/sanitize.js"
 import { type PantheonConfig, validateConfigFile } from "./schema.js"
 import { userGlobalPath, walkUpProjectPaths } from "./paths.js"
 
@@ -95,9 +96,15 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
     try {
       raw = readFileSync(filePath, "utf8")
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to read — ${err instanceof Error ? err.message : String(err)}`,
-      )
+      // Source-side sanitize for defense-in-depth: `getLoadErrors()` is
+      // exported, so the coordinator's sink-side `neutralizeUntrustedOutput`
+      // can be bypassed by future consumers. `err.message` may contain
+      // attacker-influenced bytes (e.g. ENOENT messages echoing the path,
+      // or platform-specific error text); strip ANSI/OSC/C0/C1/BiDi/zero-width
+      // before interpolating. CWE-117. Mirrors the source-side guard in
+      // `schema.ts`.
+      const detail = err instanceof Error ? err.message : String(err)
+      errors.push(`[pantheon] ${filePath}: failed to read — ${neutralizeUntrustedOutput(detail)}`)
       continue
     }
 
@@ -110,9 +117,12 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
     try {
       parsed = jsoncParser.parse(raw, parseErrors, { allowTrailingComma: true })
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to parse — ${err instanceof Error ? err.message : String(err)}`,
-      )
+      // Same CWE-117 rationale as the read catch above: jsonc-parser's
+      // RangeError text is library-controlled today but the file path /
+      // surrounding context interpolated by future error messages is not, so
+      // sanitize at the source rather than relying on the coordinator sink.
+      const detail = err instanceof Error ? err.message : String(err)
+      errors.push(`[pantheon] ${filePath}: failed to parse — ${neutralizeUntrustedOutput(detail)}`)
       continue
     }
 

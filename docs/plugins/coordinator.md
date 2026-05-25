@@ -112,15 +112,16 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 | `@perun` | Agent | `primary` | Coordinator — delegates, synthesizes, proposes next steps. System prompt at `src/agents/perun.md`. |
 | `dispatch_parallel` | Tool | n/a | Parallel session dispatch with a 4-wide worker pool. 1 s poll interval, 5 min per-task timeout, 100 KB result cap, max 50 tasks per call. |
 | `assign_issue_ids` | Tool | n/a | Pure function — deterministic, zero-padded 3-digit IDs (e.g. `QA-001`). |
+| `compute_waves` | Tool | n/a | Pure function — deterministic dependency-graph → wave grouping via topological sort, with cycle detection. |
 
 ### `@perun` allowed tools
 
 `@perun` is intentionally locked down. Its `allowed-tools` frontmatter lists only:
 
 - `Read`, `Write`, `Edit`, `Glob`, `Grep`
-- `Bash(mkdir:*)`, `Bash(ls:*)` — no general `Bash(*)`, no `git`
+- `Bash(mkdir:*)`, `Bash(ls:*)`, `Bash(./scripts/qa-preflight.sh:*)` — no general `Bash(*)`, no `git`
 - `todowrite`, `question`
-- `dispatch_parallel`, `assign_issue_ids`
+- `dispatch_parallel`, `assign_issue_ids`, `compute_waves`
 
 The `Task` tool is **excluded** to force every specialist dispatch through `dispatch_parallel`. There is no fallback.
 
