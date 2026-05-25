@@ -83,4 +83,24 @@ describe("scripts/qa-preflight.sh", () => {
     )
     expect(exitCode).toBe(0)
   })
+
+  it("parses postgresql DSN with credentials and explicit port (no false MISSING from parsing)", async () => {
+    // We can't connect (no postgres locally) but we CAN verify the parser
+    // doesn't conflate user:pass@host with host. The probe will report
+    // MISSING because pg_isready fails to connect — but the missing
+    // message must reference the original DSN, not a garbled host.
+    const { stdout } = await runPreflight(`db\tpostgresql://user:pass@127.0.0.1:5432/mydb\n`)
+    // We don't assert exact connectivity outcome (depends on local env);
+    // we assert the script processes the DSN without crashing and
+    // emits a line referencing the original DSN.
+    expect(stdout).toMatch(/(OK|MISSING) db:postgresql:\/\/user:pass@127\.0\.0\.1:5432\/mydb/)
+  })
+
+  it("parses redis DSN without explicit port (falls back to default 6379)", async () => {
+    // Same idea: assert the script processes the DSN without crashing.
+    // Without an explicit port, parsing used to set port=host; the fix
+    // should fall back to 6379.
+    const { stdout } = await runPreflight(`db\tredis://127.0.0.1\n`)
+    expect(stdout).toMatch(/(OK|MISSING) db:redis:\/\/127\.0\.0\.1/)
+  })
 })

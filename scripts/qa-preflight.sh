@@ -48,12 +48,21 @@ probe_db() {
                 echo "MISSING db:$dsn (client tool 'pg_isready' not installed)"
                 return
             fi
-            # Strip scheme, parse host:port/db. Format: postgresql://host:port/db
+            # Strip scheme, then strip optional `user:pass@` credentials segment
+            # (no-op if `@` is absent). Then split on `/` for dbname, and on `:`
+            # for host:port with a default-port fallback when port is omitted.
             local rest="${dsn#postgresql://}"; rest="${rest#postgres://}"
+            rest="${rest#*@}"
             local hostport="${rest%%/*}"
             local dbname="${rest#*/}"
-            local host="${hostport%:*}"
-            local port="${hostport#*:}"
+            local host port
+            if [[ "$hostport" == *:* ]]; then
+                host="${hostport%:*}"
+                port="${hostport#*:}"
+            else
+                host="$hostport"
+                port="5432"
+            fi
             if pg_isready -h "$host" -p "$port" -d "$dbname" -t 3 >/dev/null 2>&1; then
                 echo "OK db:$dsn"
             else
@@ -66,9 +75,16 @@ probe_db() {
                 return
             fi
             local rest="${dsn#mysql://}"
+            rest="${rest#*@}"
             local hostport="${rest%%/*}"
-            local host="${hostport%:*}"
-            local port="${hostport#*:}"
+            local host port
+            if [[ "$hostport" == *:* ]]; then
+                host="${hostport%:*}"
+                port="${hostport#*:}"
+            else
+                host="$hostport"
+                port="3306"
+            fi
             if mysqladmin ping -h "$host" -P "$port" --silent >/dev/null 2>&1; then
                 echo "OK db:$dsn"
             else
@@ -81,8 +97,16 @@ probe_db() {
                 return
             fi
             local rest="${dsn#redis://}"
-            local host="${rest%:*}"
-            local port="${rest#*:}"
+            rest="${rest#*@}"
+            local hostport="$rest"
+            local host port
+            if [[ "$hostport" == *:* ]]; then
+                host="${hostport%:*}"
+                port="${hostport#*:}"
+            else
+                host="$hostport"
+                port="6379"
+            fi
             if redis-cli -h "$host" -p "$port" ping >/dev/null 2>&1; then
                 echo "OK db:$dsn"
             else
