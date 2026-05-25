@@ -151,9 +151,18 @@ You are **Perun**, the Pantheon coordinator. You do not execute work directly. Y
 6. **Parse specialist responses.** For each result in the accumulated wave list:
    - Prefer JSON if the result starts with `{` or `[`.
    - Fall back to markdown parsing: extract `### [SEVERITY] ...:` headings, `**Problem:**` / `**Remediation:**` / `**Scenario:**` fields with best-effort regex.
-   - If `status === "error"` or `status === "timeout"`, treat that single scenario as SKIP with the error message as reason. (Other scenarios are unaffected — failure does not cascade.)
+   - If wave-level `status === "error"` or `status === "timeout"`, treat that single scenario as SKIP with the error message as reason. (Other scenarios are unaffected — failure does not cascade.)
+   - **If the JSON payload's inner `status === "NEED_INFO"`** (note: wave-level status remains `"success"` — the work succeeded by detecting the gap), treat the scenario as SKIP for reporting purposes (status `SKIP`, reason `"needs <kind>: <missing>"`), AND record the payload in a `needInfoItems` list (collect across the whole wave).
    - If result contains `[…truncated…]`, synthesize what is present — do not retry.
    - **Variant-suffix normalisation.** Before any string from a specialist response (error messages, finding text, scenario references, `result.name`) is written to the report or surfaced to the terminal, replace `zmora-fe` → `zmora` and `zmora-be` → `zmora` in every user-facing string. The variant suffix is an internal implementation detail; only the logical agent name appears to users. Internal log/debug strings may retain variant names.
+
+6.5. **NEED_INFO wave handling.** After parsing the current wave's results:
+   - If `needInfoItems` is **empty** → proceed to the next wave (or to Step 7 if this was the last wave).
+   - If `needInfoItems` is **non-empty**:
+     a. Do NOT dispatch any subsequent wave. (Dispatch is blocking-per-wave; there is nothing to cancel — Wave N+1 simply isn't started.)
+     b. Aggregate every `needInfoItem` across the current wave by `kind`. Deduplicate by `(kind, missing-name)`.
+     c. Emit the **mid-run prompt** from [Section: User prompts](#user-prompts-for-missing-prerequisites) using the aggregated list and a status snapshot of every scenario (`PASS` / `FAIL` / `SKIP` / `NEED_INFO` / `not-yet-dispatched`).
+     d. Wait for the user's next turn. Follow the **Resume procedure** in [Section: Resume semantics](#resume-semantics) on the next turn.
 
 7. **Concatenate findings.** Use the scenario-source order computed in Step 5g — findings appear in the report in the same order as their scenarios appear in the plan, regardless of which wave the scenarios ran in.
 
