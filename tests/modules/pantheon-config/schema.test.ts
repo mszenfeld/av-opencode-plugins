@@ -146,4 +146,97 @@ describe("validateConfigFile", () => {
     const result = validateConfigFile("nope", "/etc/example.json")
     expect(result.errors[0]).toContain("/etc/example.json")
   })
+
+  it("neutralizes ANSI/control bytes in agent names and unknown field names (CWE-117)", () => {
+    // JSON allows any Unicode string as an object key. Without neutralization
+    // at the source, a malicious pantheon.json could inject ANSI escape
+    // sequences, C0/C1 control bytes, BiDi overrides, or zero-width chars
+    // through `Object.entries(agents)` keys directly into `errors[]`, which
+    // is forwarded to console.error and `client.tui.showToast`. The lookup
+    // against KNOWN_AGENT_FIELDS must still use the raw key — only the
+    // rendered form is neutralized.
+    const result = validateConfigFile({
+      agents: {
+        // ESC[31m (red) + BiDi RLO + zero-width space inside the agent name
+        "evil\x1b[31m‮agent​": "not-an-object",
+      },
+    })
+    const joined = result.errors.join("\n")
+    expect(joined).not.toMatch(/\x1b/)
+    expect(joined).not.toMatch(/[‪-‮⁦-⁩]/)
+    expect(joined).not.toMatch(/[​-‍﻿]/)
+    expect(joined).toMatch(/agents\.evilagent must be object/)
+  })
+
+  it("neutralizes control bytes in unknown field names (CWE-117)", () => {
+    const result = validateConfigFile({
+      agents: {
+        perun: {
+          model: "anthropic/claude-opus-4-7",
+          // ESC sequence inside the field name
+          "temp\x1b[31merature": 0.5,
+        },
+      },
+    })
+    const joined = result.errors.join("\n")
+    expect(joined).not.toMatch(/\x1b/)
+    expect(joined).toMatch(/unknown field "agents\.perun\.temperature"/)
+  })
+
+  it("neutralizes control bytes in invalid model values (CWE-117)", () => {
+    // String models that fail MODEL_REGEX still get echoed back in the error
+    // message — neutralize the rendered form so they cannot smuggle ANSI
+    // sequences through the validation reporter.
+    const result = validateConfigFile({
+      agents: { perun: { model: "bad\x1b[31mmodel" } },
+    })
+    const joined = result.errors.join("\n")
+    expect(joined).not.toMatch(/\x1b/)
+    expect(joined).toMatch(/invalid model "badmodel"/)
+  })
+
+  it("truncates oversized model strings in the error message (CWE-117)", () => {
+    // A hostile pantheon.json can stuff a multi-megabyte string into
+    // `agent.model`. Even after neutralization the rendered form would flood
+    // `console.error` and make the warning toast unreadable, so the renderer
+    // caps the shown value at MAX_SHOWN_LEN (120 chars) with a trailing
+    // ellipsis. SEC-003.
+    const oversized = "x".repeat(10_000)
+    const result = validateConfigFile({
+      agents: { perun: { model: oversized } },
+    })
+    expect(result.config.agents).toEqual({})
+    expect(result.errors).toHaveLength(1)
+    const msg = result.errors[0]!
+    // The error must contain `invalid model "<cap>…"` — the cap is 120 chars
+    // of 'x' plus the ellipsis, so the rendered field is bounded.
+    expect(msg).toMatch(/invalid model "x{120}…"/)
+    // Sanity: the whole error line must not contain anywhere near the full
+    // 10k bytes of payload.
+    expect(msg.length).toBeLessThan(500)
+  })
+
+  it("neutralizes and truncates non-string model with hostile toString (CWE-117)", () => {
+    // JSONC permits structured values where a string is expected. A non-string
+    // `model` reaches the `String(model)` coercion, which runs a
+    // caller-supplied `toString` — that's an attacker-controlled bytes source.
+    // The neutralizer must apply to the non-string branch too, and the result
+    // must still be capped.
+    const hostile = {
+      toString: () => `\x1b[31mEVIL${"A".repeat(10_000)}`,
+    }
+    const result = validateConfigFile({
+      agents: { perun: { model: hostile } },
+    })
+    expect(result.config.agents).toEqual({})
+    expect(result.errors).toHaveLength(1)
+    const msg = result.errors[0]!
+    // ESC byte must be stripped.
+    expect(msg).not.toMatch(/\x1b/)
+    // The "EVIL" payload survives (it is printable ASCII) but the appended
+    // 10k 'A' characters must be capped — so the rendered form ends with the
+    // ellipsis, not raw bytes.
+    expect(msg).toMatch(/invalid model "EVILA{116}…"/)
+    expect(msg.length).toBeLessThan(500)
+  })
 })

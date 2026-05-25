@@ -248,7 +248,15 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       // `catch` clause flips it too: we give up after one in-band attempt to
       // avoid spamming the user on every subsequent `session.created`.
       try {
-        const errors = getLoadErrors()
+        // Neutralize attacker-influenced bytes (ANSI/CSI/OSC escapes, C0/C1
+        // control bytes, BiDi overrides, zero-width chars) before either sink
+        // sees them. Load-error strings interpolate raw values from
+        // `.opencode/pantheon.json` (invalid `model`, unknown agent keys,
+        // file paths, underlying parse-error messages), so a hostile project
+        // could otherwise splice fake log lines into stderr or spoof the
+        // toast body. Same primitive used by `dispatch.ts` and the
+        // session-notification hook (CWE-117).
+        const errors = getLoadErrors().map(neutralizeUntrustedOutput)
         // Honour the docs contract: "Check the OpenCode console output for
         // the specific parse error". Without this, the warning toast points
         // users at a console that has no diagnostic written to it.
