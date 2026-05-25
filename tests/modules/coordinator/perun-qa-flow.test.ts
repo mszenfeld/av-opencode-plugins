@@ -248,20 +248,20 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     expect(content).toMatch(/BE-0\d/)
   })
 
-  it("dispatches one qa-tester variant per scenario via plugin.tool.dispatch_parallel.execute and combines findings with assigned IDs", async () => {
+  it("dispatches one zmora variant per scenario via plugin.tool.dispatch_parallel.execute and combines findings with assigned IDs", async () => {
     // Post-Task-2 shape: Perun dispatches per-scenario tasks, routing each
-    // FE-XX scenario to qa-tester-fe and each BE-XX scenario to qa-tester-be.
+    // FE-XX scenario to zmora-fe and each BE-XX scenario to zmora-be.
     // Both variants reuse a single session id in this test because the fake
     // client maps session by title suffix `dispatch to <agent>`.
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-tester-fe", "subagent"),
-        makeAgent("qa-tester-be", "subagent"),
+        makeAgent("zmora-fe", "subagent"),
+        makeAgent("zmora-be", "subagent"),
         makeAgent("perun", "primary"),
       ],
       sessions: {
-        "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
-        "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+        "zmora-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+        "zmora-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
       },
     })
 
@@ -269,16 +269,16 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     const ctx = makeToolContext("perun-parent-session")
 
     // Three scenarios: two FE, one BE — total 3 per-scenario tasks. The
-    // `agent` label uses the logical-name exception (`qa-tester ×3`), never
-    // a comma-joined `qa-tester-fe ×2, qa-tester-be`.
+    // `agent` label uses the logical-name exception (`zmora ×3`), never
+    // a comma-joined `zmora-fe ×2, zmora-be`.
     const rawResults = await plugin.dispatchParallel(
       {
-        agent: "qa-tester ×3",
+        agent: "zmora ×3",
         summary: "integration test plan",
         tasks: [
-          { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
-          { name: "qa-tester-fe", prompt: "<FE-02 scenario block>" },
-          { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
+          { name: "zmora-fe", prompt: "<FE-01 scenario block>" },
+          { name: "zmora-fe", prompt: "<FE-02 scenario block>" },
+          { name: "zmora-be", prompt: "<BE-01 scenario block>" },
         ],
       },
       ctx,
@@ -290,17 +290,17 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     // three results in input order.
     //
     // `result.name` is normalised from the internal variant
-    // (`qa-tester-fe` / `qa-tester-be`) to the logical agent name
-    // (`qa-tester`) inside `dispatchParallel`. The TS-level surface still
+    // (`zmora-fe` / `zmora-be`) to the logical agent name
+    // (`zmora`) inside `dispatchParallel`. The TS-level surface still
     // *receives* the variant names — see `sessionPrompt[…].body.agent`
     // assertions below — but the OUTPUT contract collapses them so the
     // variant suffix cannot leak into a user-facing report.
     expect(results).toHaveLength(3)
-    expect(results[0]?.name).toBe("qa-tester")
+    expect(results[0]?.name).toBe("zmora")
     expect(results[0]?.status).toBe("success")
-    expect(results[1]?.name).toBe("qa-tester")
+    expect(results[1]?.name).toBe("zmora")
     expect(results[1]?.status).toBe("success")
-    expect(results[2]?.name).toBe("qa-tester")
+    expect(results[2]?.name).toBe("zmora")
     expect(results[2]?.status).toBe("success")
 
     // SDK wiring assertions: registry was loaded once, three sessions were
@@ -311,21 +311,21 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     expect(fake.calls.sessionCreate[0]).toEqual({
       body: {
         parentID: "perun-parent-session",
-        title: "[perun] dispatch to qa-tester-fe",
+        title: "[perun] dispatch to zmora-fe",
       },
     })
     expect(fake.calls.sessionCreate[2]).toEqual({
       body: {
         parentID: "perun-parent-session",
-        title: "[perun] dispatch to qa-tester-be",
+        title: "[perun] dispatch to zmora-be",
       },
     })
     expect(fake.calls.sessionPrompt).toHaveLength(3)
     expect(fake.calls.sessionPrompt[0]).toMatchObject({
-      body: { agent: "qa-tester-fe" },
+      body: { agent: "zmora-fe" },
     })
     expect(fake.calls.sessionPrompt[2]).toMatchObject({
-      body: { agent: "qa-tester-be" },
+      body: { agent: "zmora-be" },
     })
 
     // Functional assertions: ID assignment routes through the public path
@@ -355,18 +355,18 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     // error.
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-tester-fe", "subagent"),
-        makeAgent("qa-tester-be", "subagent"),
+        makeAgent("zmora-fe", "subagent"),
+        makeAgent("zmora-be", "subagent"),
       ],
       sessions: {
-        "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+        "zmora-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
       },
     })
 
     // Override session.create to return an empty id specifically for the BE variant.
     const originalCreate = fake.client.session.create.bind(fake.client.session)
     fake.client.session.create = (async (options: { body: { parentID: string; title: string } }) => {
-      if (options.body.title.endsWith("dispatch to qa-tester-be")) {
+      if (options.body.title.endsWith("dispatch to zmora-be")) {
         fake.calls.sessionCreate.push(options)
         return { data: { id: "" } }
       }
@@ -378,11 +378,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
     const rawResults = await plugin.dispatchParallel(
       {
-        agent: "qa-tester ×2",
+        agent: "zmora ×2",
         summary: "partial failure path",
         tasks: [
-          { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
-          { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
+          { name: "zmora-fe", prompt: "<FE-01 scenario block>" },
+          { name: "zmora-be", prompt: "<BE-01 scenario block>" },
         ],
       },
       ctx,
@@ -409,12 +409,12 @@ describe("@perun QA flow integration (plugin entry point)", () => {
     async function runFlow(): Promise<string[]> {
       const fake = makeFakeClient({
         agents: [
-          makeAgent("qa-tester-fe", "subagent"),
-          makeAgent("qa-tester-be", "subagent"),
+          makeAgent("zmora-fe", "subagent"),
+          makeAgent("zmora-be", "subagent"),
         ],
         sessions: {
-          "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
-          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+          "zmora-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+          "zmora-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
         },
       })
       const plugin = await invokePlugin(fake.client)
@@ -422,11 +422,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const rawResults = await plugin.dispatchParallel(
         {
-          agent: "qa-tester ×2",
+          agent: "zmora ×2",
           summary: "determinism check",
           tasks: [
-            { name: "qa-tester-fe", prompt: "<FE-01 scenario block>" },
-            { name: "qa-tester-be", prompt: "<BE-01 scenario block>" },
+            { name: "zmora-fe", prompt: "<FE-01 scenario block>" },
+            { name: "zmora-be", prompt: "<BE-01 scenario block>" },
           ],
         },
         ctx,
@@ -455,7 +455,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
   it("rejects unknown agents at the plugin entry point before creating any session", async () => {
     const fake = makeFakeClient({
-      agents: [makeAgent("qa-tester-fe", "subagent")],
+      agents: [makeAgent("zmora-fe", "subagent")],
       sessions: {},
     })
     const plugin = await invokePlugin(fake.client)
@@ -481,7 +481,7 @@ describe("@perun QA flow integration (plugin entry point)", () => {
   it("rejects primary-mode agents at the plugin entry point (anti-recursion)", async () => {
     const fake = makeFakeClient({
       agents: [
-        makeAgent("qa-tester-fe", "subagent"),
+        makeAgent("zmora-fe", "subagent"),
         makeAgent("perun", "primary"),
       ],
       sessions: {},
@@ -517,12 +517,12 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // BE-01 (no deps) → BE-02 [depends-on: BE-01].
       const fake = makeFakeClient({
         agents: [
-          makeAgent("qa-tester-fe", "subagent"),
-          makeAgent("qa-tester-be", "subagent"),
+          makeAgent("zmora-fe", "subagent"),
+          makeAgent("zmora-be", "subagent"),
         ],
         sessions: {
-          "qa-tester-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
-          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+          "zmora-fe": { sessionId: "fe-session", finalText: JSON.stringify(FE_FINDING) },
+          "zmora-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
         },
       })
       const plugin = await invokePlugin(fake.client)
@@ -531,9 +531,9 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // Wave 1: BE-01 only.
       const wave1Raw = await plugin.dispatchParallel(
         {
-          agent: "qa-tester",
+          agent: "zmora",
           summary: "deps plan (wave 1/2)",
-          tasks: [{ name: "qa-tester-be", prompt: "<BE-01 scenario block>" }],
+          tasks: [{ name: "zmora-be", prompt: "<BE-01 scenario block>" }],
         },
         ctx,
       )
@@ -544,9 +544,9 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // Wave 2: BE-02 (depends on BE-01, which completed in wave 1).
       const wave2Raw = await plugin.dispatchParallel(
         {
-          agent: "qa-tester",
+          agent: "zmora",
           summary: "deps plan (wave 2/2)",
-          tasks: [{ name: "qa-tester-be", prompt: "<BE-02 scenario block>" }],
+          tasks: [{ name: "zmora-be", prompt: "<BE-02 scenario block>" }],
         },
         ctx,
       )
@@ -565,11 +565,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // call with two tasks in parallel.
       const fake = makeFakeClient({
         agents: [
-          makeAgent("qa-tester-fe", "subagent"),
-          makeAgent("qa-tester-be", "subagent"),
+          makeAgent("zmora-fe", "subagent"),
+          makeAgent("zmora-be", "subagent"),
         ],
         sessions: {
-          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+          "zmora-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
         },
       })
       const plugin = await invokePlugin(fake.client)
@@ -577,11 +577,11 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const rawResults = await plugin.dispatchParallel(
         {
-          agent: "qa-tester ×2",
+          agent: "zmora ×2",
           summary: "deps plan (wave 2/2)",
           tasks: [
-            { name: "qa-tester-be", prompt: "<BE-02 scenario block>" },
-            { name: "qa-tester-be", prompt: "<BE-03 scenario block>" },
+            { name: "zmora-be", prompt: "<BE-02 scenario block>" },
+            { name: "zmora-be", prompt: "<BE-03 scenario block>" },
           ],
         },
         ctx,
@@ -603,9 +603,9 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // next wave regardless of wave 0's status. This test asserts the
       // dispatcher honours both calls independently.
       const fake = makeFakeClient({
-        agents: [makeAgent("qa-tester-be", "subagent")],
+        agents: [makeAgent("zmora-be", "subagent")],
         sessions: {
-          "qa-tester-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
+          "zmora-be": { sessionId: "be-session", finalText: JSON.stringify(BE_FINDING) },
         },
       })
 
@@ -626,9 +626,9 @@ describe("@perun QA flow integration (plugin entry point)", () => {
 
       const wave0Raw = await plugin.dispatchParallel(
         {
-          agent: "qa-tester",
+          agent: "zmora",
           summary: "deps plan (wave 1/2)",
-          tasks: [{ name: "qa-tester-be", prompt: "<BE-01 scenario block>" }],
+          tasks: [{ name: "zmora-be", prompt: "<BE-01 scenario block>" }],
         },
         ctx,
       )
@@ -639,9 +639,9 @@ describe("@perun QA flow integration (plugin entry point)", () => {
       // regardless of predecessor failure.
       const wave1Raw = await plugin.dispatchParallel(
         {
-          agent: "qa-tester",
+          agent: "zmora",
           summary: "deps plan (wave 2/2)",
-          tasks: [{ name: "qa-tester-be", prompt: "<BE-02 scenario block>" }],
+          tasks: [{ name: "zmora-be", prompt: "<BE-02 scenario block>" }],
         },
         ctx,
       )

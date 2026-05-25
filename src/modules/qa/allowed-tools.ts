@@ -1,4 +1,4 @@
-// Per-variant tool allowlists for qa-tester variants. Splitting at this layer
+// Per-variant tool allowlists for zmora variants. Splitting at this layer
 // keeps the runtime tool-allowlist as the security boundary: one variant
 // cannot exec the other variant's tools regardless of prompt content.
 

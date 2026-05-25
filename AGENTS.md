@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `qa-tester` logical agent, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `zmora` logical agent, `pantheon-config` — the harness configuration library, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel` and `assign_issue_ids` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -13,13 +13,18 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `packages/frontend-developer` | Frontend-developer plugin source, tests, skills, build scripts. Output shipped at `packages/frontend-developer/dist/`. |
 | `packages/skill-utils` | Shared helpers for creating skill-based plugins. Output shipped at `packages/skill-utils/dist/`. |
 | `packages/skill-registry` | Global skill registry — scans skill folders, parses frontmatter, registers unified `load_appverk_skill` tool, injects activation rules into every agent's system prompt. Output shipped at `packages/skill-registry/dist/`. |
-| `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/*.md`. Registers two `qa-tester-{fe,be}` subagent variants composed via `prompt-builder.ts`; logical name `qa-tester` everywhere user-facing. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
+| `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/*.md`. Registers two `zmora-{fe,be}` subagent variants composed via `prompt-builder.ts`; logical agent name `zmora` everywhere user-facing. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
 | `packages/swift-developer` | Swift-developer plugin source, tests, skills, build scripts. Output shipped at `packages/swift-developer/dist/`. |
 | `src/modules/coordinator/` | Absorbed coordinator plugin — TS source only. Asset: `src/agents/perun.md`. Registers `dispatch_parallel` (worker pool, concurrency 4, cap 50) and `assign_issue_ids` tools alongside the `@perun` primary agent. Tests: `tests/modules/coordinator/`. Built into `dist/modules/coordinator/` and `dist/agents/`. |
+| `src/modules/pantheon-config/` | Harness-resident **library** (no plugin export) — reads `pantheon.json` (user-global + per-project walk-up, closest-wins merge) and exposes `loadPantheonConfig()` / `getLoadErrors()` / `pantheonConfigEmpty()`. Consumed by `coordinator/` and `qa/` in their `config` hooks. Tests: `tests/modules/pantheon-config/`. Built into `dist/modules/pantheon-config/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
 | `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
 **Important:** `dist/` is usually ignored, but the **root `dist/`** and **`packages/*/dist/`** are committed and published (see `.gitignore`). Do not delete those `dist/` trees.
+
+## Pantheon harness configuration
+
+Per-agent model selection lives in `pantheon.json`. See [`docs/configuring-agents.md`](docs/configuring-agents.md) for the user-facing reference.
 
 ## Commands
 
@@ -133,28 +138,18 @@ When adding a new plugin, you MUST update both top-level and per-plugin document
 
 ### `README.md` (root)
 
-Update these sections:
+The README is harness-first (Pantheon agents + configuration). When you add a new piece:
 
-1. **Plugin count badge** — increment the number: `[![Plugins](https://img.shields.io/badge/plugins-N-blue.svg)]`
-2. **Introduction paragraph** — add a one-line description of the new plugin
-3. **Usage section** — add a subsection with `/command` example and what it does
-4. **Available Commands & Agents table** — add rows for the new command and
-   any agents. Verify each agent has the correct `mode` (`"primary"` for
-   user-facing agents, `"subagent"` for background/skill agents).
-5. **Repository Structure** — add `packages/<name>` and `docs/plugins/<name>.md` entries
-6. **Documentation list** — add link to the new plugin guide
+1. **If it is user-facing in the harness** (a new primary agent, a new subagent surfaced through Perun, or a new configuration surface), add a short entry under "What you get today" and link to its detailed reference under `docs/`.
+2. **If it is plumbing** (a new library module like `pantheon-config`, a new dispatch primitive, a hook), update `AGENTS.md`'s monorepo-layout table — do not add to the README. The README is not a system-architecture diagram.
 
-### `docs/plugins/<name>.md` (per-plugin guide)
+Do **not** maintain a plugin badge, a comprehensive command/agent table, or per-plugin marketing copy. Those constructs were retired with the harness pivot.
 
-Create a dedicated guide with:
+### `docs/<topic>.md` (harness reference)
 
-1. **Installation** — "The root plugin bundle includes this package automatically."
-2. **Usage** — `/command <args>` syntax with examples
-3. **What it does** — step-by-step breakdown of the workflow
-4. **Direct agent use** — `opencode agent <agent-name> "..."` examples (if applicable)
-5. **Architecture** — table of registered elements (commands, agents, tools) and their purposes
-6. **Limitations** — known MVP limitations or deferred features
-7. **Project Structure** — list of key source files
+For user-facing harness concerns (e.g. configuration, agent reference, workflow guides), write a dedicated topic doc directly under `docs/`. `docs/configuring-agents.md` is the first of these.
+
+> Do **not** add new files under `docs/plugins/`. That tree is legacy and will be removed once the harness migration completes.
 
 ---
 
@@ -166,10 +161,9 @@ Create a dedicated guide with:
 4. Add the new `packages/<name>/dist/` path to root `package.json` `files`.
 5. Update root `npm run build` / `npm run test` / `npm run typecheck` scripts to include the new workspace.
 6. Add a smoke/packaging test in `tests/` or `packages/<name>/tests/`.
-7. **Update `README.md`** following the [Documentation Checklist](#documentation-checklist).
-8. **Create `docs/plugins/<name>.md`** following the per-plugin guide template.
-9. **Update this `AGENTS.md`** — increment plugin counts, add new rows to layout table, update published files count.
-10. **Add a `.gitignore` exception** for the new package's `dist/` directory:
+7. **Update `README.md` and contributor docs** following the [Documentation Checklist](#documentation-checklist). New user-facing harness surfaces get a topic doc under `docs/` (e.g. `docs/configuring-agents.md`); do **not** add new files under `docs/plugins/` (that tree is legacy).
+8. **Update this `AGENTS.md`** — add a row to the monorepo-layout table; update published files count.
+9. **Add a `.gitignore` exception** for the new package's `dist/` directory:
     ```gitignore
     !packages/<name>/dist/
     !packages/<name>/dist/**
@@ -182,11 +176,10 @@ Create a dedicated guide with:
 
 For small absorbed modules (no separate workspace), follow this pattern instead:
 
-> **Canonical reference:** The `src/` TypeScript absorption program is documented in
-> [`docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md`](docs/superpowers/specs/2026-05-20-src-typescript-migration-commit-pilot-design.md)
-> (design rationale: `bundle: false`, build-order constraints, `tsup.root.config.ts` filename) and
-> [`docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md`](docs/superpowers/plans/2026-05-20-src-typescript-migration-commit-pilot.md)
-> (staged execution plan — Stage 1 of N is the `commit` pilot). Read both before starting a new absorption stage so future work does not re-derive or contradict these decisions.
+> **Design constraints carried over from the original src/ absorption program:**
+> - **`bundle: false`** in `tsup.root.config.ts` — each module is compiled standalone so relative imports between modules keep working at runtime.
+> - **Build-order matters:** the root build (`npm run build:root`) emits `dist/` from `src/` first; workspace package builds run afterwards. Modules that read assets from `dist/` (via `import.meta.url` resolution) rely on this ordering.
+> - **The config filename is `tsup.root.config.ts`** (not the default `tsup.config.ts`) — this is intentional so workspace `tsup.config.ts` files are not picked up by the root build.
 
 1. Create `src/modules/<name>/` with `index.ts` and supporting `.ts` modules.
 2. Place `.md` assets under `src/commands/`, `src/agents/`, or `src/skills/` (the layout `scripts/copy-root-assets.mjs` knows about).
@@ -201,24 +194,35 @@ For small absorbed modules (no separate workspace), follow this pattern instead:
 When installing from git, OpenCode (via Bun) caches the repository and **does not automatically pull updates** when the branch moves. To ensure users receive the latest commands and agents:
 
 1. **Bump the version** in **all** `package.json` files (root + every workspace) when adding new commands, agents, or built assets.
-2. **Create a git tag** matching the version (e.g. `v0.2.8`) after the bump commit.
+2. **Create a git tag** matching the version (e.g. `v0.3.0`) after the bump commit.
 3. **Update installation examples** in `README.md`, `AGENTS.md`, and `.opencode/opencode.json` to reference the new tag instead of a branch name like `#master`.
 
 Example config:
 ```json
 {
   "plugin": [
-    "av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.2.16"
+    "av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.3.0"
   ]
 }
 ```
 
 If a user reports missing commands after an update, instruct them to either:
-- Re-install with `opencode plugin -f av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.2.16`, or
+- Re-install with `opencode plugin -f av-opencode-plugins@git+https://github.com/AppVerk/av-opencode-plugins.git#v0.3.0`, or
 - Remove the old cache directory manually:
   ```bash
   rm -rf ~/.cache/opencode/packages/av-opencode-plugins*
   ```
+
+## Superpowers Artefacts
+
+**Never link to anything under `docs/superpowers/` from source, tests, or any other documentation file.** That tree (`docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`) holds *temporary working artefacts* produced by the brainstorming / writing-plans skills. Specs and plans get archived or deleted once their work has shipped — every link to them becomes a broken reference the moment that happens.
+
+If a design decision needs to stay reachable after the spec is gone:
+
+- **Inline the decision and its rationale** in the permanent doc that needs it (e.g. `AGENTS.md` for contributor patterns, `docs/<topic>.md` for user-facing reference). The *why* should live in the doc that survives.
+- **Use git history** for the audit trail — `git log --follow <file>` and `git blame` are the durable record of when and why a decision was made.
+
+Exceptions: cross-references *within* `docs/superpowers/` (a plan linking to its spec, etc.) are fine — those files are temporary together.
 
 ## Code Review Artefacts
 

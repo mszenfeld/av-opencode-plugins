@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { tool, type Plugin } from "@opencode-ai/plugin"
 import { dispatchParallel } from "./dispatch.js"
 import { assignIssueIds } from "./assign-issue-ids.js"
@@ -15,24 +12,21 @@ import {
   loadAgentRegistry,
   toPollerMessage,
 } from "./sdk-specialist.js"
+import {
+  getLoadErrors,
+  loadPantheonConfig,
+  pantheonConfigEmpty,
+} from "../pantheon-config/index.js"
+import { loadModuleAsset } from "../_shared/load-asset.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
-// imports (e.g. `tests/to-poller-message.test.ts` imports `toPollerMessage`
-// from `../src/index.js`).
+// imports (e.g. `tests/modules/coordinator/to-poller-message.test.ts` imports
+// `toPollerMessage` from `../../../src/modules/coordinator/index.js`).
 export { createSDKSpecialist, loadAgentRegistry, toPollerMessage }
 export { neutralizeUntrustedOutput, deriveReportPath, normalizeVariantSuffix }
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-
 function loadAgentPrompt(name: string): string {
-  // After absorption into src/modules/coordinator/, this file is compiled
-  // standalone (root tsup uses `bundle: false`) so `moduleDir` resolves to:
-  //   Production:                dist/modules/coordinator/  → reads dist/agents/<name>.md
-  //   Dev (tests against src):   src/modules/coordinator/   → reads src/agents/<name>.md
-  // Both resolve via the same `../../agents/<name>.md` relative to moduleDir.
-  // Agent prompts land at dist/agents/<name>.md via copy-root-assets.mjs.
-  const filePath = path.resolve(moduleDir, "../../agents", `${name}.md`)
-  return readFileSync(filePath, "utf8")
+  return loadModuleAsset(import.meta.url, `../../agents/${name}.md`)
 }
 
 let cachedPerunPrompt: string | undefined
@@ -45,6 +39,7 @@ function getPerunPrompt(): string {
 
 export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
   const { client } = input
+  let toastShown = false
 
   const dispatchParallelTool = tool({
     description:
@@ -80,7 +75,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
             "- different agents: comma-joined names (e.g. \"code-reviewer, security-auditor\")\n" +
             "- mixed + duplicates: combine the two (e.g. \"code-reviewer ×2, security-auditor\")\n" +
             "Hard cap 60 chars. Do not include prompts, goals, or PII — `summary` is the place for that.\n\n" +
-            "Exception for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `qa-tester` → `qa-tester-fe` + `qa-tester-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent's prompt.",
+            "Exception for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `zmora` → `zmora-fe` + `zmora-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent's prompt.",
         ),
       summary: tool.schema
         .string()
@@ -221,6 +216,13 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
           return getPerunPrompt()
         },
       }
+      // Inject model AFTER registration so we don't have to merge it into the
+      // object literal above — the non-null assertion is safe because we just
+      // set the key on the line above.
+      const perunModel = loadPantheonConfig().agents.perun?.model
+      if (perunModel !== undefined) {
+        config.agent["Perun - Coordinator"]!.model = perunModel
+      }
     },
     // IMPORTANT: Tool names "dispatch_parallel", "assign_issue_ids", and "compute_waves" must
     // exactly match the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename any
@@ -229,6 +231,54 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,
       compute_waves: computeWavesTool,
+    },
+    event: async ({ event }) => {
+      if (event.type !== "session.created") return
+      if (toastShown) return
+
+      // Everything that can throw lives INSIDE the try:
+      //  - `getLoadErrors()` / `pantheonConfigEmpty()` both call
+      //    `ensureLoaded()`, which used to be able to throw on hostile input
+      //    (RangeError from deeply-nested JSONC). It now degrades to an
+      //    error entry, but we still defend the event handler in depth.
+      //  - `client.tui.showToast` rejects in headless / non-TUI invocations.
+      // `toastShown` is flipped only AFTER a successful toast attempt, so a
+      // transient TUI failure on the first session does not permanently
+      // suppress the warning for the rest of the process lifetime. The
+      // `catch` clause flips it too: we give up after one in-band attempt to
+      // avoid spamming the user on every subsequent `session.created`.
+      try {
+        const errors = getLoadErrors()
+        // Honour the docs contract: "Check the OpenCode console output for
+        // the specific parse error". Without this, the warning toast points
+        // users at a console that has no diagnostic written to it.
+        // `console.error` is the right channel for genuine plugin-level
+        // diagnostics — it goes to stderr and is visible in `opencode` runs.
+        for (const e of errors) console.error(e)
+
+        if (errors.length > 0) {
+          await client.tui.showToast({
+            body: {
+              variant: "warning",
+              title: "Pantheon",
+              message: errors[0] ?? "pantheon.json parse error — check console for details",
+            },
+          })
+        } else if (pantheonConfigEmpty()) {
+          await client.tui.showToast({
+            body: {
+              variant: "info",
+              title: "Pantheon",
+              message: "pantheon.json not found — using default models",
+            },
+          })
+        }
+        toastShown = true
+      } catch {
+        // best-effort: headless / non-TUI OpenCode invocations must not crash.
+        // Flip the latch so we don't keep retrying on every session.created.
+        toastShown = true
+      }
     },
   }
 }

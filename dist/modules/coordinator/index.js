@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import { dispatchParallel } from "./dispatch.js";
 import { assignIssueIds } from "./assign-issue-ids.js";
@@ -15,10 +12,14 @@ import {
   loadAgentRegistry,
   toPollerMessage
 } from "./sdk-specialist.js";
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+import {
+  getLoadErrors,
+  loadPantheonConfig,
+  pantheonConfigEmpty
+} from "../pantheon-config/index.js";
+import { loadModuleAsset } from "../_shared/load-asset.js";
 function loadAgentPrompt(name) {
-  const filePath = path.resolve(moduleDir, "../../agents", `${name}.md`);
-  return readFileSync(filePath, "utf8");
+  return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
 }
 let cachedPerunPrompt;
 function getPerunPrompt() {
@@ -29,6 +30,7 @@ function getPerunPrompt() {
 }
 const AppVerkCoordinatorPlugin = async (input) => {
   const { client } = input;
+  let toastShown = false;
   const dispatchParallelTool = tool({
     description: [
       "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
@@ -52,7 +54,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       // bare `dispatch_parallel`. Splitting into `agent` and `summary` lets
       // reviewers see "who" and "what" as two distinct columns inline.
       agent: tool.schema.string().min(1).max(60).describe(
-        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent (total dispatched; \u22644 run concurrently): "name \xD7N" (e.g. "code-reviewer \xD73" or "code-reviewer \xD710")\n- different agents: comma-joined names (e.g. "code-reviewer, security-auditor")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.\n\nException for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `qa-tester` \u2192 `qa-tester-fe` + `qa-tester-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent\'s prompt.'
+        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent (total dispatched; \u22644 run concurrently): "name \xD7N" (e.g. "code-reviewer \xD73" or "code-reviewer \xD710")\n- different agents: comma-joined names (e.g. "code-reviewer, security-auditor")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.\n\nException for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `zmora` \u2192 `zmora-fe` + `zmora-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent\'s prompt.'
       ),
       summary: tool.schema.string().min(1).max(80).describe(
         'REQUIRED. One-line description of what is being delegated (e.g. "run login plan", "security/perf/quality review of PR #123", "QA-003 missing CSRF token"). Rendered next to `agent` in the OpenCode TUI. Hard cap 80 chars; do not include prompts or PII.'
@@ -158,6 +160,10 @@ const AppVerkCoordinatorPlugin = async (input) => {
           return getPerunPrompt();
         }
       };
+      const perunModel = loadPantheonConfig().agents.perun?.model;
+      if (perunModel !== void 0) {
+        config.agent["Perun - Coordinator"].model = perunModel;
+      }
     },
     // IMPORTANT: Tool names "dispatch_parallel", "assign_issue_ids", and "compute_waves" must
     // exactly match the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename any
@@ -166,6 +172,34 @@ const AppVerkCoordinatorPlugin = async (input) => {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,
       compute_waves: computeWavesTool
+    },
+    event: async ({ event }) => {
+      if (event.type !== "session.created") return;
+      if (toastShown) return;
+      try {
+        const errors = getLoadErrors();
+        for (const e of errors) console.error(e);
+        if (errors.length > 0) {
+          await client.tui.showToast({
+            body: {
+              variant: "warning",
+              title: "Pantheon",
+              message: errors[0] ?? "pantheon.json parse error \u2014 check console for details"
+            }
+          });
+        } else if (pantheonConfigEmpty()) {
+          await client.tui.showToast({
+            body: {
+              variant: "info",
+              title: "Pantheon",
+              message: "pantheon.json not found \u2014 using default models"
+            }
+          });
+        }
+        toastShown = true;
+      } catch {
+        toastShown = true;
+      }
     }
   };
 };

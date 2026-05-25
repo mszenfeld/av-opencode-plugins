@@ -13,12 +13,12 @@ function neutralizeUntrustedOutput(s) {
   out = out.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return out;
 }
-const VARIANT_SUFFIX_PATTERN = /\bqa-tester-(?:fe|be)\b/g;
+const VARIANT_SUFFIX_PATTERN = /\bzmora-(?:fe|be)\b/g;
 function normalizeVariantSuffix(s) {
   if (s.length === 0) {
     return s;
   }
-  return s.replace(VARIANT_SUFFIX_PATTERN, "qa-tester");
+  return s.replace(VARIANT_SUFFIX_PATTERN, "zmora");
 }
 const PLAN_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
 const PLAN_SUFFIX = /-test-plan$/;

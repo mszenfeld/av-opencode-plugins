@@ -622,21 +622,21 @@ describe("dispatchParallel", () => {
 
   describe("variant-suffix normalisation on DispatchResult", () => {
     // Registry uses the real internal variant names: agent-registry validation
-    // still receives the unmodified `task.name` (`qa-tester-fe` / `qa-tester-be`),
+    // still receives the unmodified `task.name` (`zmora-fe` / `zmora-be`),
     // so the input side of the contract is unchanged. Only the OUTPUT
-    // `result.name` (and `.error`) get normalised to the logical `qa-tester`.
+    // `result.name` (and `.error`) get normalised to the logical `zmora`.
     const variantRegistry: Record<string, AgentInfo> = {
-      "qa-tester-fe": { mode: "subagent" },
-      "qa-tester-be": { mode: "subagent" },
+      "zmora-fe": { mode: "subagent" },
+      "zmora-be": { mode: "subagent" },
     }
 
-    it("rewrites result.name from qa-tester-fe to qa-tester on success", async () => {
+    it("rewrites result.name from zmora-fe to zmora on success", async () => {
       const { specialist, calls } = makeSpecialistRecorder({
         sessionMap: { s1: { messages: [finishedMessage("fe ok")] } },
         sessionIdSequence: ["s1"],
       })
 
-      const tasks: DispatchTask[] = [{ name: "qa-tester-fe", prompt: "fe scenario" }]
+      const tasks: DispatchTask[] = [{ name: "zmora-fe", prompt: "fe scenario" }]
 
       const results = await dispatchParallel({
         tasks,
@@ -647,19 +647,19 @@ describe("dispatchParallel", () => {
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe("success")
-      expect(results[0]?.name).toBe("qa-tester")
+      expect(results[0]?.name).toBe("zmora")
       // Input-side contract intact: the registry was consulted with the
       // original variant name (no "Unknown agent" error fired).
-      expect(calls.startTask[0]?.agentName).toBe("qa-tester-fe")
+      expect(calls.startTask[0]?.agentName).toBe("zmora-fe")
     })
 
-    it("rewrites result.name from qa-tester-be to qa-tester on success", async () => {
+    it("rewrites result.name from zmora-be to zmora on success", async () => {
       const { specialist } = makeSpecialistRecorder({
         sessionMap: { s1: { messages: [finishedMessage("be ok")] } },
         sessionIdSequence: ["s1"],
       })
 
-      const tasks: DispatchTask[] = [{ name: "qa-tester-be", prompt: "be scenario" }]
+      const tasks: DispatchTask[] = [{ name: "zmora-be", prompt: "be scenario" }]
 
       const results = await dispatchParallel({
         tasks,
@@ -668,7 +668,7 @@ describe("dispatchParallel", () => {
         pollIntervalMs: 10,
       })
 
-      expect(results[0]?.name).toBe("qa-tester")
+      expect(results[0]?.name).toBe("zmora")
     })
 
     it("rewrites result.name on error results too", async () => {
@@ -678,7 +678,7 @@ describe("dispatchParallel", () => {
         },
       })
 
-      const tasks: DispatchTask[] = [{ name: "qa-tester-fe", prompt: "will fail" }]
+      const tasks: DispatchTask[] = [{ name: "zmora-fe", prompt: "will fail" }]
 
       const results = await dispatchParallel({
         tasks,
@@ -688,7 +688,7 @@ describe("dispatchParallel", () => {
       })
 
       expect(results[0]?.status).toBe("error")
-      expect(results[0]?.name).toBe("qa-tester")
+      expect(results[0]?.name).toBe("zmora")
     })
 
     it("scrubs variant suffix from result.error strings", async () => {
@@ -696,11 +696,11 @@ describe("dispatchParallel", () => {
       // simulates a server-side error that surfaces the internal agent name.
       const { specialist } = makeSpecialistRecorder({
         startTaskHandler: async () => {
-          throw new Error("failed to spawn qa-tester-be session for scenario BE-01")
+          throw new Error("failed to spawn zmora-be session for scenario BE-01")
         },
       })
 
-      const tasks: DispatchTask[] = [{ name: "qa-tester-be", prompt: "be scenario" }]
+      const tasks: DispatchTask[] = [{ name: "zmora-be", prompt: "be scenario" }]
 
       const results = await dispatchParallel({
         tasks,
@@ -711,8 +711,8 @@ describe("dispatchParallel", () => {
 
       expect(results[0]?.status).toBe("error")
       expect(results[0]?.error).toBeDefined()
-      expect(results[0]?.error).not.toContain("qa-tester-be")
-      expect(results[0]?.error).toContain("qa-tester")
+      expect(results[0]?.error).not.toContain("zmora-be")
+      expect(results[0]?.error).toContain("zmora")
     })
 
     it("normalises a mixed batch of fe + be tasks while preserving order", async () => {
@@ -724,9 +724,9 @@ describe("dispatchParallel", () => {
       })
 
       const tasks: DispatchTask[] = [
-        { name: "qa-tester-fe", prompt: "fe-1" },
-        { name: "qa-tester-be", prompt: "be-1" },
-        { name: "qa-tester-fe", prompt: "fe-2" },
+        { name: "zmora-fe", prompt: "fe-1" },
+        { name: "zmora-be", prompt: "be-1" },
+        { name: "zmora-fe", prompt: "fe-2" },
       ]
 
       const results = await dispatchParallel({
@@ -738,14 +738,14 @@ describe("dispatchParallel", () => {
 
       expect(results).toHaveLength(3)
       expect(results.map((r) => r.name)).toEqual([
-        "qa-tester",
-        "qa-tester",
-        "qa-tester",
+        "zmora",
+        "zmora",
+        "zmora",
       ])
       expect(results.every((r) => r.status === "success")).toBe(true)
     })
 
-    it("leaves non-qa-tester agent names untouched", async () => {
+    it("leaves non-zmora agent names untouched", async () => {
       // Regression guard: the normaliser must not touch unrelated names.
       const registry: Record<string, AgentInfo> = {
         "fix-auto": { mode: "subagent" },

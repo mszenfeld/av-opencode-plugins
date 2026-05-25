@@ -114,77 +114,77 @@ describe("normalizeVariantSuffix", () => {
     expect(normalizeVariantSuffix("")).toBe("")
   })
 
-  it("rewrites qa-tester-fe to qa-tester", () => {
-    expect(normalizeVariantSuffix("qa-tester-fe")).toBe("qa-tester")
+  it("rewrites zmora-fe to zmora", () => {
+    expect(normalizeVariantSuffix("zmora-fe")).toBe("zmora")
   })
 
-  it("rewrites qa-tester-be to qa-tester", () => {
-    expect(normalizeVariantSuffix("qa-tester-be")).toBe("qa-tester")
+  it("rewrites zmora-be to zmora", () => {
+    expect(normalizeVariantSuffix("zmora-be")).toBe("zmora")
   })
 
   it("rewrites both variants in the same string", () => {
-    const input = "dispatched qa-tester-fe and qa-tester-be in parallel"
+    const input = "dispatched zmora-fe and zmora-be in parallel"
     expect(normalizeVariantSuffix(input)).toBe(
-      "dispatched qa-tester and qa-tester in parallel",
+      "dispatched zmora and zmora in parallel",
     )
   })
 
   it("rewrites all occurrences (global replacement, not just the first)", () => {
-    const input = "qa-tester-fe qa-tester-fe qa-tester-be"
-    expect(normalizeVariantSuffix(input)).toBe("qa-tester qa-tester qa-tester")
+    const input = "zmora-fe zmora-fe zmora-be"
+    expect(normalizeVariantSuffix(input)).toBe("zmora zmora zmora")
   })
 
   it("rewrites occurrences inside an error message", () => {
-    const error = 'Unknown agent: qa-tester-fe (timeout after 5m)'
+    const error = 'Unknown agent: zmora-fe (timeout after 5m)'
     expect(normalizeVariantSuffix(error)).toBe(
-      "Unknown agent: qa-tester (timeout after 5m)",
+      "Unknown agent: zmora (timeout after 5m)",
     )
   })
 
-  it("leaves the bare logical name qa-tester untouched", () => {
-    expect(normalizeVariantSuffix("qa-tester")).toBe("qa-tester")
-    expect(normalizeVariantSuffix("dispatched qa-tester ×3")).toBe(
-      "dispatched qa-tester ×3",
+  it("leaves the bare logical name zmora untouched", () => {
+    expect(normalizeVariantSuffix("zmora")).toBe("zmora")
+    expect(normalizeVariantSuffix("dispatched zmora ×3")).toBe(
+      "dispatched zmora ×3",
     )
   })
 
-  it("does not match qa-tester-* with an unknown suffix (only fe/be)", () => {
+  it("does not match zmora-* with an unknown suffix (only fe/be)", () => {
     // The pattern is anchored on the two known internal variants; a future
     // variant must be added here deliberately rather than silently absorbed.
-    expect(normalizeVariantSuffix("qa-tester-mobile")).toBe("qa-tester-mobile")
-    expect(normalizeVariantSuffix("qa-tester-api")).toBe("qa-tester-api")
+    expect(normalizeVariantSuffix("zmora-mobile")).toBe("zmora-mobile")
+    expect(normalizeVariantSuffix("zmora-api")).toBe("zmora-api")
   })
 
-  it("does not match qa-tester-fe inside a longer alphanumeric token (no word boundary)", () => {
-    // `\b` only matches between a word char and a non-word char. `x` and `q`
-    // are both word chars, so `xqa-tester-fe` has no boundary before `qa-` —
-    // it must not be collapsed because `xqa-tester-fe` is not the registered
+  it("does not match zmora-fe inside a longer alphanumeric token (no word boundary)", () => {
+    // `\b` only matches between a word char and a non-word char. `x` and `z`
+    // are both word chars, so `xzmora-fe` has no boundary before `zmora-` —
+    // it must not be collapsed because `xzmora-fe` is not the registered
     // variant.
-    expect(normalizeVariantSuffix("xqa-tester-fe")).toBe("xqa-tester-fe")
-    expect(normalizeVariantSuffix("qa-tester-fext")).toBe("qa-tester-fext")
+    expect(normalizeVariantSuffix("xzmora-fe")).toBe("xzmora-fe")
+    expect(normalizeVariantSuffix("zmora-fext")).toBe("zmora-fext")
   })
 
   it("matches across hyphen boundaries (intended; hyphen is non-word)", () => {
     // JS `\b` treats `-` as a non-word character, so the variant suffix inside
     // a hyphen-separated phrase still matches. The logical-name promise is
-    // "the literal substring `qa-tester-fe` / `qa-tester-be` never reaches
+    // "the literal substring `zmora-fe` / `zmora-be` never reaches
     // user-facing output" — this aligns with that promise.
-    expect(normalizeVariantSuffix("my-qa-tester-fe-runner")).toBe(
-      "my-qa-tester-runner",
+    expect(normalizeVariantSuffix("my-zmora-fe-runner")).toBe(
+      "my-zmora-runner",
     )
   })
 
   it("rewrites inside multi-line / report-shaped strings", () => {
     const input = [
-      "## Result for qa-tester-fe",
+      "## Result for zmora-fe",
       "- status: timeout",
-      "- error: qa-tester-be failed to start",
+      "- error: zmora-be failed to start",
     ].join("\n")
     expect(normalizeVariantSuffix(input)).toBe(
       [
-        "## Result for qa-tester",
+        "## Result for zmora",
         "- status: timeout",
-        "- error: qa-tester failed to start",
+        "- error: zmora failed to start",
       ].join("\n"),
     )
   })

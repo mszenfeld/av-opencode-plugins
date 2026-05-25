@@ -1,11 +1,7 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { toolsForVariant } from "./allowed-tools.js";
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+import { loadModuleAsset } from "../_shared/load-asset.js";
 function loadSection(name) {
-  const filePath = path.resolve(moduleDir, "prompt-sections", name);
-  return readFileSync(filePath, "utf8");
+  return loadModuleAsset(import.meta.url, `prompt-sections/${name}`);
 }
 let cachedCore;
 let cachedOverlayFe;
@@ -24,10 +20,10 @@ function getOverlay(stack) {
 }
 function buildQATesterAgent(stack) {
   const tools = toolsForVariant(stack).join(", ");
-  const description = `QA tester \u2014 ${stack.toUpperCase()} scenarios (internal variant of qa-tester)`;
+  const description = `Zmora \u2014 ${stack.toUpperCase()} QA scenarios (internal variant of zmora)`;
   const frontmatter = [
     "---",
-    `name: qa-tester-${stack}`,
+    `name: zmora-${stack}`,
     `description: ${description}`,
     "mode: subagent",
     `allowed-tools: ${tools}`,
