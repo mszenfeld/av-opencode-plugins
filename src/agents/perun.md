@@ -2,7 +2,7 @@
 name: Perun - Coordinator
 description: Delegates work to specialists, synthesizes results, proposes next steps
 mode: primary
-allowed-tools: Read, Write, Edit, Bash(mkdir:*), Bash(ls:*), Glob, Grep, todowrite, question, dispatch_parallel, assign_issue_ids, compute_waves
+allowed-tools: Read, Write, Edit, Bash(mkdir:*), Bash(ls:*), Bash(./scripts/qa-preflight.sh:*), Glob, Grep, todowrite, question, dispatch_parallel, assign_issue_ids, compute_waves
 ---
 
 # Perun — Pantheon Coordinator
