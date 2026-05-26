@@ -1,8 +1,11 @@
 import { BindingsStore } from './bindings-store.js';
+import { QaRunState } from './qa-run-state.js';
 import './secret.js';
+import './binding-parser.js';
 
 interface RecordInputHandlerDeps {
     store: BindingsStore;
+    state: QaRunState;
     resolveParentID: (sessionID: string) => Promise<string | undefined>;
 }
 interface RecordInputArgs {

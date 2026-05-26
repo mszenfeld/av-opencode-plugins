@@ -122,15 +122,30 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 - `Bash(mkdir:*)`, `Bash(ls:*)`, `Bash(./scripts/qa-preflight.sh:*)` — no general `Bash(*)`, no `git`
 - `todowrite`, `question`
 - `dispatch_parallel`, `assign_issue_ids`, `compute_waves`
+- `record_input`, `parse_plan` — Perun-only QA-plugin tools used by the bindings workflow (parsing the plan's `## Setup → **Bindings:**` block and capturing user-pasted inputs during the mid-run dialog). Neither tool is available to any zmora variant; the QA plugin gates them per-agent via `AgentConfig.tools`.
 
 The `Task` tool is **excluded** to force every specialist dispatch through `dispatch_parallel`. There is no fallback.
+
+#### Strict-orchestrator hard rule
+
+Perun is a strict orchestrator — it never executes scenario work in its own context. On every turn (initial dispatch, resume, preflight, mid-run dialog), Perun MUST NOT:
+
+- Read `.env`, `.envrc`, `.env.local`, or any dotfile via `Read` / `Bash(cat)` / `Bash(grep)` / any other path.
+- Invoke `Bash(curl:*)`, `Bash(psql:*)`, `Bash(supabase:*)`, `Bash(docker:*)`, `Bash(make:*)`, `Bash(uv:*)`, or any tool not in the `allowed-tools` frontmatter above.
+- Invoke MCP tools (e.g. `serena_*`, `playwright_browser_*`) — those are not in `allowed-tools` and the runtime gate rejects them.
+- Mint, derive, or capture credentials (JWTs, tokens, session cookies, API keys). Credential acquisition is the job of `execute_recipe` (invoked only by `zmora-setup`) or `record_input` (invoked by Perun when parsing user replies in the mid-run dialog).
+
+If Perun ever observes itself about to perform any of the above, that is a spec violation — it aborts the turn and surfaces the violation to the user. See `src/agents/perun.md` ("Hard rule — strict orchestrator") for the canonical statement; this section is a summary.
 
 ### Specialists `@perun` knows
 
 | Name | Mode | Purpose | When |
 |---|---|---|---|
 | `zmora` | subagent | Execute a single QA scenario (FE or BE). Implemented as two registered variants (`zmora-fe` for Playwright scenarios, `zmora-be` for HTTP + DB scenarios); Perun routes by scenario prefix and dispatches one task per scenario. The logical name `zmora` is what appears in the TUI and the report; variants are an internal implementation detail. See [docs/plugins/qa.md](./qa.md) for the variant-split rationale. | Dispatched once per scenario by Perun |
+| `zmora-setup` | subagent | Provision one Binding per dispatch via `execute_recipe` — the ONLY agent in the bundle with `execute_recipe` enabled. Has no Bash access at all (`SETUP_TOOLS = ["Read", "Glob", "Grep", "execute_recipe"]`); the recipe sandbox is its only actuator. Perun synthesises `SETUP-NN` scenarios for each declared binding in Workflow 1 Step 3.6 and dispatches them in Wave 0 ahead of any FE/BE scenarios that depend on the binding. See [docs/plugins/qa.md → Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning). | Dispatched once per binding by Perun before FE/BE scenarios |
 | `fix-auto` | subagent | Auto-fix code issues from reports | User accepts a fix proposal |
+
+Perun's prefix-routing is therefore **three-way**: `FE-*` → `zmora-fe`, `BE-*` → `zmora-be`, `SETUP-*` → `zmora-setup`. The variant-suffix normalisation rule still applies to user-facing strings: `zmora-fe` / `zmora-be` / `zmora-setup` collapse to `zmora` in the report, terminal output, and error messages (internal log/debug strings may retain variant names).
 
 #### Agent label — logical-name exception
 
@@ -147,7 +162,7 @@ When adding a new logical agent with variants, document the variant mapping in t
 
 #### Variant-suffix normalisation
 
-Perun normalises `zmora-fe` / `zmora-be` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
+Perun normalises `zmora-fe` / `zmora-be` / `zmora-setup` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
 
 ### `dispatch_parallel` runtime characteristics
 
@@ -202,9 +217,16 @@ The coordinator's security posture has two layers. Code-enforced rules cannot be
 | Code-enforced | Max 4 tasks per `dispatch_parallel` call (matches worker pool size); rejected pre-flight with explicit error. Bounds per-call session-spawn count and keeps the `×N` label honest. Larger workloads are chunked into multiple sequential calls by the caller. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_MAX_TASKS`) |
 | Code-enforced | Worker pool concurrency capped at 4 — bounds wall-clock concurrency regardless of `tasks.length`. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_CONCURRENCY`) |
 | Code-enforced | Per-variant `allowed-tools` boundary — `zmora-fe` and `zmora-be` register with disjoint stack-specific tool allowlists. Routes a wrong-variant dispatch into a runtime "tool not in allowlist" rejection rather than silent cross-stack execution. | `src/modules/qa/allowed-tools.ts` + OpenCode runtime |
+| Code-enforced | Per-agent tool gating via `AgentConfig.tools` — `execute_recipe` is enabled ONLY on `zmora-setup`; `record_input` and `parse_plan` are enabled ONLY on Perun. Every other registered agent (`zmora-fe`, `zmora-be`, `fix-auto`) has those tools disabled at the runtime registry level. | `src/modules/qa/index.ts` (`AgentConfig.tools`) |
+| Code-enforced | `execute_recipe` AST validation — recipe scripts are parsed into an AST and rejected if they contain anything outside the recipe DSL (no arbitrary shell commands, no eval). The recipe then runs in a sandboxed bash child with an allowlisted env subset built by `buildChildEnv` — host `process.env` is NOT inherited. | `src/modules/qa/recipe-parser.ts` + `src/modules/qa/child-env.ts` |
+| Code-enforced | `record_input` name denylist — user-pasted input names are rejected if they hit the process-control denylist (`PATH`, `LD_PRELOAD`, `NODE_OPTIONS`, `IFS`, `BASH_ENV`, `HOME`, `SSH_AUTH_SOCK`, …) or start with a well-known credential prefix (`AWS_`, `GCP_`, `GITHUB_`, `ANTHROPIC_`, `OPENAI_`, `DATABASE_`, `OP_`, `VAULT_`, `K8S_`, `KUBE`, …). Minted recipe bindings (`QA_BIND_*`) are exempt. | `src/modules/qa/bindings-store.ts` |
+| Code-enforced | `Secret` wrapper around stored binding values — redacts the underlying value from `toString` / `util.inspect` / `JSON.stringify` so a binding cannot leak into a log line, error trace, or specialist response by accident. `execute_recipe` only ever returns enum status payloads to the LLM, never the minted value. | `src/modules/qa/secret.ts` |
+| Code-enforced | `BindingsStore` TTL + cap — entries expire 1 h after last write via a 5-minute sweep, and the store is capped to bound memory + blast radius. The sweep skips pinned entries (`BindingSnapshot` held by an in-flight wave) so the scrubber doesn't lose backing entries mid-scrub. | `src/modules/qa/bindings-store.ts` |
+| Code-enforced | `shell.env` hook scoped to `zmora-*` child sessions — the hook injects resolved bindings into the bash env of dispatched zmora variants only. Perun's own bash never receives binding values; values reach scenarios exclusively through the dispatched child's env. | `src/modules/qa/shell-env-hook.ts` |
 | Code-enforced | Specialist-output neutralization — strips ANSI/CSI escapes, ASCII control chars (except `\n\r\t`), and HTML-escapes `<` / `>`. | `src/modules/coordinator/sanitize.ts` (`neutralizeUntrustedOutput`) |
 | Code-enforced | Deterministic, zero-padded ID assignment — IDs are not LLM-generated. | `src/modules/coordinator/assign-issue-ids.ts` |
 | Code-enforced | Topic validation in `deriveReportPath` — strips `YYYY-MM-DD-` prefix and `-test-plan` suffix, validates against `^[a-z0-9-]+$`, rejects path-traversal or filename injection. | `src/modules/coordinator/sanitize.ts` (`deriveReportPath`) |
+| LLM-requested | Strict-orchestrator hard rule — Perun never executes scenario work in its own context: no `Bash(curl/psql/docker/...)`, no MCP tools, no dotfile reads, no credential minting. Credential acquisition is delegated to `execute_recipe` (zmora-setup only) or `record_input` (Perun only, mid-run dialog). The hard rule is reinforced by code-enforced layers above (`allowed-tools` frontmatter, per-agent `AgentConfig.tools`), but the prompt-level rule is what keeps Perun from improvising on resume / preflight / dialog turns. | `src/agents/perun.md` ("Hard rule — strict orchestrator") |
 | LLM-requested | Plan sanitization rules — block `.env`, `~/.ssh/*`, `~/.aws/*`, `/etc/passwd`, private keys, secrets files. | `src/agents/perun.md` Workflow 1 Step 4 |
 | LLM-requested | Bash subcommand allowlist for scenarios — `playwright`, `curl`, `psql`, `sqlite3` only; everything else is `SKIP`. | `src/agents/perun.md` Workflow 1 Step 4 |
 | LLM-requested | Unauthorized network exfil rejection — destinations not in plan frontmatter → `SKIP`. | `src/agents/perun.md` Workflow 1 Step 4 |
@@ -227,7 +249,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
 - **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
-- **Pre-built specialist set.** `@perun` only knows two specialists (`zmora` — itself split into `zmora-fe` / `zmora-be` variants — and `fix-auto`). Adding more requires updating `perun.md`.
+- **Pre-built specialist set.** `@perun` only knows two logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — and `fix-auto`). Adding more requires updating `perun.md`.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
 

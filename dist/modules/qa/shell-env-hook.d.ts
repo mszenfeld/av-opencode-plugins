@@ -1,12 +1,7 @@
+import { SessionAgentRegistry } from '../_shared/session-agent-registry.js';
 import { BindingsStore } from './bindings-store.js';
 import './secret.js';
 
-declare class SessionAgentRegistry {
-    #private;
-    register(sessionID: string, agent: string): void;
-    unregister(sessionID: string): void;
-    lookup(sessionID: string): string | undefined;
-}
 interface ShellEnvHookDeps {
     store: BindingsStore;
     registry: SessionAgentRegistry;

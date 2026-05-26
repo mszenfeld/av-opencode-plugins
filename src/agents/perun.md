@@ -2,7 +2,7 @@
 name: Perun - Coordinator
 description: Delegates work to specialists, synthesizes results, proposes next steps
 mode: primary
-allowed-tools: Read, Write, Edit, Bash(mkdir:*), Bash(ls:*), Bash(./scripts/qa-preflight.sh:*), Glob, Grep, todowrite, question, dispatch_parallel, assign_issue_ids, compute_waves, record_input
+allowed-tools: Read, Write, Edit, Bash(mkdir:*), Bash(ls:*), Bash(./scripts/qa-preflight.sh:*), Glob, Grep, todowrite, question, dispatch_parallel, assign_issue_ids, compute_waves, record_input, parse_plan
 ---
 
 # Perun — Pantheon Coordinator
@@ -101,6 +101,7 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
 
 3.6. **Parse bindings (if present).** If the plan contains a `## Setup → **Bindings:**` subsection:
 
+   - **First, register the plan with the plugin.** Call `parse_plan({ plan: <full plan markdown> })` exactly once. This is REQUIRED — without it `execute_recipe` returns `{status: "unknown_binding"}` for every recipe and no zmora-setup task can succeed. If the call returns `{status: "error", reason}`, surface the reason verbatim and abort the QA run. If it returns `{status: "ok", bindings: []}` the plan has no bindings — skip this step entirely and continue to Step 3.7 without synthesising any SETUP-* scenarios.
    - For each binding declaration, synthesise a `### SETUP-<NN>: Provision QA_BIND_<NAME>` scenario.
    - The synthesised scenario has `Depends-on:` derived from any of its `Inputs:` that are themselves `QA_BIND_*` names (transitive predecessors).
    - The scenario body is exactly: `Invoke execute_recipe({ binding_name: "QA_BIND_<NAME>" }) and return its status.`
@@ -340,6 +341,8 @@ If the reply contains no parseable NAME=value pairs:
 - Otherwise → ask for clarification: "I did not see any NAME=value pairs. Please paste in the form NAME=value, one per line, or reply 'abort'."
 
 Bounded retry: max 3 rounds per QA run. After the 3rd, auto-abort with: "Setup unresolved after 3 rounds. Aborting. Last unresolved bindings: NAME1, NAME2."
+
+The 3-round cap is also enforced deterministically in the plugin: `record_input` rejects any further pastes with `{status: "rejected", reason: "dialog_round_exceeded: ..."}` once the counter exceeds 3. A round ends when the plugin sees the next `execute_recipe` call (i.e. on re-dispatch to zmora-setup). If `record_input` ever returns that rejection, write the abort message verbatim and stop.
 
 **Mid-run prompt — recipe failed branch:**
 

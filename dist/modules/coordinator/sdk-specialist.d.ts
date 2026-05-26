@@ -1,9 +1,7 @@
 import { createOpencodeClient, Message } from '@opencode-ai/sdk';
 import { DispatchSpecialist, AgentInfo } from './dispatch.js';
 import { PollerMessage } from './poller.js';
-import '../qa/shell-env-hook.js';
-import '../qa/bindings-store.js';
-import '../qa/secret.js';
+import '../_shared/session-agent-registry.js';
 
 /**
  * SDK adapter layer: bridges the strongly-typed OpenCode SDK client into the

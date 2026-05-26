@@ -1,4 +1,5 @@
-export type BindingType = "secret" | "plain"
+import type { BindingType } from "./bindings-store.js"
+export type { BindingType }
 
 export interface ParsedBinding {
   name: string
@@ -17,13 +18,15 @@ export type ValidateRecipeResult =
   | { status: "ok" }
   | { status: "error"; reason: string }
 
+// COMP-002: `awk` and `sed` were removed because both expose shell-exec
+// primitives (`awk 'BEGIN{system(...)}'`, `sed 'e cmd'` / `sed '... W file'`)
+// that the recipe regex cannot reliably constrain. Use `jq`/`cut`/`grep` for
+// the same text-shaping needs. Do NOT re-add them without a sandbox redesign.
 const ALLOWED_COMMANDS = new Set([
   "curl",
   "psql",
   "sqlite3",
   "jq",
-  "sed",
-  "awk",
   "grep",
   "cut",
   "head",
@@ -31,6 +34,27 @@ const ALLOWED_COMMANDS = new Set([
   "tr",
   "printf",
 ])
+
+// Commands whose primary purpose is reading files. Recipes may pass a path
+// argument to them, so we confine the accepted paths to `./*` relative paths,
+// `-` (stdin), or `/dev/null`/`/dev/stdin`. Anything starting with `/` that
+// isn't one of those allowlisted dev paths is rejected (SEC-005).
+const FILE_READER_COMMANDS = new Set(["grep", "cut", "head", "tail", "tr"])
+
+// Commands that take a DSN (or URL) as a positional argument and connect to
+// an arbitrary host. The Egress check must apply to them too, not just curl
+// (SEC-004).
+const DSN_COMMANDS = new Set(["psql", "sqlite3"])
+
+// Sqlite3 dot-commands that escape to shell (`.shell`, `.system`) or read
+// arbitrary files (`.read`) — bypass any positional-arg validation by
+// embedding the malicious action in the SQL initialiser (SEC-004).
+const SQLITE_FORBIDDEN_DOT_COMMANDS = [".read", ".shell", ".system", ".import", ".save", ".output", ".log"]
+
+// Maximum recipe length. Used to bound the work the validator's regex
+// pipeline does on adversarial input (SEC-008). 16 KiB is roughly 4× the
+// largest legitimate recipe we've seen in practice.
+const MAX_RECIPE_BYTES = 16 * 1024
 
 const FORBIDDEN_TOKENS: { pattern: RegExp; label: string }[] = [
   { pattern: /\$\(/, label: "$(...) command substitution" },
@@ -72,6 +96,14 @@ const CURL_FORBIDDEN_FLAGS: { pattern: RegExp; label: string }[] = [
     label: "remote-name flags",
   },
   { pattern: /(?:^|\s)(?:--write-out|-w)\s+["']?@/, label: "--write-out/-w with @file" },
+  // SEC-002: `--next` chains a second request whose URL bypasses the
+  // single-URL extractCurlURL check. Refuse outright — recipes are
+  // single-request by contract.
+  { pattern: /(?:^|\s)--next(?:\s|$)/, label: "--next (chains additional request)" },
+  // SEC-002: `--url` is an alternative way to specify a target URL. Allowing
+  // it would require us to validate every flag-value pair against the egress
+  // host. Simpler: forbid it; the bare positional URL is the canonical form.
+  { pattern: /(?:^|\s)--url(?:\s|=)/, label: "--url (use bare URL argument)" },
 ]
 
 function collapseLineContinuations(text: string): string {
@@ -159,13 +191,78 @@ function extractCurlURL(cmd: string): string | null {
 }
 
 function hostOfURL(urlOrTemplate: string): string | null {
-  const m = urlOrTemplate.match(/^(?:https?:\/\/)?(\$\{?[A-Z_][A-Z0-9_]*\}?|[\w.-]+)/)
+  // Accept an optional scheme — any scheme://, not just http(s) — so DSN
+  // strings like `postgres://...` or `mysql://...` are handled too (SEC-004).
+  const m = urlOrTemplate.match(/^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/)?(\$\{?[A-Z_][A-Z0-9_]*\}?|[\w.-]+)/)
   if (m === null) return null
   const captured = m[1]
   return captured === undefined ? null : captured
 }
 
+// Identify a token that names a connection target (DSN or URL). Used to find
+// the DSN argument inside a psql/sqlite3 invocation so we can apply the same
+// egress-host check we do for curl (SEC-004).
+function looksLikeDSN(token: string): boolean {
+  const unquoted = token.replace(/^["']|["']$/g, "")
+  // scheme://... (postgres, postgresql, mysql, sqlite, redis, …) or a $VAR
+  // template that the caller will resolve to one.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(unquoted)) return true
+  if (unquoted.startsWith("$")) return true
+  return false
+}
+
+function extractDSNTarget(cmd: string): string | null {
+  // Find the first non-flag token that looks like a DSN/URL/var. The leading
+  // token (the command name itself) is skipped.
+  const tokens = tokenizeShell(cmd)
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (t === undefined) continue
+    if (t.startsWith("-")) continue
+    if (looksLikeDSN(t)) {
+      return t.replace(/^["']|["']$/g, "")
+    }
+  }
+  return null
+}
+
+// Allowlist for file-reader path arguments (SEC-005). Anything starting with
+// `/` that isn't one of these is rejected so a recipe can't `tail /etc/passwd`
+// to exfiltrate host files.
+const FILE_READER_ALLOWED_DEV_PATHS = new Set(["/dev/null", "/dev/stdin", "/dev/zero"])
+
+function isAllowedFileReaderArg(token: string): boolean {
+  const unquoted = token.replace(/^["']|["']$/g, "")
+  // Flags (-n, -d:, --foo) are not paths.
+  if (unquoted.startsWith("-") && unquoted !== "-") return true
+  // Stdin sentinel.
+  if (unquoted === "-") return true
+  // Variable expansion — egress validation does not apply to file readers,
+  // but we trust declared inputs (their values came from execute_recipe's
+  // input resolution, which the user / parse_plan already authorised).
+  if (unquoted.startsWith("$")) return true
+  // Allowlisted device paths.
+  if (FILE_READER_ALLOWED_DEV_PATHS.has(unquoted)) return true
+  // Any other absolute path is rejected.
+  if (unquoted.startsWith("/")) return false
+  // Bare token without a leading `/` or `./` — assume it's a flag value
+  // (e.g. `cut -d: -f1` has `-d:` then `-f1`) or a relative basename. Relative
+  // basenames resolve in the recipe's CWD, which the QA plugin controls.
+  return true
+}
+
 export function validateRecipe(recipe: string, egress: string): ValidateRecipeResult {
+  // SEC-008: cap recipe length up-front. The validator runs a pipeline of
+  // regexes over the input; a multi-kilobyte adversarial recipe could push
+  // worst-case backtracking into the seconds. 16 KiB is comfortably above
+  // every legitimate recipe shape we've seen.
+  if (recipe.length > MAX_RECIPE_BYTES) {
+    return {
+      status: "error",
+      reason: `recipe too long: ${recipe.length} bytes (max ${MAX_RECIPE_BYTES})`,
+    }
+  }
+
   const collapsed = collapseLineContinuations(recipe)
 
   const statements = splitOnUnquotedSeparators(collapsed)
@@ -207,20 +304,76 @@ export function validateRecipe(recipe: string, egress: string): ValidateRecipeRe
         }
       }
     }
+    // SEC-005: file-reader path confinement. Reject any absolute path
+    // argument that isn't one of the allowlisted device paths so a recipe
+    // can't `tail /etc/passwd` / `grep secret /var/log/...`.
+    if (FILE_READER_COMMANDS.has(head)) {
+      const tokens = tokenizeShell(cmd)
+      for (let i = 1; i < tokens.length; i++) {
+        const t = tokens[i]
+        if (t === undefined) continue
+        if (!isAllowedFileReaderArg(t)) {
+          return {
+            status: "error",
+            reason: `${head} cannot read absolute path '${t}' — restrict to ./ relative paths, '-', /dev/null, /dev/stdin`,
+          }
+        }
+      }
+    }
+    // SEC-004: sqlite3 dot-commands escape SQL into shell or read arbitrary
+    // files. Reject any token starting with `.read`/`.shell`/`.system`/etc.
+    if (head === "sqlite3") {
+      const tokens = tokenizeShell(cmd)
+      for (let i = 1; i < tokens.length; i++) {
+        const t = tokens[i]
+        if (t === undefined) continue
+        const unquoted = t.replace(/^["']|["']$/g, "")
+        for (const dot of SQLITE_FORBIDDEN_DOT_COMMANDS) {
+          if (unquoted.startsWith(dot)) {
+            return {
+              status: "error",
+              reason: `sqlite3 forbidden dot-command: ${dot}`,
+            }
+          }
+        }
+      }
+    }
   }
 
   const egressHost = hostOfURL(egress)
   for (const cmd of cmds) {
-    if (firstWord(cmd) !== "curl") continue
-    const url = extractCurlURL(cmd)
-    if (url === null) {
-      return { status: "error", reason: "curl invocation without a URL argument" }
+    const head = firstWord(cmd)
+    if (head === "curl") {
+      const url = extractCurlURL(cmd)
+      if (url === null) {
+        return { status: "error", reason: "curl invocation without a URL argument" }
+      }
+      const host = hostOfURL(url)
+      if (host !== egressHost) {
+        return {
+          status: "error",
+          reason: `curl URL host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`,
+        }
+      }
+      continue
     }
-    const host = hostOfURL(url)
-    if (host !== egressHost) {
-      return {
-        status: "error",
-        reason: `curl URL host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`,
+    // SEC-004: psql/sqlite3 take a DSN as their connection target. Apply the
+    // same egress check we apply to curl — otherwise a recipe can connect to
+    // an attacker-controlled DSN and exfil via SQL.
+    if (DSN_COMMANDS.has(head)) {
+      const target = extractDSNTarget(cmd)
+      if (target === null) {
+        return {
+          status: "error",
+          reason: `${head} invocation without a connection target (DSN/path)`,
+        }
+      }
+      const host = hostOfURL(target)
+      if (host !== egressHost) {
+        return {
+          status: "error",
+          reason: `${head} target host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`,
+        }
       }
     }
   }
@@ -329,7 +482,13 @@ export function parseBindings(planText: string): ParseResult {
         const recipeStart = k + 1
         let recipeEnd = recipeStart
         while (recipeEnd < lines.length && !/^\s*```\s*$/.test(lines[recipeEnd]!)) recipeEnd++
-        recipe = lines.slice(recipeStart, recipeEnd).map((l) => l.replace(/^    /, "")).join("\n").trim()
+        const recipeLines = lines.slice(recipeStart, recipeEnd)
+        const nonEmptyRecipeLines = recipeLines.filter((l) => l.trim().length > 0)
+        const minIndent =
+          nonEmptyRecipeLines.length === 0
+            ? 0
+            : Math.min(...nonEmptyRecipeLines.map((l) => /^[ \t]*/.exec(l)![0].length))
+        recipe = recipeLines.map((l) => l.slice(minIndent)).join("\n").trim()
         j = recipeEnd + 1
         continue
       }

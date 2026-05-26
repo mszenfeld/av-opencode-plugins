@@ -1,4 +1,4 @@
-import type { SessionAgentRegistry } from "../qa/shell-env-hook.js"
+import type { SessionAgentRegistry } from "../_shared/session-agent-registry.js"
 import {
   pollUntilIdle,
   PollerAbortError,
@@ -66,13 +66,40 @@ export interface DispatchParallelInput {
    * output neutraliser, before truncation. Receives (text, parentSessionID)
    * and returns redacted text. Used by the QA bindings flow to redact known
    * secret values from Zmora results before they reach the report or TUI.
+   *
+   * If a `scrubberFactory` is also provided, the factory wins and this field
+   * is ignored — the factory yields a pinned-snapshot scrubber, which is the
+   * race-safe path (ARCH-004).
    */
   scrubber?: (text: string, parentSessionID: string) => string
   /**
-   * Parent (Perun) session ID — passed to the scrubber. Required if scrubber
-   * is set; ignored otherwise.
+   * Optional factory that produces a per-dispatch scrubber session. Called
+   * ONCE at the start of `dispatchParallel`; the returned `scrub(text)` is
+   * applied to every task result; `release()` is invoked in a `finally` after
+   * all tasks complete (success, failure, or abort). Takes precedence over
+   * `scrubber`. This is the only race-safe scrubber path for store-backed
+   * implementations — see `DispatchScrubberFactory` for the contract.
+   */
+  scrubberFactory?: (
+    parentSessionID: string,
+  ) => { scrub: (text: string) => string; release: () => void } | undefined
+  /**
+   * Parent (Perun) session ID — passed to the scrubber/factory. Required if
+   * either is set; ignored otherwise.
    */
   parentSessionID?: string
+  /**
+   * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
+   * specialist session is spawned. The QA plugin uses this to lazily parse the
+   * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
+   * `execute_recipe` calls can find recipes by name. Implementations must be
+   * idempotent and must not throw — preflight errors are swallowed so they
+   * cannot break unrelated dispatches.
+   */
+  preflight?: (input: {
+    parentSessionID: string
+    taskNames: readonly string[]
+  }) => Promise<void>
 }
 
 // 1 s tail-latency budget on completion observation. `session.prompt` in the
@@ -104,7 +131,9 @@ export async function dispatchParallel(
     signal,
     sessionAgentRegistry,
     scrubber,
+    scrubberFactory,
     parentSessionID,
+    preflight,
   } = input
 
   if (tasks.length > DISPATCH_MAX_TASKS) {
@@ -127,6 +156,46 @@ export async function dispatchParallel(
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`)
     }
   }
+
+  // Preflight runs ONCE per dispatch, after validation but BEFORE any session
+  // is spawned, so dependent state (e.g. QA bindings) is populated before the
+  // first specialist task starts. Swallow errors so a buggy hook cannot break
+  // unrelated dispatches — the hook is expected to be self-defensive.
+  if (preflight !== undefined && parentSessionID !== undefined && parentSessionID.length > 0) {
+    try {
+      await preflight({
+        parentSessionID,
+        taskNames: tasks.map((t) => t.name),
+      })
+    } catch {
+      // Never let a preflight failure mask a downstream dispatch result.
+    }
+  }
+
+  // Materialise the per-dispatch scrubber session BEFORE any task runs so the
+  // pinned snapshot exists for the full duration of the wave. The factory
+  // takes precedence over the legacy `scrubber` field — when both are set the
+  // factory wins because it is the race-safe path (ARCH-004). Factory failures
+  // are absorbed: a buggy factory must not break unrelated dispatches.
+  let scrubberSession: { scrub: (text: string) => string; release: () => void } | undefined
+  if (
+    scrubberFactory !== undefined &&
+    parentSessionID !== undefined &&
+    parentSessionID.length > 0
+  ) {
+    try {
+      scrubberSession = scrubberFactory(parentSessionID)
+    } catch {
+      scrubberSession = undefined
+    }
+  }
+  // Adapt the per-dispatch scrubber to the per-task `(text, parentSessionID)`
+  // signature so `runTask` can stay agnostic of which path produced it. The
+  // session's `scrub` already closes over the snapshot.
+  const effectiveScrubber: ((text: string, parent: string) => string) | undefined =
+    scrubberSession !== undefined
+      ? (text) => scrubberSession!.scrub(text)
+      : scrubber
 
   // Worker pool: maintain DISPATCH_CONCURRENCY workers draining a shared queue.
   // `nextRef.value++` is race-free in single-threaded JS between `await` points.
@@ -153,14 +222,27 @@ export async function dispatchParallel(
         resultMaxBytes,
         signal,
         sessionAgentRegistry,
-        scrubber,
+        scrubber: effectiveScrubber,
         parentSessionID,
       })
     }
   }
 
-  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  try {
+    const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  } finally {
+    // Release the pinned snapshot regardless of how the wave terminated
+    // (success, abort, or unhandled error in a worker). Swallow release
+    // failures so a buggy plugin can't corrupt the dispatch return value.
+    if (scrubberSession !== undefined) {
+      try {
+        scrubberSession.release()
+      } catch {
+        /* swallow: release is best-effort cleanup */
+      }
+    }
+  }
 
   // Convert the variant-suffix invariant from a prompt-only convention into
   // a code-enforced one. The agent registry still validates input task names

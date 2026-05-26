@@ -2,11 +2,15 @@ import { tool } from "@opencode-ai/plugin";
 import { buildQATesterAgent } from "./prompt-builder.js";
 import { loadPantheonConfig } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
+import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js";
 import { BindingsStore } from "./bindings-store.js";
 import { QaRunState } from "./qa-run-state.js";
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js";
 import { makeExecuteRecipeHandler } from "./execute-recipe.js";
 import { makeRecordInputHandler } from "./record-input.js";
+import { parseBindings } from "./binding-parser.js";
+import { scrubSecrets } from "./scrubber.js";
+import { makeRunBash } from "./run-bash.js";
 import { FE_TOOLS, BE_TOOLS, SETUP_TOOLS, SHARED_TOOLS, toolsForVariant } from "./allowed-tools.js";
 function loadCommandMarkdown(name) {
   return loadModuleAsset(import.meta.url, `../../commands/${name}`);
@@ -46,38 +50,33 @@ const AppVerkQAPlugin = async ({ client }) => {
       return void 0;
     }
   }
-  const recordInputHandler = makeRecordInputHandler({ store, resolveParentID });
+  const recordInputHandler = makeRecordInputHandler({ store, state, resolveParentID });
   const executeRecipeHandler = makeExecuteRecipeHandler({
     store,
     state,
     resolveParentID,
-    runBash: async (cmd, env) => {
-      const { spawn } = await import("node:child_process");
-      return await new Promise((resolve) => {
-        const child = spawn("bash", ["-c", cmd], {
-          env: { ...process.env, ...env },
-          stdio: ["ignore", "pipe", "pipe"]
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (d) => {
-          stdout += d.toString();
-        });
-        child.stderr.on("data", (d) => {
-          stderr += d.toString();
-        });
-        child.on("close", (code) => {
-          resolve({ exitCode: code ?? -1, stdout, stderr });
-        });
-        child.on("error", (err) => {
-          resolve({ exitCode: -1, stdout, stderr: stderr + err.message });
-        });
-      });
-    },
+    // `makeRunBash` owns wall-clock timeout enforcement: AbortController +
+    // `spawn`'s `signal` so an over-budget recipe is actually killed
+    // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
+    runBash: makeRunBash(),
     processEnv: process.env,
     nowMs: () => Date.now()
   });
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID });
+  registerDispatchExtensions({
+    sessionAgentRegistry: registry,
+    scrubberFactory: (parentSessionID) => {
+      try {
+        const snapshot = store.pinSnapshot(parentSessionID);
+        return {
+          scrub: (text) => scrubSecrets(text, parentSessionID, store, snapshot),
+          release: () => store.releaseSnapshot(snapshot.id)
+        };
+      } catch {
+        return void 0;
+      }
+    }
+  });
   const sweepTimer = setInterval(() => {
     try {
       store.sweepExpired(Date.now(), TTL_MS);
@@ -98,18 +97,21 @@ const AppVerkQAPlugin = async ({ client }) => {
           },
           mode: "subagent",
           // Plugin-provided tools are opt-in per agent. Only zmora-setup may
-          // execute recipes; record_input is Perun-only (registered in the
-          // coordinator agent's frontmatter, not in any zmora variant).
+          // execute recipes; record_input and parse_plan are Perun-only
+          // (registered in Perun's frontmatter, not in any zmora variant).
           tools: {
             execute_recipe: stack === "setup",
-            record_input: false
+            record_input: false,
+            parse_plan: false
           }
         };
       }
       const zmoraModel = loadPantheonConfig().agents.zmora?.model;
       if (zmoraModel !== void 0) {
         for (const stack of VARIANTS) {
-          config.agent[`zmora-${stack}`].model = zmoraModel;
+          const agent = config.agent[`zmora-${stack}`];
+          if (agent === void 0) continue;
+          agent.model = zmoraModel;
         }
       }
       config.command ??= {};
@@ -125,6 +127,36 @@ const AppVerkQAPlugin = async ({ client }) => {
       }
     },
     tool: {
+      parse_plan: tool({
+        description: [
+          "Parse a QA plan's `## Setup` \u2192 `**Bindings:**` subsection into the plugin's per-run state. Perun MUST call this exactly once per QA run, after reading the plan and BEFORE the first `dispatch_parallel` that includes a zmora-setup task. Without this call `execute_recipe` returns `{status:\"unknown_binding\"}` for every recipe.",
+          "",
+          "The plan text is parsed in-process \u2014 the binding values themselves are NEVER produced here, only the recipe AST. Value materialisation happens later in `execute_recipe`.",
+          "",
+          "Result shape (JSON-stringified):",
+          '- `{ status: "ok", bindings: string[] }` \u2014 bindings stored; `bindings` lists the names parsed (e.g. `["QA_BIND_TOKEN"]`). Empty array means the plan has no `## Setup` / `**Bindings:**` subsection \u2014 Perun should proceed to dispatch without any zmora-setup tasks.',
+          '- `{ status: "error", reason }` \u2014 parse/validation failed (invalid binding name, recipe AST rejection, etc.). Surface `reason` to the user verbatim and abort the QA run.',
+          "",
+          "Idempotent: calling twice with the same plan replaces the stored plan (later wins). Safe to call again on resume."
+        ].join("\n"),
+        args: {
+          plan: tool.schema.string().describe(
+            "Full text of the QA plan markdown. Perun passes the contents read via `Read` \u2014 do not summarise or trim."
+          )
+        },
+        async execute(args, ctx) {
+          const parentID = await resolveParentID(ctx.sessionID) ?? ctx.sessionID;
+          const parsed = parseBindings(args.plan);
+          if (parsed.status !== "ok") {
+            return JSON.stringify({ status: "error", reason: parsed.reason });
+          }
+          state.storePlan(parentID, parsed.bindings);
+          return JSON.stringify({
+            status: "ok",
+            bindings: parsed.bindings.map((b) => b.name)
+          });
+        }
+      }),
       execute_recipe: tool({
         description: [
           "Execute a single binding recipe declared in the plan's **Bindings:** section. Atomically: validates recipe AST, runs via bash with composed env (host env + previously-bound inputs), validates output, registers the value in the bindings store. Returns status only \u2014 the value never appears in the LLM context.",
@@ -182,9 +214,9 @@ const AppVerkQAPlugin = async ({ client }) => {
       if (event.type !== "session.deleted") return;
       const deletedID = event.properties?.info?.id;
       if (typeof deletedID !== "string" || deletedID.length === 0) return;
+      registry.unregister(deletedID);
       store.clearParent(deletedID);
       state.clearRun(deletedID);
-      registry.unregister(deletedID);
       parentIDCache.delete(deletedID);
       for (const [childID, parentID] of parentIDCache.entries()) {
         if (parentID === deletedID) parentIDCache.delete(childID);

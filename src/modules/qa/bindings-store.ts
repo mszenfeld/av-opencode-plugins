@@ -39,7 +39,30 @@ const NAME_DENYLIST = new Set([
   "SSH_AUTH_SOCK", "SSH_AGENT_PID",
 ])
 
-const DENYLIST_PREFIXES = ["AWS_", "GIT_SSH_", "GCP_", "AZURE_"]
+/**
+ * Prefix denylist for `user-paste` bindings (SEC-007 / CWE-15). A malicious
+ * plan can ask the user to paste under a plausible name and exfil to
+ * attacker-controlled egress, so we reject any name that begins with a
+ * well-known credential / secret-manager / cloud-provider / database prefix.
+ * Keep this list conservative: false positives are recoverable (user picks a
+ * different name); false negatives leak credentials.
+ */
+const DENYLIST_PREFIXES = [
+  // Cloud providers
+  "AWS_", "GCP_", "AZURE_",
+  // VCS / hosting
+  "GIT_", "GH_", "GITHUB_", "GITLAB_",
+  // LLM / agent platforms
+  "ANTHROPIC_", "OPENAI_", "OPENCODE_",
+  // Databases / data stores
+  "DATABASE_", "REDIS_", "MONGO_", "POSTGRES_",
+  // PaaS / BaaS
+  "SUPABASE_", "FIREBASE_", "VERCEL_",
+  // Secret managers
+  "OP_", "VAULT_", "DOPPLER_",
+  // Kubernetes (note: "KUBE" with no trailing _ catches KUBECONFIG)
+  "K8S_", "KUBE",
+]
 
 function nameIsDenied(name: string): boolean {
   if (NAME_DENYLIST.has(name)) return true
@@ -196,18 +219,28 @@ export class BindingsStore {
   }
 
   /**
-   * Purge all bindings for a parent session (called on session.deleted /
-   * QA-run completion / abort). Pinned entries are still purged — the caller
-   * has decided the parent's lifecycle is over.
+   * Purge bindings for a parent session (called on session.deleted /
+   * QA-run completion / abort). Pinned entries are preserved so that any
+   * in-flight reader holding a snapshot (e.g. the scrubber) still has a
+   * coherent backing entry until the snapshot is explicitly released
+   * (CWE-672 — operation invoked on resource in incompatible phase).
+   * Returns the number of entries actually purged. Pin-counts and pinned
+   * entries remain so releaseSnapshot() can complete normally.
    */
   clearParent(parentID: string): number {
     const parentMap = this.#map.get(parentID)
     if (parentMap === undefined) return 0
-    const purged = parentMap.size
-    this.#globalCount -= purged
-    this.#map.delete(parentID)
-    // Also clear any lingering pin counts for safety.
-    this.#pinCounts.delete(parentID)
+    const parentPinCounts = this.#pinCounts.get(parentID)
+    let purged = 0
+    for (const name of Array.from(parentMap.keys())) {
+      if ((parentPinCounts?.get(name) ?? 0) > 0) continue
+      parentMap.delete(name)
+      purged++
+      this.#globalCount--
+    }
+    if (parentMap.size === 0) {
+      this.#map.delete(parentID)
+    }
     return purged
   }
 }

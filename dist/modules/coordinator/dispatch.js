@@ -21,7 +21,9 @@ async function dispatchParallel(input) {
     signal,
     sessionAgentRegistry,
     scrubber,
-    parentSessionID
+    scrubberFactory,
+    parentSessionID,
+    preflight
   } = input;
   if (tasks.length > DISPATCH_MAX_TASKS) {
     throw new Error(
@@ -37,6 +39,24 @@ async function dispatchParallel(input) {
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`);
     }
   }
+  if (preflight !== void 0 && parentSessionID !== void 0 && parentSessionID.length > 0) {
+    try {
+      await preflight({
+        parentSessionID,
+        taskNames: tasks.map((t) => t.name)
+      });
+    } catch {
+    }
+  }
+  let scrubberSession;
+  if (scrubberFactory !== void 0 && parentSessionID !== void 0 && parentSessionID.length > 0) {
+    try {
+      scrubberSession = scrubberFactory(parentSessionID);
+    } catch {
+      scrubberSession = void 0;
+    }
+  }
+  const effectiveScrubber = scrubberSession !== void 0 ? (text) => scrubberSession.scrub(text) : scrubber;
   const results = new Array(tasks.length);
   const nextRef = { value: 0 };
   async function worker() {
@@ -54,13 +74,22 @@ async function dispatchParallel(input) {
         resultMaxBytes,
         signal,
         sessionAgentRegistry,
-        scrubber,
+        scrubber: effectiveScrubber,
         parentSessionID
       });
     }
   }
-  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  try {
+    const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  } finally {
+    if (scrubberSession !== void 0) {
+      try {
+        scrubberSession.release();
+      } catch {
+      }
+    }
+  }
   for (const r of results) {
     r.name = normalizeVariantSuffix(r.name);
     if (r.error !== void 0) {

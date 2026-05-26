@@ -41,7 +41,9 @@ export function scrubSecrets(
       continue
     }
 
-    // Partial: longest substring of v ≥16 chars with entropy ≥3.5 present in out.
+    // Partial: longest substring of v ≥16 chars with entropy ≥3.8 present in out.
+    // Threshold raised from 3.5 to 3.8 to reduce false-positives on low-entropy
+    // strings like "test_user_admin_account" that would otherwise be redacted.
     if (v.length < PARTIAL_MIN_LEN) continue
     if (shannonEntropy(v) < ENTROPY_MIN) continue
 

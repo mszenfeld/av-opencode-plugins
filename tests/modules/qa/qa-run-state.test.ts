@@ -46,4 +46,43 @@ describe("QaRunState", () => {
     expect(state.getDialogRound("p1")).toBe(0)
     expect(state.getRecipeAttempts("p1", "QA_BIND_TOKEN")).toBe(0)
   })
+
+  describe("dialog round on-first-input semantics", () => {
+    it("increments only once per round, regardless of how many pairs land", () => {
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(1)
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(1)
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(1)
+      expect(state.getDialogRound("p1")).toBe(1)
+    })
+
+    it("re-arms after endDialogRound", () => {
+      state.incrementDialogRoundOnFirstInput("p1") // round 1
+      state.endDialogRound("p1")
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(2)
+      state.endDialogRound("p1")
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(3)
+    })
+
+    it("creates a fresh record when called before storePlan", () => {
+      expect(state.incrementDialogRoundOnFirstInput("never-planned")).toBe(1)
+      // No plan was stored, so `getBindings` returns an empty bindings
+      // array (the freshly-materialised record's default). It must not be
+      // an opaque sentinel — Perun-style callers iterate it directly.
+      expect(state.getBindings("never-planned")).toEqual([])
+    })
+
+    it("endDialogRound is a no-op when nothing in progress", () => {
+      // Should not throw and should not create a record.
+      state.endDialogRound("p1")
+      expect(state.getDialogRound("p1")).toBe(0)
+    })
+
+    it("clearRun resets the dialog round counter and in-progress flag", () => {
+      state.incrementDialogRoundOnFirstInput("p1")
+      state.clearRun("p1")
+      expect(state.getDialogRound("p1")).toBe(0)
+      // Next call starts at round 1 again.
+      expect(state.incrementDialogRoundOnFirstInput("p1")).toBe(1)
+    })
+  })
 })

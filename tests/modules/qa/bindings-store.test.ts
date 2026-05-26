@@ -45,6 +45,51 @@ describe("BindingsStore.writeBinding — validation", () => {
     }
   })
 
+  it("rejects credential / cloud / secret-manager prefixes from user-paste (SEC-007)", () => {
+    // One representative per denylisted prefix — guards against accidental
+    // removal/typo of any prefix in the list.
+    const names = [
+      // Cloud providers
+      "AWS_SECRET_ACCESS_KEY",
+      "GCP_PROJECT",
+      "AZURE_CLIENT_SECRET",
+      // VCS / hosting
+      "GIT_AUTHOR_NAME",
+      "GIT_SSH_COMMAND",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "GITLAB_TOKEN",
+      // LLM / agent platforms
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENCODE_API_KEY",
+      // Databases / data stores
+      "DATABASE_URL",
+      "REDIS_URL",
+      "MONGO_URL",
+      "POSTGRES_PASSWORD",
+      // PaaS / BaaS
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "FIREBASE_TOKEN",
+      "VERCEL_TOKEN",
+      // Secret managers
+      "OP_SESSION_MY",
+      "VAULT_TOKEN",
+      "DOPPLER_TOKEN",
+      // Kubernetes
+      "K8S_NAMESPACE",
+      "KUBECONFIG",
+      "KUBECTL_CONTEXT",
+    ]
+    for (const name of names) {
+      const result = store.writeBinding("perun1", name, "x", "plain", "user-paste")
+      expect(result.status, `expected reject for ${name}`).toBe("error")
+      if (result.status === "error") {
+        expect(result.reason).toContain("denylist")
+      }
+    }
+  })
+
   it("rejects names not matching identifier regex", () => {
     for (const name of ["", "lowercase", "1LEADING_DIGIT", "has-dash", "has space"]) {
       const result = store.writeBinding("perun1", name, "x", "plain", "user-paste")
@@ -200,5 +245,55 @@ describe("BindingsStore — TTL sweep + clearParent", () => {
     // Clear one parent's 32 — now room.
     expect(store.clearParent("p0")).toBe(32)
     expect(store.writeBinding("p99", "QA_BIND_NEW", "v", "plain", "minted-recipe").status).toBe("ok")
+  })
+
+  it("clearParent skips pinned entries (SEC-006)", () => {
+    // Two entries for the same parent: one will be pinned via snapshot, one will not.
+    store.writeBinding("p1", "QA_BIND_PINNED", "vpin", "plain", "minted-recipe")
+    store.writeBinding("p1", "QA_BIND_LOOSE", "vloose", "plain", "minted-recipe")
+    const snap = store.pinSnapshot("p1") // pins both names captured at snapshot time
+    // Add another binding AFTER snapshot (not pinned).
+    store.writeBinding("p1", "QA_BIND_AFTER", "vafter", "plain", "minted-recipe")
+
+    const purged = store.clearParent("p1")
+    // Two pinned entries (PINNED + LOOSE) survive; AFTER is purged.
+    expect(purged).toBe(1)
+    expect(store.getBinding("p1", "QA_BIND_PINNED")).toBeDefined()
+    expect(store.getBinding("p1", "QA_BIND_LOOSE")).toBeDefined()
+    expect(store.getBinding("p1", "QA_BIND_AFTER")).toBeUndefined()
+    // Pin counts must remain intact so release still works.
+    expect(store.isPinned("p1", "QA_BIND_PINNED")).toBe(true)
+    expect(store.isPinned("p1", "QA_BIND_LOOSE")).toBe(true)
+
+    // Releasing the snapshot drops pin counts; a subsequent clearParent removes survivors.
+    store.releaseSnapshot(snap.id)
+    expect(store.isPinned("p1", "QA_BIND_PINNED")).toBe(false)
+    expect(store.clearParent("p1")).toBe(2)
+    expect(store.getBinding("p1", "QA_BIND_PINNED")).toBeUndefined()
+    expect(store.getBinding("p1", "QA_BIND_LOOSE")).toBeUndefined()
+  })
+
+  it("clearParent global count stays consistent when pinned entries survive", () => {
+    // Fill cap minus 1.
+    for (let p = 0; p < 7; p++) {
+      for (let i = 0; i < 32; i++) {
+        store.writeBinding(`p${p}`, `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+      }
+    }
+    // Add 31 to p7 (255 total).
+    for (let i = 0; i < 31; i++) {
+      store.writeBinding("p7", `QA_BIND_X${i}`, "v", "plain", "minted-recipe")
+    }
+    // Pin a snapshot on p7 (31 entries pinned).
+    const snap = store.pinSnapshot("p7")
+    // Add one more on p7 — total 256, at cap.
+    store.writeBinding("p7", "QA_BIND_LAST", "v", "plain", "minted-recipe")
+    // Now clearParent("p7") — only the unpinned QA_BIND_LAST should be purged.
+    expect(store.clearParent("p7")).toBe(1)
+    // p7 still has 31 pinned entries; cap should reflect 255 used; one slot free.
+    expect(store.writeBinding("p99", "QA_BIND_NEW", "v", "plain", "minted-recipe").status).toBe("ok")
+    // Cap reached again at 256 — next write should fail.
+    expect(store.writeBinding("p99", "QA_BIND_NEW2", "v", "plain", "minted-recipe").status).toBe("error")
+    store.releaseSnapshot(snap.id)
   })
 })

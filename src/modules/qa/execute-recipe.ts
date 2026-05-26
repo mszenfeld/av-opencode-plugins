@@ -34,7 +34,6 @@ export interface ExecuteRecipeContext {
 }
 
 const MAX_ATTEMPTS = 3
-const TIMEOUT_MS = 30_000
 
 export function makeExecuteRecipeHandler(
   deps: ExecuteRecipeDeps,
@@ -44,6 +43,11 @@ export function makeExecuteRecipeHandler(
     const bindings = deps.state.getBindings(parentID) ?? []
     const target = bindings.find((b) => b.name === args.binding_name)
     if (target === undefined) return { status: "unknown_binding" }
+
+    // Re-dispatch to zmora-setup means the prior mid-run dialog round (if
+    // any) has concluded — the next `record_input` call should count as a
+    // fresh round against the `MAX_DIALOG_ROUNDS` cap (MAINT-002).
+    deps.state.endDialogRound(parentID)
 
     // Resolve inputs from BindingsStore first, then process env.
     const composedEnv: Record<string, string> = {}
@@ -69,15 +73,16 @@ export function makeExecuteRecipeHandler(
       return { status: "recipe_failed", reason: "max_attempts", stderr_tail: "" }
     }
 
-    // Run with timeout.
-    const result = await Promise.race([
-      deps.runBash(target.recipe, composedEnv),
-      new Promise<BashResult>((resolve) =>
-        setTimeout(() => resolve({ exitCode: 124, stdout: "", stderr: "timeout" }), TIMEOUT_MS),
-      ),
-    ])
+    // Run the recipe. `runBash` owns the wall-clock timeout (PERF-001):
+    // it kills the child via AbortController and reports `exitCode: 124`
+    // on timeout, so there is no need for a Promise.race guard here that
+    // would otherwise leak the underlying bash process past resolution.
+    const result = await deps.runBash(target.recipe, composedEnv)
 
-    const scrubbedStderr = scrubSecrets(result.stderr.slice(-200), parentID, deps.store)
+    // Scrub the full stderr BEFORE truncating: `slice(-200)` could otherwise
+    // cut a secret in half and let partial bytes survive the scrubber
+    // (MAINT-004). The O(N) full scan is the correct trade-off.
+    const scrubbedStderr = scrubSecrets(result.stderr, parentID, deps.store).slice(-200)
 
     if (result.exitCode === 124) {
       return { status: "recipe_failed", reason: "timeout", stderr_tail: scrubbedStderr }

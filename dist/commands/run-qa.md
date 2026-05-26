@@ -83,7 +83,7 @@ Perun will then:
 3. **Route by prefix:** every `### FE-XX:` scenario routes to the `zmora-fe` variant; every `### BE-XX:` scenario routes to the `zmora-be` variant. The user-facing label is always the logical `zmora` — variant suffixes are internal.
 4. **Build the dependency graph** by parsing optional `**Depends-on:**` annotations on each scenario. Self-references, cycles, and dangling references abort the run with a clear error before any specialist is dispatched.
 5. **Compute topological waves:** Wave 0 = scenarios with no dependencies; Wave N+1 = scenarios whose predecessors all live in some earlier wave. Plans with no `**Depends-on:**` annotations (the common case) collapse to a single wave via the fast path — no overhead.
-6. **Dispatch each wave** through `dispatch_parallel({ agent, summary, tasks })` — one task per scenario, with a 4-wide worker pool. Each wave waits for completion before the next begins. The 50-task cap is per-wave.
+6. **Dispatch each wave** through `dispatch_parallel({ agent, summary, tasks })` — one task per scenario, with a 4-wide worker pool. Each wave waits for completion before the next begins. `dispatch_parallel` accepts max 4 tasks per call; Perun chunks larger waves into multiple sequential calls of ≤4 tasks.
 7. **Merge findings** across waves in scenario-source order (the original markdown order, NOT wave order).
 8. **Assign QA-XXX IDs** via `assign_issue_ids` and sort by severity (CRITICAL → HIGH → MEDIUM → LOW).
 9. **Write the report** to `docs/testing/reports/YYYY-MM-DD-<topic>-report.md` where `<topic>` is the plan filename minus the leading date prefix and the trailing `-test-plan` suffix.
@@ -116,6 +116,6 @@ Perun will then:
 
 - `src/agents/perun.md` — Perun coordinator spec, including Workflow 1 (QA Run) and the dispatch contract.
 - `docs/plugins/qa.md` — QA plugin architecture, variant-split rationale, `**Depends-on:**` semantics, plan/report formats.
-- `docs/plugins/coordinator.md` — `dispatch_parallel` runtime characteristics (4-wide pool, 50-task cap, 5-minute per-task timeout).
+- `docs/plugins/coordinator.md` — `dispatch_parallel` runtime characteristics (4-wide pool, max 4 tasks per call, 5-minute per-task timeout).
 - `src/modules/qa/index.ts` — `AppVerkQAPlugin` registers the `zmora-fe` / `zmora-be` variants exposed to Perun.
 - `src/modules/coordinator/dispatch.ts` — `dispatch_parallel` implementation used by Perun.

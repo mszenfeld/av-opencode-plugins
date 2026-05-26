@@ -1,11 +1,10 @@
+import { SessionAgentRegistry } from "../_shared/session-agent-registry.js"
 import type { BindingsStore } from "./bindings-store.js"
 
-export class SessionAgentRegistry {
-  readonly #map = new Map<string, string>()
-  register(sessionID: string, agent: string): void { this.#map.set(sessionID, agent) }
-  unregister(sessionID: string): void { this.#map.delete(sessionID) }
-  lookup(sessionID: string): string | undefined { return this.#map.get(sessionID) }
-}
+// Re-export for backwards compatibility. The canonical definition lives in
+// `_shared/session-agent-registry.ts` so the coordinator can depend on the
+// type without reaching into a feature module.
+export { SessionAgentRegistry }
 
 export interface ShellEnvHookDeps {
   store: BindingsStore

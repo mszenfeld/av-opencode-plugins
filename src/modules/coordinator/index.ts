@@ -18,6 +18,7 @@ import {
   pantheonConfigEmpty,
 } from "../pantheon-config/index.js"
 import { loadModuleAsset } from "../_shared/load-asset.js"
+import { getDispatchExtensions } from "../_shared/dispatch-extensions.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
 // imports (e.g. `tests/modules/coordinator/to-poller-message.test.ts` imports
@@ -116,6 +117,11 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID)
       const agentRegistry = await loadAgentRegistry(client)
+      // Source plugin-supplied extensions (QA bindings registry / scrubber /
+      // preflight) from the shared module — keeps the coordinator free of
+      // direct imports from feature modules (ARCH-002: avoids layer inversion).
+      // Extensions are wire-time; `undefined` fields are dispatch no-ops.
+      const ext = getDispatchExtensions()
       const results = await dispatchParallel({
         tasks: args.tasks,
         agentRegistry,
@@ -124,6 +130,11 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         // iteration and during the inter-poll sleep, and child sessions are
         // cancelled server-side when it fires.
         signal: context.abort,
+        parentSessionID: context.sessionID,
+        sessionAgentRegistry: ext.sessionAgentRegistry,
+        scrubber: ext.scrubber,
+        scrubberFactory: ext.scrubberFactory,
+        preflight: ext.preflight,
       })
       return JSON.stringify(results, null, 2)
     },

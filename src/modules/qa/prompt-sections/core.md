@@ -44,12 +44,13 @@ When you return `NEED_INFO`, the wave-level task status is still `success` (the 
 }
 ```
 
-- `kind` classifies the gap. Allowed values (pick exactly one): `credentials`, `service`, `fixture`, `tool`.
+- `kind` classifies the gap. Allowed values (pick exactly one): `credentials`, `service`, `fixture`, `tool`, `binding_input`.
   - `credentials` = a required env var is empty OR the upstream rejects its value (e.g. expired Stripe key returns 401, wrong DB password gives auth failure). If the env var IS set but the upstream rejects it, prefer `credentials` over `service`.
   - `service` = an upstream host is unreachable in a way that is not credential-related: DNS failure, connection refused with no auth context, persistent 5xx from the dependency.
   - `fixture` = required test data (seed row, file, record) is missing from the DB or filesystem.
   - `tool` = a required CLI binary is not on `PATH`.
-- `missing` is an array of identifiers whose shape is fixed by `kind`: env-var NAMES (not values) for `credentials`; base URLs for `service`; fixture keys (table/row identifiers or fixture names) for `fixture`; binary names for `tool`. One element per distinct missing identifier.
+  - `binding_input` = a `## Setup` → `**Bindings:**` recipe input is unbound (zmora-setup variant only). Emitted by zmora-setup when `execute_recipe` returns `{status: "need_info", missing}`; carries an extra top-level `binding` field naming the unbound binding. See the setup overlay for the exact payload.
+- `missing` is an array of identifiers whose shape is fixed by `kind`: env-var NAMES (not values) for `credentials`; base URLs for `service`; fixture keys (table/row identifiers or fixture names) for `fixture`; binary names for `tool`; recipe-input NAMES for `binding_input` (e.g. `["TEST_USER_EMAIL", "TEST_USER_PASSWORD"]`). One element per distinct missing identifier.
 - `hint` is a one-line action the user can take. NEVER include the value of any secret — only names.
 
 `SKIP` vs `NEED_INFO`: return `SKIP` when the scenario does not apply to this stack or environment at all (e.g. a mobile-only scenario on a desktop run, a Stripe scenario in a project that has no Stripe integration). Return `NEED_INFO` when the scenario WOULD apply here but a prerequisite (credential, service, fixture, tool) is absent at runtime.

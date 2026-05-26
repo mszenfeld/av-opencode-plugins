@@ -1,13 +1,13 @@
 import { scrubSecrets } from "./scrubber.js";
 const NULLISH_LITERALS = /* @__PURE__ */ new Set(["null", "undefined", "none", "nil", "nan", "(null)"]);
 const MAX_ATTEMPTS = 3;
-const TIMEOUT_MS = 3e4;
 function makeExecuteRecipeHandler(deps) {
   return async (args, ctx) => {
     const parentID = await deps.resolveParentID(ctx.sessionID) ?? ctx.sessionID;
     const bindings = deps.state.getBindings(parentID) ?? [];
     const target = bindings.find((b) => b.name === args.binding_name);
     if (target === void 0) return { status: "unknown_binding" };
+    deps.state.endDialogRound(parentID);
     const composedEnv = {};
     const missing = [];
     for (const inputName of target.inputs) {
@@ -28,12 +28,7 @@ function makeExecuteRecipeHandler(deps) {
     if (attempts > MAX_ATTEMPTS) {
       return { status: "recipe_failed", reason: "max_attempts", stderr_tail: "" };
     }
-    const result = await Promise.race([
-      deps.runBash(target.recipe, composedEnv),
-      new Promise(
-        (resolve) => setTimeout(() => resolve({ exitCode: 124, stdout: "", stderr: "timeout" }), TIMEOUT_MS)
-      )
-    ]);
+    const result = await deps.runBash(target.recipe, composedEnv);
     const scrubbedStderr = scrubSecrets(result.stderr.slice(-200), parentID, deps.store);
     if (result.exitCode === 124) {
       return { status: "recipe_failed", reason: "timeout", stderr_tail: scrubbedStderr };

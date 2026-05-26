@@ -113,6 +113,63 @@ Use Setup to declare prerequisites that QA's preflight check must pass before an
 
 ---
 
+## Bindings (dynamic credentials)
+
+Use `**Bindings:**` inside `## Setup` to declare credentials or tokens that must be **minted at QA time** (e.g. short-lived auth tokens fetched from a login endpoint). Unlike `Required environment variables` — which the preflight check only probes for presence — bindings are produced by a sandboxed shell **recipe** run inside Perun's binding executor and then exposed to dependent scenarios.
+
+A binding is a first-class member of `## Setup`, peer to `**Required environment variables:**`, `**Required services:**`, and `**Required databases:**`. Omit the subsection entirely when no bindings are needed.
+
+### Markdown shape
+
+~~~markdown
+**Bindings:**
+- `QA_BIND_NAME` (secret|plain) — description
+  - Inputs: $VAR1, $VAR2
+  - Egress: `https://api.example.com`
+  - Recipe:
+    ```bash
+    curl -sf -X POST "$VAR1/auth/login" \
+      -H "Content-Type: application/json" \
+      --data "{\"email\":\"$VAR2\"}" | jq -er .token
+    ```
+~~~
+
+Each binding block has exactly four members and they MUST appear in this order: the header line, then `Inputs:`, `Egress:`, and `Recipe:` (with a fenced ```bash``` block). The parser is strict about indentation — sub-fields are indented two spaces beneath the header bullet, and the recipe fence is indented four spaces.
+
+### Field rules
+
+- **Name pattern.** `QA_BIND_[A-Z][A-Z0-9_]*` — the `QA_BIND_` prefix is mandatory. Names that fail the regex cause `parse_plan` to abort with an error.
+- **Type.**
+  - `secret` — value is scrubbed from logs, reports, and any other artefact the QA run emits. Use for tokens, passwords, API keys.
+  - `plain` — value is NOT scrubbed. Use only for non-sensitive derived values (e.g. a discovered resource ID).
+- **Inputs.** Comma-separated `$VAR` references. Every `$VAR` that appears in the recipe MUST be declared here; the parser rejects the binding otherwise. Inputs may reference other bindings (`$QA_BIND_OTHER`) — this creates a Wave-0 dependency edge.
+- **Egress.** A single host URL the recipe is allowed to talk to. Applies to `curl` (URL host), `psql`, and `sqlite3` (DSN host). The parser rejects any recipe command whose connection target host does not match this value.
+- **Recipe.** A single shell statement inside a fenced ```bash``` block. See sandbox rules below.
+
+### Recipe sandbox rules (summary)
+
+The recipe is validated by `validateRecipe()` before it runs. Cross-check `src/modules/qa/binding-parser.ts` for the canonical list; the rules that matter at plan-authoring time are:
+
+- **Single statement.** No `;`, `&&`, `||`, or newlines splitting commands. Pipes (`|`) are allowed — a pipeline is one statement.
+- **Command allowlist.** Only `curl`, `psql`, `sqlite3`, `jq`, `grep`, `cut`, `head`, `tail`, `tr`, `printf`. Anything else (including `awk`, `sed`, `bash`, `sh`, `python`) is rejected outright.
+- **No shell metaprogramming.** Forbidden: command substitution `$(...)`, backticks, heredocs/herestrings, process substitution `<(...) / >(...)`, `eval`, `source`, `export`, `unset`, `declare`/`local`/`readonly`/`set`, `function`, redirects to anywhere other than `/dev/null`, and trailing `&` backgrounding.
+- **Egress host match.** Every `curl` URL host and every `psql`/`sqlite3` DSN host must equal the binding's `Egress:` host.
+- **File-reader path confinement.** `grep`, `cut`, `head`, `tail`, `tr` may only read `./` relative paths, `-` (stdin), `/dev/null`, `/dev/stdin`, or `/dev/zero`. Absolute paths anywhere else (e.g. `/etc/passwd`) are rejected.
+- **sqlite3 dot-command restrictions.** `.read`, `.shell`, `.system`, `.import`, `.save`, `.output`, `.log` are forbidden — they escape SQL into shell or read arbitrary files.
+- **16 KiB cap.** The recipe body (after line-continuation collapse) must be ≤16 384 bytes.
+
+### Wave-0 synthesis (Perun's responsibility)
+
+You — the plan author — only write the declarative binding block. Perun synthesises one `### SETUP-<NN>: Provision QA_BIND_<NAME>` scenario per binding during Step 3.6 of its workflow (see `src/agents/perun.md`). These SETUP-* scenarios:
+
+- Are inserted into the scenario list BEFORE wave computation, so they typically land in Wave 0.
+- Inherit `Depends-on:` from any `Inputs:` that are themselves `QA_BIND_*` names — transitive bindings chain correctly.
+- Have a one-line body that invokes `execute_recipe({ binding_name: "QA_BIND_<NAME>" })`.
+
+Do NOT hand-author `### SETUP-XX:` scenarios in your plan — they are generated, not authored.
+
+---
+
 ## Scenario Naming
 
 - FE scenarios: `FE-01`, `FE-02`, ... `FE-NN` (zero-padded two digits)
@@ -202,3 +259,4 @@ Before saving the plan, verify:
 - [ ] API paths match actual routes from the codebase
 - [ ] No placeholder text (TBD, TODO, fill in later)
 - [ ] `**Depends-on:**` fields, if present, reference existing scenario IDs without cycles
+- [ ] Binding format: every `**Bindings:**` entry uses a `QA_BIND_*` name with `(secret|plain)` type, declares `Inputs:` for every `$VAR` referenced by the recipe, sets an `Egress:` host, and the fenced ```bash``` recipe is a single statement using only allowlisted commands

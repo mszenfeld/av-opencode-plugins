@@ -34,9 +34,13 @@ declare class BindingsStore {
      */
     sweepExpired(nowMs: number, ttlMs: number): number;
     /**
-     * Purge all bindings for a parent session (called on session.deleted /
-     * QA-run completion / abort). Pinned entries are still purged — the caller
-     * has decided the parent's lifecycle is over.
+     * Purge bindings for a parent session (called on session.deleted /
+     * QA-run completion / abort). Pinned entries are preserved so that any
+     * in-flight reader holding a snapshot (e.g. the scrubber) still has a
+     * coherent backing entry until the snapshot is explicitly released
+     * (CWE-672 — operation invoked on resource in incompatible phase).
+     * Returns the number of entries actually purged. Pin-counts and pinned
+     * entries remain so releaseSnapshot() can complete normally.
      */
     clearParent(parentID: string): number;
 }

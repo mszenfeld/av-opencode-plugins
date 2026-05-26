@@ -88,7 +88,8 @@ type AssertVoidReturn<K extends FunctionHookKey> =
   ReturnType<NonNullable<PluginHooks[K]> & ((...args: never[]) => unknown)> extends Promise<void>
     ? true
     : never
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- compile-time-only guard; see comment above
+// Compile-time-only guard; see comment above. Name is underscore-prefixed
+// so @typescript-eslint/no-unused-vars (varsIgnorePattern: ^_) allows it.
 type _AssertHooksReturnVoid = { [K in FunctionHookKey]: AssertVoidReturn<K> }
 
 function mergeHook<K extends HookKey>(plugins: PluginHooks[], key: K) {

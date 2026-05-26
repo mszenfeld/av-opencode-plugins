@@ -61,9 +61,9 @@ Effective configuration when running inside `/my-project`:
 | Pantheon key | Registered as | Description |
 |---|---|---|
 | `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. |
-| `zmora` | `zmora-fe` + `zmora-be` (subagents) | QA tester. Both variants share the same model — set once via `zmora`. |
+| `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. |
 
-> Internal variants of Zmora (`zmora-fe`, `zmora-be`) are subagents dispatched by Perun. They are not user-facing, but the model you set under `zmora` applies to both.
+> Internal variants of Zmora (`zmora-fe`, `zmora-be`, `zmora-setup`) are subagents dispatched by Perun. They are not user-facing, but the model you set under `zmora` applies to all three.
 
 ## Schema
 

@@ -3,8 +3,6 @@ const ALLOWED_COMMANDS = /* @__PURE__ */ new Set([
   "psql",
   "sqlite3",
   "jq",
-  "sed",
-  "awk",
   "grep",
   "cut",
   "head",
@@ -12,6 +10,10 @@ const ALLOWED_COMMANDS = /* @__PURE__ */ new Set([
   "tr",
   "printf"
 ]);
+const FILE_READER_COMMANDS = /* @__PURE__ */ new Set(["grep", "cut", "head", "tail", "tr"]);
+const DSN_COMMANDS = /* @__PURE__ */ new Set(["psql", "sqlite3"]);
+const SQLITE_FORBIDDEN_DOT_COMMANDS = [".read", ".shell", ".system", ".import", ".save", ".output", ".log"];
+const MAX_RECIPE_BYTES = 16 * 1024;
 const FORBIDDEN_TOKENS = [
   { pattern: /\$\(/, label: "$(...) command substitution" },
   { pattern: /`/, label: "backticks" },
@@ -50,7 +52,15 @@ const CURL_FORBIDDEN_FLAGS = [
     pattern: /(?:^|\s)(?:--remote-name-all|-J|--remote-header-name)\b/,
     label: "remote-name flags"
   },
-  { pattern: /(?:^|\s)(?:--write-out|-w)\s+["']?@/, label: "--write-out/-w with @file" }
+  { pattern: /(?:^|\s)(?:--write-out|-w)\s+["']?@/, label: "--write-out/-w with @file" },
+  // SEC-002: `--next` chains a second request whose URL bypasses the
+  // single-URL extractCurlURL check. Refuse outright — recipes are
+  // single-request by contract.
+  { pattern: /(?:^|\s)--next(?:\s|$)/, label: "--next (chains additional request)" },
+  // SEC-002: `--url` is an alternative way to specify a target URL. Allowing
+  // it would require us to validate every flag-value pair against the egress
+  // host. Simpler: forbid it; the bare positional URL is the canonical form.
+  { pattern: /(?:^|\s)--url(?:\s|=)/, label: "--url (use bare URL argument)" }
 ];
 function collapseLineContinuations(text) {
   return text.replace(/\\\n\s*/g, " ");
@@ -128,12 +138,46 @@ function extractCurlURL(cmd) {
   return null;
 }
 function hostOfURL(urlOrTemplate) {
-  const m = urlOrTemplate.match(/^(?:https?:\/\/)?(\$\{?[A-Z_][A-Z0-9_]*\}?|[\w.-]+)/);
+  const m = urlOrTemplate.match(/^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/)?(\$\{?[A-Z_][A-Z0-9_]*\}?|[\w.-]+)/);
   if (m === null) return null;
   const captured = m[1];
   return captured === void 0 ? null : captured;
 }
+function looksLikeDSN(token) {
+  const unquoted = token.replace(/^["']|["']$/g, "");
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(unquoted)) return true;
+  if (unquoted.startsWith("$")) return true;
+  return false;
+}
+function extractDSNTarget(cmd) {
+  const tokens = tokenizeShell(cmd);
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === void 0) continue;
+    if (t.startsWith("-")) continue;
+    if (looksLikeDSN(t)) {
+      return t.replace(/^["']|["']$/g, "");
+    }
+  }
+  return null;
+}
+const FILE_READER_ALLOWED_DEV_PATHS = /* @__PURE__ */ new Set(["/dev/null", "/dev/stdin", "/dev/zero"]);
+function isAllowedFileReaderArg(token) {
+  const unquoted = token.replace(/^["']|["']$/g, "");
+  if (unquoted.startsWith("-") && unquoted !== "-") return true;
+  if (unquoted === "-") return true;
+  if (unquoted.startsWith("$")) return true;
+  if (FILE_READER_ALLOWED_DEV_PATHS.has(unquoted)) return true;
+  if (unquoted.startsWith("/")) return false;
+  return true;
+}
 function validateRecipe(recipe, egress) {
+  if (recipe.length > MAX_RECIPE_BYTES) {
+    return {
+      status: "error",
+      reason: `recipe too long: ${recipe.length} bytes (max ${MAX_RECIPE_BYTES})`
+    };
+  }
   const collapsed = collapseLineContinuations(recipe);
   const statements = splitOnUnquotedSeparators(collapsed);
   if (statements.length !== 1) {
@@ -170,20 +214,68 @@ function validateRecipe(recipe, egress) {
         }
       }
     }
+    if (FILE_READER_COMMANDS.has(head)) {
+      const tokens = tokenizeShell(cmd);
+      for (let i = 1; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t === void 0) continue;
+        if (!isAllowedFileReaderArg(t)) {
+          return {
+            status: "error",
+            reason: `${head} cannot read absolute path '${t}' \u2014 restrict to ./ relative paths, '-', /dev/null, /dev/stdin`
+          };
+        }
+      }
+    }
+    if (head === "sqlite3") {
+      const tokens = tokenizeShell(cmd);
+      for (let i = 1; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (t === void 0) continue;
+        const unquoted = t.replace(/^["']|["']$/g, "");
+        for (const dot of SQLITE_FORBIDDEN_DOT_COMMANDS) {
+          if (unquoted.startsWith(dot)) {
+            return {
+              status: "error",
+              reason: `sqlite3 forbidden dot-command: ${dot}`
+            };
+          }
+        }
+      }
+    }
   }
   const egressHost = hostOfURL(egress);
   for (const cmd of cmds) {
-    if (firstWord(cmd) !== "curl") continue;
-    const url = extractCurlURL(cmd);
-    if (url === null) {
-      return { status: "error", reason: "curl invocation without a URL argument" };
+    const head = firstWord(cmd);
+    if (head === "curl") {
+      const url = extractCurlURL(cmd);
+      if (url === null) {
+        return { status: "error", reason: "curl invocation without a URL argument" };
+      }
+      const host = hostOfURL(url);
+      if (host !== egressHost) {
+        return {
+          status: "error",
+          reason: `curl URL host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`
+        };
+      }
+      continue;
     }
-    const host = hostOfURL(url);
-    if (host !== egressHost) {
-      return {
-        status: "error",
-        reason: `curl URL host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`
-      };
+    if (DSN_COMMANDS.has(head)) {
+      const target = extractDSNTarget(cmd);
+      if (target === null) {
+        return {
+          status: "error",
+          reason: `${head} invocation without a connection target (DSN/path)`
+        };
+      }
+      const host = hostOfURL(target);
+      if (host !== egressHost) {
+        return {
+          status: "error",
+          reason: `${head} target host '${host ?? "?"}' does not match Egress '${egressHost ?? "?"}'`
+        };
+      }
     }
   }
   return { status: "ok" };

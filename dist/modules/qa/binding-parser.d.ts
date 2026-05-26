@@ -1,4 +1,6 @@
-type BindingType = "secret" | "plain";
+import { BindingType } from './bindings-store.js';
+import './secret.js';
+
 interface ParsedBinding {
     name: string;
     type: BindingType;
@@ -39,4 +41,4 @@ declare function validateRecipe(recipe: string, egress: string): ValidateRecipeR
  */
 declare function parseBindings(planText: string): ParseResult;
 
-export { type BindingType, type ParseResult, type ParsedBinding, type ValidateRecipeResult, parseBindings, validateRecipe };
+export { BindingType, type ParseResult, type ParsedBinding, type ValidateRecipeResult, parseBindings, validateRecipe };

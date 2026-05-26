@@ -74,7 +74,7 @@ Cleanup: bindings map purged for parent session
 
 Five new primitives carry this:
 
-1. **Declarative per-agent tool restriction** via `AgentConfig.tools` (native OpenCode) — primary gate. `tool.execute.before` hook as defense-in-depth.
+1. **Declarative per-agent tool restriction** via `AgentConfig.tools` (native OpenCode) — primary gate, paired with prompt-level discipline. (A runtime `tool.execute.before` defense-in-depth hook is deferred to a future iteration; see §4.1.)
 2. **`zmora-setup` Zmora variant** with **`execute_recipe` custom tool** (rev3) — deterministic credential acquisition; LLM never observes the value.
 3. **`shell.env` plugin hook + per-parent-session bindings map** — native OpenCode channel for env injection, scoped to `zmora-*` agents only.
 4. **Mandatory coordinator-side log-scrubber** — redacts known secret-typed binding values from every Zmora result before report/TUI.
@@ -91,11 +91,12 @@ Perun's `allowed-tools` allowlist is the **exhaustive** set. Concretely:
 - Reading any dotfile (`.env`, `.env.*`, `.envrc`, `~/.ssh/*`) is forbidden — reaffirms the existing rule.
 - The "Hard rule" from the resume Step 7 is **promoted to universal** — applies to every Perun turn (initial dispatch, preflight, resume), not just resume.
 
-Enforcement (three layers, in priority order):
+Enforcement (two layers, in priority order — as shipped):
 
-1. **Native OpenCode `AgentConfig.tools` declarative restriction** (primary) — `node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:840-842` exposes `tools: { [name: string]: boolean }` per agent. Each agent definition (Perun, zmora-fe, zmora-be, zmora-setup) declares allow/deny per known tool. This catches **MCP tools natively** (OpenCode's MCP integration respects this map). Resolves rev1 §8.5 open question.
-2. **`tool.execute.before` plugin hook** (defense-in-depth) — runtime guard for tool calls. Hook receives `{tool, sessionID, callID}` but **no agent name**, so plugin must maintain its own `sessionID → agent` map populated at `dispatch_parallel` time. Hook throws to abort on mismatch.
-3. **Prompt-level documentation** (informational) — Perun's prompt declares the allowlist with concrete examples of forbidden patterns. LLM compliance only; security must not rely on this alone.
+1. **Native OpenCode `AgentConfig.tools` declarative restriction** (primary, code-enforced at agent registration time) — `node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts:840-842` exposes `tools: { [name: string]: boolean }` per agent. Each agent definition (Perun, zmora-fe, zmora-be, zmora-setup) declares allow/deny per known tool in `src/modules/qa/index.ts`. This catches **MCP tools natively** (OpenCode's MCP integration respects this map). Resolves rev1 §8.5 open question.
+2. **Prompt-level discipline** (LLM-requested constraint via `core.md` + `overlay-setup.md`) — Perun's and zmora-*'s prompts declare the allowlist with concrete examples of forbidden patterns. LLM compliance only; security must not rely on this alone.
+
+**Future iteration (not implemented):** A third runtime `tool.execute.before` plugin hook is desirable as defense-in-depth. It would receive `{tool, sessionID, callID}` (but **no agent name**, so the plugin would have to maintain its own `sessionID → agent` map populated at `dispatch_parallel` time) and throw to abort on allowlist mismatch. The infrastructure exists (other modules such as `commit` and `session-notification` already register `tool.execute.before` hooks), but the qa module currently does not. Adding it would harden against any future bug that lets a disallowed tool slip past the `AgentConfig.tools` gate. Tracked as a follow-up; out of scope for this revision.
 
 ### 4.2 `zmora-setup` variant
 

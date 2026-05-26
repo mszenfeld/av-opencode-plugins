@@ -18,6 +18,7 @@ import {
   pantheonConfigEmpty
 } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
+import { getDispatchExtensions } from "../_shared/dispatch-extensions.js";
 function loadAgentPrompt(name) {
   return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
 }
@@ -79,6 +80,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID);
       const agentRegistry = await loadAgentRegistry(client);
+      const ext = getDispatchExtensions();
       const results = await dispatchParallel({
         tasks: args.tasks,
         agentRegistry,
@@ -86,7 +88,12 @@ const AppVerkCoordinatorPlugin = async (input) => {
         // Thread the harness abort signal end-to-end: poller checks it at each
         // iteration and during the inter-poll sleep, and child sessions are
         // cancelled server-side when it fires.
-        signal: context.abort
+        signal: context.abort,
+        parentSessionID: context.sessionID,
+        sessionAgentRegistry: ext.sessionAgentRegistry,
+        scrubber: ext.scrubber,
+        scrubberFactory: ext.scrubberFactory,
+        preflight: ext.preflight
       });
       return JSON.stringify(results, null, 2);
     }

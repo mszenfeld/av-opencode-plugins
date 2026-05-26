@@ -2,11 +2,15 @@ import { tool, type Plugin } from "@opencode-ai/plugin"
 import { buildQATesterAgent } from "./prompt-builder.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
 import { loadModuleAsset } from "../_shared/load-asset.js"
+import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js"
 import { BindingsStore } from "./bindings-store.js"
 import { QaRunState } from "./qa-run-state.js"
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js"
 import { makeExecuteRecipeHandler } from "./execute-recipe.js"
 import { makeRecordInputHandler } from "./record-input.js"
+import { parseBindings } from "./binding-parser.js"
+import { scrubSecrets } from "./scrubber.js"
+import { makeRunBash } from "./run-bash.js"
 
 export { buildQATesterAgent }
 export { FE_TOOLS, BE_TOOLS, SETUP_TOOLS, SHARED_TOOLS, toolsForVariant } from "./allowed-tools.js"
@@ -63,43 +67,61 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
     }
   }
 
-  const recordInputHandler = makeRecordInputHandler({ store, resolveParentID })
+  const recordInputHandler = makeRecordInputHandler({ store, state, resolveParentID })
   const executeRecipeHandler = makeExecuteRecipeHandler({
     store,
     state,
     resolveParentID,
-    runBash: async (cmd, env) => {
-      // Bash execution via Node child_process. Inherit process env merged with
-      // composed env (composed wins for overlap so binding/input values mask
-      // any host-env collision). Timeout enforcement lives in the handler
-      // (Promise.race), so this just runs and returns.
-      const { spawn } = await import("node:child_process")
-      return await new Promise((resolve) => {
-        const child = spawn("bash", ["-c", cmd], {
-          env: { ...process.env, ...env },
-          stdio: ["ignore", "pipe", "pipe"],
-        })
-        let stdout = ""
-        let stderr = ""
-        child.stdout.on("data", (d: Buffer) => {
-          stdout += d.toString()
-        })
-        child.stderr.on("data", (d: Buffer) => {
-          stderr += d.toString()
-        })
-        child.on("close", (code) => {
-          resolve({ exitCode: code ?? -1, stdout, stderr })
-        })
-        child.on("error", (err) => {
-          resolve({ exitCode: -1, stdout, stderr: stderr + err.message })
-        })
-      })
-    },
+    // `makeRunBash` owns wall-clock timeout enforcement: AbortController +
+    // `spawn`'s `signal` so an over-budget recipe is actually killed
+    // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
+    runBash: makeRunBash(),
     processEnv: process.env,
     nowMs: () => Date.now(),
   })
 
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID })
+
+  // Bridge plugin-owned state into the coordinator's `dispatch_parallel` via
+  // the shared dispatch-extensions module. The coordinator reads this at
+  // execute time — see `src/modules/_shared/dispatch-extensions.ts` for the
+  // contract and rationale (ARCH-002: avoids coordinator → qa layer inversion).
+  //
+  //   - `sessionAgentRegistry`: dispatch records (childSessionID → task.name)
+  //     so the `shell.env` hook can resolve agent identity per session.
+  //   - `scrubberFactory`: pins a `BindingSnapshot` for the duration of a
+  //     `dispatch_parallel` wave and routes every task result through a
+  //     scrubber closed over that snapshot. This protects the scrub from
+  //     interleaving with `execute_recipe` writes / `clearParent` purges that
+  //     would otherwise reveal a newly-minted secret in the moment between
+  //     write and the next scrub (ARCH-004 / CWE-362). `releaseSnapshot` is
+  //     invoked by the coordinator in a `finally` after the wave completes,
+  //     letting `sweepExpired` and `clearParent` reclaim the entries.
+  //
+  // No `preflight` is registered here — plan parsing happens explicitly via
+  // the `parse_plan` tool (Perun-only) which Perun is required to call after
+  // reading the plan and before the first `dispatch_parallel`. Keeping it
+  // explicit (a) makes the lifecycle visible in the agent prompt and (b)
+  // avoids needing the plan text at dispatch time.
+  registerDispatchExtensions({
+    sessionAgentRegistry: registry,
+    scrubberFactory: (parentSessionID) => {
+      // Defensive try/catch: a snapshot-pin failure must not break the
+      // dispatch wave. Returning `undefined` falls back to no scrubbing —
+      // which is the existing legacy behaviour for callers without a
+      // configured scrubber. The dispatched task results still pass through
+      // `neutralizeUntrustedOutput` and truncation in the coordinator.
+      try {
+        const snapshot = store.pinSnapshot(parentSessionID)
+        return {
+          scrub: (text) => scrubSecrets(text, parentSessionID, store, snapshot),
+          release: () => store.releaseSnapshot(snapshot.id),
+        }
+      } catch {
+        return undefined
+      }
+    },
+  })
 
   // Periodic TTL sweep: purges binding entries older than TTL_MS. Skips pinned
   // entries (active snapshots). Wrapped in try/catch — a background timer must
@@ -128,24 +150,26 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
           },
           mode: "subagent",
           // Plugin-provided tools are opt-in per agent. Only zmora-setup may
-          // execute recipes; record_input is Perun-only (registered in the
-          // coordinator agent's frontmatter, not in any zmora variant).
+          // execute recipes; record_input and parse_plan are Perun-only
+          // (registered in Perun's frontmatter, not in any zmora variant).
           tools: {
             execute_recipe: stack === "setup",
             record_input: false,
+            parse_plan: false,
           },
         }
       }
 
       // Inject model AFTER registration so we don't merge it into every literal
-      // above — the non-null assertion is safe because the loop above just set
-      // each `zmora-${stack}` key. The model string is also restricted to a
-      // printable-ASCII allow-list by `MODEL_REGEX` in pantheon-config/schema.ts,
-      // so no control characters can reach this TUI sink (CWE-117).
+      // above. The model string is restricted to a printable-ASCII allow-list
+      // by `MODEL_REGEX` in pantheon-config/schema.ts, so no control characters
+      // can reach this TUI sink (CWE-117).
       const zmoraModel = loadPantheonConfig().agents.zmora?.model
       if (zmoraModel !== undefined) {
         for (const stack of VARIANTS) {
-          config.agent[`zmora-${stack}`]!.model = zmoraModel
+          const agent = config.agent[`zmora-${stack}`]
+          if (agent === undefined) continue // structurally impossible — loop above just set this key
+          agent.model = zmoraModel
         }
       }
 
@@ -162,6 +186,38 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }
     },
     tool: {
+      parse_plan: tool({
+        description: [
+          "Parse a QA plan's `## Setup` → `**Bindings:**` subsection into the plugin's per-run state. Perun MUST call this exactly once per QA run, after reading the plan and BEFORE the first `dispatch_parallel` that includes a zmora-setup task. Without this call `execute_recipe` returns `{status:\"unknown_binding\"}` for every recipe.",
+          "",
+          "The plan text is parsed in-process — the binding values themselves are NEVER produced here, only the recipe AST. Value materialisation happens later in `execute_recipe`.",
+          "",
+          "Result shape (JSON-stringified):",
+          "- `{ status: \"ok\", bindings: string[] }` — bindings stored; `bindings` lists the names parsed (e.g. `[\"QA_BIND_TOKEN\"]`). Empty array means the plan has no `## Setup` / `**Bindings:**` subsection — Perun should proceed to dispatch without any zmora-setup tasks.",
+          "- `{ status: \"error\", reason }` — parse/validation failed (invalid binding name, recipe AST rejection, etc.). Surface `reason` to the user verbatim and abort the QA run.",
+          "",
+          "Idempotent: calling twice with the same plan replaces the stored plan (later wins). Safe to call again on resume.",
+        ].join("\n"),
+        args: {
+          plan: tool.schema
+            .string()
+            .describe(
+              "Full text of the QA plan markdown. Perun passes the contents read via `Read` — do not summarise or trim.",
+            ),
+        },
+        async execute(args, ctx) {
+          const parentID = (await resolveParentID(ctx.sessionID)) ?? ctx.sessionID
+          const parsed = parseBindings(args.plan)
+          if (parsed.status !== "ok") {
+            return JSON.stringify({ status: "error", reason: parsed.reason })
+          }
+          state.storePlan(parentID, parsed.bindings)
+          return JSON.stringify({
+            status: "ok",
+            bindings: parsed.bindings.map((b) => b.name),
+          })
+        },
+      }),
       execute_recipe: tool({
         description: [
           "Execute a single binding recipe declared in the plan's **Bindings:** section. Atomically: validates recipe AST, runs via bash with composed env (host env + previously-bound inputs), validates output, registers the value in the bindings store. Returns status only — the value never appears in the LLM context.",
@@ -222,18 +278,33 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
     },
     "shell.env": shellEnvHook,
     event: async ({ event }) => {
-      // Defensive cleanup: when a parent session is deleted in the SDK, drop
-      // any in-memory state still keyed by that ID (bindings, attempt counters,
-      // child→agent registrations). Bounded by sweepExpired, but explicit
-      // cleanup avoids waiting up to TTL_MS for the next periodic pass.
+      // Defensive cleanup on `session.deleted`. The SDK emits this for BOTH
+      // parent (Perun) and child (zmora-*) sessions, and child sessions die
+      // independently of their parent in long-lived OpenCode processes — so
+      // every call here must be safe and meaningful for either kind of ID.
+      //
+      // The order below is "registry first, then keyed state, then caches":
+      //  - `registry.unregister(deletedID)` — ALWAYS. This is the credential-
+      //    mapping store (childSessionID → agent name) that gates the
+      //    `shell.env` hook; a stale entry plus a recycled SDK session ID
+      //    would in principle leak bindings into the wrong session, so we
+      //    drop it whether the deleted ID is a parent or a child (ARCH-003).
+      //  - `store.clearParent` / `state.clearRun` — no-op when `deletedID`
+      //    is a child (they're keyed by parent ID). Cheap to call always.
+      //  - `parentIDCache` — drop the entry for the deleted ID itself, then
+      //    sweep any child entries that pointed at this (deleted) parent so
+      //    they don't resolve to a tombstone.
+      //
+      // Bounded by `sweepExpired`, but explicit cleanup avoids waiting up to
+      // TTL_MS for the next periodic pass.
       if (event.type !== "session.deleted") return
       const deletedID = event.properties?.info?.id
       if (typeof deletedID !== "string" || deletedID.length === 0) return
+      registry.unregister(deletedID)
       store.clearParent(deletedID)
       state.clearRun(deletedID)
-      registry.unregister(deletedID)
       parentIDCache.delete(deletedID)
-      // Also drop any child entries that resolved to this parent — they're
+      // Sweep child entries whose cached parent is the deleted ID — they're
       // stale now that the parent is gone.
       for (const [childID, parentID] of parentIDCache.entries()) {
         if (parentID === deletedID) parentIDCache.delete(childID)
