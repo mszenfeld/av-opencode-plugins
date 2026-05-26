@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest"
 import {
   buildKeyTriggersSection,
   buildSpecialistsTable,
+  buildDelegationTable,
+  buildUseAvoidSection,
+  buildPerunPrompt,
 } from "../../../src/modules/agent-registry/perun-prompt-builder.js"
 import type { SpecialistInfo } from "../../../src/modules/agent-registry/agent-metadata.js"
 
@@ -56,8 +59,6 @@ describe("buildKeyTriggersSection", () => {
   })
 })
 
-import { buildDelegationTable } from "../../../src/modules/agent-registry/perun-prompt-builder.js"
-
 describe("buildDelegationTable", () => {
   it("returns empty string when no agent declares triggers", () => {
     expect(buildDelegationTable([info({ name: "zmora" })])).toBe("")
@@ -89,11 +90,6 @@ describe("buildDelegationTable", () => {
     )
   })
 })
-
-import {
-  buildPerunPrompt,
-  buildUseAvoidSection,
-} from "../../../src/modules/agent-registry/perun-prompt-builder.js"
 
 const triglav = info({
   name: "triglav",
