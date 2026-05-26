@@ -26,3 +26,20 @@ export function buildKeyTriggersSection(registry: SpecialistInfo[]): string {
   const bullets = withTrigger.map((a) => `- ${a.metadata.keyTrigger}`)
   return ["### Key Triggers (check BEFORE classification):", "", ...bullets].join("\n")
 }
+
+export function buildDelegationTable(registry: SpecialistInfo[]): string {
+  const rows: string[] = []
+  for (const agent of [...registry].sort(byName)) {
+    for (const t of agent.metadata.triggers) {
+      rows.push(`| ${t.domain} | \`${agent.name}\` | ${t.trigger} |`)
+    }
+  }
+  if (rows.length === 0) return ""
+  return [
+    "### Delegation Table:",
+    "",
+    "| Domain | Agent | Trigger |",
+    "|---|---|---|",
+    ...rows,
+  ].join("\n")
+}

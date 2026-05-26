@@ -55,3 +55,37 @@ describe("buildKeyTriggersSection", () => {
     )
   })
 })
+
+import { buildDelegationTable } from "../../../src/modules/agent-registry/perun-prompt-builder.js"
+
+describe("buildDelegationTable", () => {
+  it("returns empty string when no agent declares triggers", () => {
+    expect(buildDelegationTable([info({ name: "zmora" })])).toBe("")
+  })
+
+  it("expands triggers[] into Domain/Agent/Trigger rows", () => {
+    const out = buildDelegationTable([
+      info({
+        name: "triglav",
+        metadata: {
+          category: "exploration",
+          cost: "FREE",
+          triggers: [
+            { domain: "Code search", trigger: "find where X is defined" },
+            { domain: "Impact analysis", trigger: "what calls Y" },
+          ],
+        },
+      }),
+    ])
+    expect(out).toBe(
+      [
+        "### Delegation Table:",
+        "",
+        "| Domain | Agent | Trigger |",
+        "|---|---|---|",
+        "| Code search | `triglav` | find where X is defined |",
+        "| Impact analysis | `triglav` | what calls Y |",
+      ].join("\n"),
+    )
+  })
+})
