@@ -1,11 +1,13 @@
 import type { Hooks, Plugin } from "@opencode-ai/plugin"
-import { AppVerkCommitPlugin } from "../packages/commit/dist/index.js"
+import { AppVerkCommitPlugin } from "./modules/commit/index.js"
 import { AppVerkPythonDeveloperPlugin } from "../packages/python-developer/dist/index.js"
 import { AppVerkCodeReviewPlugin } from "../packages/code-review/dist/index.js"
 import { AppVerkFrontendDeveloperPlugin } from "../packages/frontend-developer/dist/index.js"
 import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/index.js"
-import { AppVerkQAPlugin } from "../packages/qa/dist/index.js"
+import { AppVerkQAPlugin } from "./modules/qa/index.js"
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js"
+import { AppVerkCoordinatorPlugin } from "./modules/coordinator/index.js"
+import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
 type PluginHooks = Awaited<ReturnType<Plugin>>
 type HookKey = Exclude<keyof PluginHooks, "config" | "tool">
 type MergedHook = (...args: unknown[]) => Promise<void>
@@ -21,6 +23,8 @@ const defaultPluginFactories: Plugin[] = [
   AppVerkSkillRegistryPlugin,
   AppVerkQAPlugin,
   AppVerkSwiftDeveloperPlugin,
+  AppVerkCoordinatorPlugin,
+  AppVerkPantheonPlugin,
 ]
 
 function mergeTools(plugins: PluginHooks[]): PluginHooks["tool"] {
@@ -70,6 +74,22 @@ function mergeToolExecuteAfter(plugins: PluginHooks[]) {
     }
   }
 }
+
+// Compile-time guard: the generic merger in `mergeHook` discards each hook's
+// return value, so it is only safe for hooks whose return type is `Promise<void>`.
+// If a future OpenCode SDK upgrade introduces a value-returning hook (e.g. a
+// permission decision), `_AssertHooksReturnVoid` will fail to typecheck at this
+// site instead of silently dropping return values at runtime. Do not delete —
+// removing this guard removes the only compile-time guarantee against that bug.
+type FunctionHookKey = {
+  [K in HookKey]: NonNullable<PluginHooks[K]> extends (...args: never[]) => unknown ? K : never
+}[HookKey]
+type AssertVoidReturn<K extends FunctionHookKey> =
+  ReturnType<NonNullable<PluginHooks[K]> & ((...args: never[]) => unknown)> extends Promise<void>
+    ? true
+    : never
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- compile-time-only guard; see comment above
+type _AssertHooksReturnVoid = { [K in FunctionHookKey]: AssertVoidReturn<K> }
 
 function mergeHook<K extends HookKey>(plugins: PluginHooks[], key: K) {
   if (key === "tool.execute.before") {

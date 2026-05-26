@@ -64,6 +64,23 @@ describe("AppVerkPlugins", () => {
     expect(plugin.tool?.load_appverk_skill).toBeDefined()
   })
 
+  it("registers Perun coordinator agent and coordinator tools", async () => {
+    const { AppVerkPlugins } = await loadRootModule()
+    const plugin = await AppVerkPlugins({} as never)
+    const config = {} as {
+      agent?: Record<string, { description?: string; prompt: string; mode?: string }>
+    }
+
+    await plugin.config?.(config as never)
+
+    const perun = config.agent?.["Perun - Coordinator"]
+    expect(perun?.description).toContain("Delegates work to specialists")
+    expect(perun?.mode).toBe("primary")
+    expect(perun?.prompt).toContain("Perun")
+    expect(plugin.tool?.dispatch_parallel).toBeDefined()
+    expect(plugin.tool?.assign_issue_ids).toBeDefined()
+  })
+
   it("registers the /frontend command and frontend-developer agent", async () => {
     const { AppVerkPlugins } = await loadRootModule()
     const plugin = await AppVerkPlugins({} as never)
@@ -92,9 +109,7 @@ describe("AppVerkPlugins", () => {
     )
     expect(packageJson.files).toEqual(
       expect.arrayContaining([
-        "src/index.js",
-        "src/index.d.ts",
-        "packages/commit/dist",
+        "dist",
       ]),
     )
 
@@ -110,11 +125,11 @@ describe("AppVerkPlugins", () => {
     expect(packedFiles).toEqual(
       expect.arrayContaining([
         "package.json",
-        "src/index.js",
-        "src/index.d.ts",
-        "packages/commit/dist/index.js",
-        "packages/commit/dist/index.d.ts",
-        "packages/commit/dist/commands/commit.md",
+        "dist/index.js",
+        "dist/index.d.ts",
+        "dist/commands/commit.md",
+        "dist/modules/commit/index.js",
+        "dist/modules/commit/index.d.ts",
         "packages/frontend-developer/dist/index.js",
         "packages/frontend-developer/dist/index.d.ts",
         "packages/frontend-developer/dist/commands/frontend.md",
@@ -131,8 +146,60 @@ describe("AppVerkPlugins", () => {
         "packages/swift-developer/dist/commands/swift.md",
         "packages/swift-developer/dist/agent-prompt.md",
         "packages/swift-developer/dist/skills/swift-coding-standards/SKILL.md",
+        "dist/modules/coordinator/index.js",
+        "dist/modules/coordinator/index.d.ts",
+        "dist/modules/qa/index.js",
+        "dist/modules/qa/index.d.ts",
+        "dist/modules/qa/prompt-builder.js",
+        "dist/modules/qa/prompt-builder.d.ts",
+        "dist/modules/qa/allowed-tools.js",
+        "dist/modules/qa/allowed-tools.d.ts",
+        "dist/modules/qa/prompt-sections/core.md",
+        "dist/modules/qa/prompt-sections/overlay-fe.md",
+        "dist/modules/qa/prompt-sections/overlay-be.md",
+        "dist/modules/_shared/load-asset.js",
+        "dist/modules/_shared/load-asset.d.ts",
+        "dist/modules/pantheon-config/index.js",
+        "dist/modules/pantheon-config/index.d.ts",
+        "dist/modules/pantheon-config/loader.js",
+        "dist/modules/pantheon-config/loader.d.ts",
+        "dist/modules/pantheon-config/paths.js",
+        "dist/modules/pantheon-config/paths.d.ts",
+        "dist/modules/pantheon-config/schema.js",
+        "dist/modules/pantheon-config/schema.d.ts",
+        "dist/agents/perun.md",
+        "dist/commands/create-qa-plan.md",
+        "dist/commands/run-qa.md",
+        "dist/skills/qa/test-plan-format/SKILL.md",
+        "dist/skills/qa/report-format/SKILL.md",
+        "dist/skills/qa/fe-testing/SKILL.md",
+        "dist/skills/qa/be-testing/SKILL.md",
+        "dist/hooks/session-notification/plugin.js",
+        "dist/hooks/session-notification/plugin.d.ts",
+        "dist/hooks/session-notification/env-config.js",
+        "dist/hooks/session-notification/env-config.d.ts",
+        "dist/hooks/session-notification/idle-scheduler.js",
+        "dist/hooks/session-notification/idle-scheduler.d.ts",
+        "dist/hooks/session-notification/notification-sender.js",
+        "dist/hooks/session-notification/notification-sender.d.ts",
+        "dist/hooks/session-notification/session-notification.js",
+        "dist/hooks/session-notification/session-notification.d.ts",
+        "dist/hooks/session-notification/session-tracker.js",
+        "dist/hooks/session-notification/session-tracker.d.ts",
       ]),
     )
+  })
+
+  it("registers the Pantheon session-notification event hook", async () => {
+    const { AppVerkPlugins } = await loadRootModule()
+    const plugin = await AppVerkPlugins({} as never)
+    expect(typeof plugin.event).toBe("function")
+    // Smoke: feed a synthetic event; must not throw.
+    const eventHandler = plugin.event
+    if (typeof eventHandler !== "function") throw new Error("expected event handler")
+    await expect(
+      eventHandler({ event: { type: "session.idle", properties: { sessionID: "ses_unknown" } } } as never),
+    ).resolves.toBeUndefined()
   })
 
   it("injects skill activation rules via system prompt transform", async () => {

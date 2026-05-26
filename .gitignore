@@ -1,7 +1,7 @@
 node_modules/
 dist/
-!packages/commit/dist/
-!packages/commit/dist/**
+!dist/
+!dist/**
 !packages/python-developer/dist/
 !packages/python-developer/dist/**
 !packages/code-review/dist/
@@ -12,8 +12,6 @@ dist/
 !packages/skill-utils/dist/**
 !packages/skill-registry/dist/
 !packages/skill-registry/dist/**
-!packages/qa/dist/
-!packages/qa/dist/**
 !packages/swift-developer/dist/
 !packages/swift-developer/dist/**
 coverage/
