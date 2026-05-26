@@ -29,7 +29,7 @@ function makeExecuteRecipeHandler(deps) {
       return { status: "recipe_failed", reason: "max_attempts", stderr_tail: "" };
     }
     const result = await deps.runBash(target.recipe, composedEnv);
-    const scrubbedStderr = scrubSecrets(result.stderr.slice(-200), parentID, deps.store);
+    const scrubbedStderr = scrubSecrets(result.stderr, parentID, deps.store).slice(-200);
     if (result.exitCode === 124) {
       return { status: "recipe_failed", reason: "timeout", stderr_tail: scrubbedStderr };
     }

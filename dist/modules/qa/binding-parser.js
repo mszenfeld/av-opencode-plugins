@@ -355,7 +355,10 @@ function parseBindings(planText) {
         const recipeStart = k + 1;
         let recipeEnd = recipeStart;
         while (recipeEnd < lines.length && !/^\s*```\s*$/.test(lines[recipeEnd])) recipeEnd++;
-        recipe = lines.slice(recipeStart, recipeEnd).map((l) => l.replace(/^    /, "")).join("\n").trim();
+        const recipeLines = lines.slice(recipeStart, recipeEnd);
+        const nonEmptyRecipeLines = recipeLines.filter((l) => l.trim().length > 0);
+        const minIndent = nonEmptyRecipeLines.length === 0 ? 0 : Math.min(...nonEmptyRecipeLines.map((l) => /^[ \t]*/.exec(l)[0].length));
+        recipe = recipeLines.map((l) => l.slice(minIndent)).join("\n").trim();
         j = recipeEnd + 1;
         continue;
       }
