@@ -43,3 +43,42 @@ export function buildDelegationTable(registry: SpecialistInfo[]): string {
     ...rows,
   ].join("\n")
 }
+
+export function buildUseAvoidSection(
+  agentName: string,
+  registry: SpecialistInfo[],
+): string {
+  const agent = registry.find((a) => a.name === agentName)
+  if (agent === undefined) {
+    throw new Error(`Unknown agent in placeholder: ${agentName}`)
+  }
+  const useWhen = agent.metadata.useWhen ?? []
+  const avoidWhen = agent.metadata.avoidWhen ?? []
+  if (useWhen.length === 0 && avoidWhen.length === 0) return ""
+  const lines: string[] = [`### Use \`${agentName}\` when:`]
+  for (const u of useWhen) lines.push(`- ${u}`)
+  if (avoidWhen.length > 0) {
+    lines.push("", `### Avoid \`${agentName}\` when:`)
+    for (const a of avoidWhen) lines.push(`- ${a}`)
+  }
+  return lines.join("\n")
+}
+
+export function buildPerunPrompt(
+  template: string,
+  registry: SpecialistInfo[],
+): string {
+  const sections: Record<(typeof PERUN_PLACEHOLDERS)[number], string> = {
+    SPECIALISTS_TABLE: buildSpecialistsTable(registry),
+    KEY_TRIGGERS: buildKeyTriggersSection(registry),
+    DELEGATION_TABLE: buildDelegationTable(registry),
+  }
+  let out = template
+  for (const key of PERUN_PLACEHOLDERS) {
+    out = out.replaceAll(`{${key}}`, sections[key])
+  }
+  out = out.replace(/\{USE_AVOID:([A-Za-z0-9_-]+)\}/g, (_match, name: string) =>
+    buildUseAvoidSection(name, registry),
+  )
+  return out
+}

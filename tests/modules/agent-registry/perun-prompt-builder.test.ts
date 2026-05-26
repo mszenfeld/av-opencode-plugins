@@ -89,3 +89,78 @@ describe("buildDelegationTable", () => {
     )
   })
 })
+
+import {
+  buildPerunPrompt,
+  buildUseAvoidSection,
+} from "../../../src/modules/agent-registry/perun-prompt-builder.js"
+
+const triglav = info({
+  name: "triglav",
+  metadata: {
+    category: "exploration",
+    cost: "FREE",
+    triggers: [],
+    useWhen: ["you need to find code", "you need impact analysis"],
+    avoidWhen: ["you already know the file"],
+  },
+})
+
+describe("buildUseAvoidSection", () => {
+  it("returns empty string for an agent without useWhen/avoidWhen", () => {
+    expect(buildUseAvoidSection("zmora", [info({ name: "zmora" })])).toBe("")
+  })
+
+  it("throws for an unknown agent target", () => {
+    expect(() => buildUseAvoidSection("ghost", [info({ name: "zmora" })])).toThrow(
+      /Unknown agent in placeholder: ghost/,
+    )
+  })
+
+  it("renders use and avoid bullets", () => {
+    expect(buildUseAvoidSection("triglav", [triglav])).toBe(
+      [
+        "### Use `triglav` when:",
+        "- you need to find code",
+        "- you need impact analysis",
+        "",
+        "### Avoid `triglav` when:",
+        "- you already know the file",
+      ].join("\n"),
+    )
+  })
+})
+
+describe("buildPerunPrompt", () => {
+  it("substitutes known placeholders", () => {
+    const out = buildPerunPrompt("X\n{SPECIALISTS_TABLE}\nY", [
+      info({ name: "zmora", description: "QA work" }),
+    ])
+    expect(out).toContain("| `zmora` | subagent | QA work |")
+    expect(out.startsWith("X\n")).toBe(true)
+    expect(out.endsWith("\nY")).toBe(true)
+  })
+
+  it("leaves an unknown placeholder literal", () => {
+    expect(buildPerunPrompt("{UNKNOWN_X}", [])).toBe("{UNKNOWN_X}")
+  })
+
+  it("substitutes a lowercase-named per-agent placeholder", () => {
+    const out = buildPerunPrompt("{USE_AVOID:triglav}", [triglav])
+    expect(out).toContain("### Use `triglav` when:")
+    expect(out).not.toContain("{USE_AVOID:triglav}")
+  })
+
+  it("throws when a per-agent placeholder targets an unknown agent", () => {
+    expect(() => buildPerunPrompt("{USE_AVOID:ghost}", [triglav])).toThrow(
+      /Unknown agent in placeholder: ghost/,
+    )
+  })
+
+  it("renders empty sections to nothing", () => {
+    const out = buildPerunPrompt("a{KEY_TRIGGERS}b{DELEGATION_TABLE}c", [
+      info({ name: "zmora" }),
+    ])
+    expect(out).toBe("abc")
+  })
+})
