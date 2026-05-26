@@ -1,15 +1,14 @@
 import type { SpecialistInfo } from "./agent-metadata.js"
 
 export * from "./agent-metadata.js"
-// Builder re-exports restored in Task 3 once perun-prompt-builder.ts exists.
-// export {
-//   PERUN_PLACEHOLDERS,
-//   buildDelegationTable,
-//   buildKeyTriggersSection,
-//   buildPerunPrompt,
-//   buildSpecialistsTable,
-//   buildUseAvoidSection,
-// } from "./perun-prompt-builder.js"
+export {
+  PERUN_PLACEHOLDERS,
+  buildDelegationTable,
+  buildKeyTriggersSection,
+  buildPerunPrompt,
+  buildSpecialistsTable,
+  buildUseAvoidSection,
+} from "./perun-prompt-builder.js"
 
 const registry: SpecialistInfo[] = []
 
