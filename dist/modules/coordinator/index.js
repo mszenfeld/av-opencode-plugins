@@ -18,6 +18,12 @@ import {
   pantheonConfigEmpty
 } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
+import {
+  buildPerunPrompt,
+  getAgentMetadataRegistry,
+  registerAgentMetadata
+} from "../agent-registry/index.js";
+import { fixAutoSpecialistInfo } from "../agent-registry/fix-auto.metadata.js";
 import { getDispatchExtensions } from "../_shared/dispatch-extensions.js";
 function loadAgentPrompt(name) {
   return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
@@ -25,13 +31,15 @@ function loadAgentPrompt(name) {
 let cachedPerunPrompt;
 function getPerunPrompt() {
   if (cachedPerunPrompt === void 0) {
-    cachedPerunPrompt = loadAgentPrompt("perun");
+    const template = loadAgentPrompt("perun");
+    cachedPerunPrompt = buildPerunPrompt(template, getAgentMetadataRegistry());
   }
   return cachedPerunPrompt;
 }
 const AppVerkCoordinatorPlugin = async (input) => {
   const { client } = input;
   let toastShown = false;
+  registerAgentMetadata(fixAutoSpecialistInfo);
   const dispatchParallelTool = tool({
     description: [
       "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",

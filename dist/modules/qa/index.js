@@ -3,6 +3,8 @@ import { buildQATesterAgent } from "./prompt-builder.js";
 import { loadPantheonConfig } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
 import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js";
+import { registerAgentMetadata } from "../agent-registry/index.js";
+import { zmoraSpecialistInfo } from "./zmora.metadata.js";
 import { BindingsStore } from "./bindings-store.js";
 import { QaRunState } from "./qa-run-state.js";
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js";
@@ -76,6 +78,7 @@ const AppVerkQAPlugin = async ({ client }) => {
       }
     }
   });
+  registerAgentMetadata(zmoraSpecialistInfo);
   const sweepTimer = setInterval(() => {
     try {
       store.sweepExpired(Date.now(), TTL_MS);
