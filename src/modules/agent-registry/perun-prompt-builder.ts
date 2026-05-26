@@ -80,6 +80,9 @@ export function buildPerunPrompt(
   out = out.replace(/\{USE_AVOID:([A-Za-z0-9_-]+)\}/g, (_match, name: string) =>
     buildUseAvoidSection(name, registry),
   )
+  // Collapse blank-line runs left when a section renders to "" (e.g. an empty
+  // KEY_TRIGGERS/DELEGATION_TABLE in 1A) so placeholder removal never leaves a
+  // 3+ newline gap. Safe: the template authors no triple-newline runs itself.
   out = out.replace(/\n{3,}/g, "\n\n")
   return out
 }
