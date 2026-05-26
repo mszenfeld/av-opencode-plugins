@@ -8,17 +8,55 @@
 
 Pantheon (the Perun harness in `av-opencode-plugins`) is heavily modeled on
 [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (omo). This spec
-ports one omo pattern into Pantheon: **the orchestrator's prompt is partly generated
+ports one omo idea into Pantheon: **the orchestrator's prompt is partly generated
 from per-subagent metadata.**
 
 In omo, `src/agents/dynamic-agent-prompt-builder.ts` + `dynamic-agent-core-sections.ts`
-build Sisyphus/Atlas prompt sections (Key Triggers, Tool/Agent Selection, Delegation
-Table, Use/Avoid) from each subagent's `AgentPromptMetadata`. Adding a subagent never
-requires editing the orchestrator prompt — the renderer reads metadata.
+build Sisyphus/Atlas prompt sections (Key Triggers, Tool & Agent Selection, Delegation
+Table, and per-agent use/avoid guidance) from each subagent's `AgentPromptMetadata`
+(defined in omo `src/agents/types.ts`). Adding a subagent never requires editing the
+orchestrator prompt — the renderer reads metadata.
 
-Pantheon today has a single static `src/agents/perun.md` loaded verbatim via
-`getPerunPrompt()` in `src/modules/coordinator/index.ts`. There is exactly one
-specialist (`zmora`, with internal variants `zmora-fe`/`zmora-be`) plus `fix-auto`.
+We port the *idea*, not omo's file layout. Notable differences confirmed against omo:
+
+- omo's `AgentPromptMetadata` fields (`category`/`cost`/`keyTrigger`/`useWhen`/
+  `avoidWhen`/`triggers`/`promptAlias`, plus `dedicatedSection` which we omit) and its
+  enums (`AgentCategory` = exploration/specialist/advisor/utility, `AgentCost` =
+  FREE/CHEAP/EXPENSIVE, `DelegationTrigger` = `{domain, trigger}`) are reused as-is.
+- `SpecialistInfo` is **our own** wrapper type, not an omo type. omo carries `mode` on
+  its agent factory (`AgentMode`) and its summary struct is just `{name, description}`.
+  We bundle `{name, mode, description, metadata}` because, in Pantheon, name/mode/
+  description are known at the point an agent is registered (see Architecture).
+- omo's "Use/Avoid" is **not** a single named section — it is rendered inline per agent
+  from `useWhen`/`avoidWhen`. We follow that: a per-agent block, not a global section.
+- The exact omo heading is **"Tool & Agent Selection"** (ampersand), not "Tool/Agent".
+
+### Pantheon's current reality (what the renderer must fit)
+
+- `src/agents/` contains **only `perun.md`** (`mode: primary`). There is no per-subagent
+  `.md` file there. The renderer must NOT assume a `src/agents/<agent>.md` per subagent.
+- **Zmora** has no static `.md`: its prompt is built dynamically by `buildQATesterAgent()`
+  (`src/modules/qa/prompt-builder.ts`) and registered as **three** physical variants —
+  `zmora-fe`, `zmora-be`, `zmora-setup` (`VARIANTS` in `src/modules/qa/index.ts`). Perun's
+  specialist table shows **one logical** `zmora` row.
+- **`fix-auto`** lives in a **separate build unit**: `packages/code-review/`
+  (`packages/code-review/src/index.ts` registers it; prompt at `agents/fix-auto.md`
+  inside that package). It is consumed by `src/` only via its built `dist/`.
+
+Perun's prompt today is a single static `src/agents/perun.md`, loaded via
+`getPerunPrompt()` in `src/modules/coordinator/index.ts` (compute-once latch
+`cachedPerunPrompt`, wired through a `get prompt()` getter on
+`config.agent["Perun - Coordinator"]`). The "Available Specialists" table (`zmora`,
+`fix-auto`) is hand-written prose.
+
+### Architectural constraint — plugins→harness migration (recurring)
+
+Pantheon is mid-migration from an old plugin-based architecture to a full harness. As a
+legacy artifact, `packages/*` are independent build units: **dependency direction is
+strictly `src/ → packages/` (via `dist/`); packages CANNOT import from `src/`** (verified:
+no package→src imports, no tsconfig path mappings, no shared-types package). This boundary
+shapes the design below (it is why `fix-auto` cannot use the same registration bridge as
+`zmora`) and will recur for every cross-cutting concern until packages are migrated in.
 
 This spec is the **first of three** in a sequence whose end goal is an exploration
 agent ("Triglav") for Perun. The renderer is a prerequisite extracted so it can be
@@ -32,67 +70,96 @@ built, reviewed, and shipped independently of the agent itself.
 
 Introduce metadata-driven rendering of Perun's prompt so that:
 
-1. Each subagent declares `AgentPromptMetadata` in a `*.metadata.ts` file next to its
-   `*.md` prompt.
+1. Each subagent's routing/delegation metadata (`AgentPromptMetadata`) is declared once,
+   next to where that agent is registered, and contributed to a shared registry.
 2. A pure renderer composes Perun's prompt from a template (`perun.md` with
    placeholders) + the agent registry.
-3. Adding a future specialist (Triglav, Librarian, Oracle, …) requires only a new
-   `*.metadata.ts` + a placeholder — no manual edits to Perun's prose.
+3. Adding a future specialist (Triglav, Librarian, Oracle, …) requires only registering
+   its metadata + a placeholder — no manual edits to Perun's prose.
 
-Zmora is refactored into this system as part of this spec, so the infrastructure has
-a real client and is not built speculatively for a single future consumer.
+Zmora **and** fix-auto are refactored into this system as part of this spec, so the
+infrastructure has real clients (and the two existing specialist-table rows are
+preserved with no regression) rather than being built speculatively.
 
 ## Non-goals
 
 - The Triglav agent itself (Spec 1B).
 - Background / non-blocking dispatch (Spec 2).
-- Per-model prompt variants (omo has opus-4-7.md / gpt.md / gemini.md / kimi.md via
-  `prompts-core`; Pantheon keeps one universal template — possible future spec).
+- Per-model prompt variants (omo has default.md / opus-4-7.md / gpt.md / gemini.md /
+  kimi.md via `prompts-core`; Pantheon keeps one universal template — possible future spec).
 - `<agent-identity>` override section (omo needs it for `mode: primary` identity;
   Perun's identity already comes from its frontmatter).
-- Any change to QA tools, `dispatch_parallel`, skills under `packages/`, or the
-  installer.
+- Migrating `packages/*` into the harness, or letting `code-review` own its own metadata
+  via a shared types package (a future migration step — see fix-auto handling below).
+- Any change to QA tools, `dispatch_parallel`, skills under `packages/`, or the installer.
 
 ## Architecture
 
-The renderer is a standalone module. Dependency direction is one-way:
-`coordinator` → `agent-registry`. The coordinator calls the builder when assembling
-Perun's prompt; the registry never depends on the coordinator.
+Metadata is **pushed** into a shared registry by whoever registers the agent — it is not
+pulled by scanning files. This mirrors the existing `registerDispatchExtensions` bridge
+(`src/modules/_shared/dispatch-extensions.ts`, ARCH-002), which already lets the QA module
+feed data to the coordinator's `dispatch_parallel` **without** a `coordinator → qa` layer
+inversion. We reuse that proven direction for metadata. Dependency direction stays one-way:
+`coordinator` → `agent-registry`; modules → `agent-registry`; the registry depends on
+nobody.
 
 ```
-BUILD-TIME (static):
-  src/agents/zmora.metadata.ts   ─┐
-  src/agents/triglav.metadata.ts ─┤  (added in 1B)
-  …                              ─┘
-            │  (static import)
-            ▼
-  src/modules/agent-registry/index.ts
-     loadAgentRegistry() → SpecialistInfo[]      (deterministic order, no IO)
+FACTORY TIME (src/index.ts runs all plugin factories via Promise.all,
+              BEFORE any config hook fires):
 
-RUNTIME (once, at plugin start / config hook):
-  coordinator/index.ts :: getPerunPrompt()
-     1. template = loadModuleAsset("…/agents/perun.md")   // raw, with placeholders
-     2. registry = loadAgentRegistry()
-     3. prompt   = buildPerunPrompt(template, registry)   // substitutes {SPECIALISTS_TABLE} etc.
-     4. cache := prompt                                    // cached once (static inputs)
+  src/modules/qa/index.ts  (factory body)
+     registerAgentMetadata(zmoraSpecialistInfo)        ─┐
+  src/modules/agent-registry/index.ts                   │  push into
+     registerAgentMetadata(fixAutoSpecialistInfo)       │  shared registry
+       (explicit src-side entry — fix-auto lives in a   │  (module-level
+        package and cannot import this bridge)         ─┘   singleton)
             │
             ▼
-  config hook: config.agent["Perun - Coordinator"].prompt = getPerunPrompt()
+  agent-registry singleton: SpecialistInfo[]  (insertion-tracked,
+                                               getter returns name-sorted copy)
+
+RUNTIME (lazy, first time OpenCode reads Perun's prompt — registry already full):
+
+  coordinator/index.ts :: getPerunPrompt()              (compute-once latch stays)
+     1. template = loadModuleAsset(".../agents/perun.md")  // raw, with placeholders (one IO read)
+     2. registry = getAgentMetadataRegistry()              // pure read of the singleton
+     3. prompt   = buildPerunPrompt(template, registry)    // PURE: substitutes {SPECIALISTS_TABLE} etc.
+     4. cachedPerunPrompt := prompt
+            │
+            ▼
+  config hook: config.agent["Perun - Coordinator"] = { get prompt() { return getPerunPrompt() }, … }
             │
             ▼
   OpenCode loads Perun with the fully-rendered prompt
 ```
 
+**Timing guarantee.** `src/index.ts` awaits all plugin factories (`Promise.all`) before
+any `config` hook runs, and the coordinator's `get prompt()` is evaluated lazily by
+OpenCode after config assembly. So every module's `registerAgentMetadata(...)` (called in
+its factory body, exactly like `registerDispatchExtensions`) has executed before
+`getPerunPrompt()` reads the registry. No ordering fragility.
+
 Key properties:
 
-- **One-way data flow** — metadata (build-time, static) → registry → builder → prompt → opencode.
-- **No runtime IO in rendering** — `loadAgentRegistry()` is static TS imports, not a
-  directory scan. The only IO is `loadModuleAsset` for the template (already the case today).
-- **`buildPerunPrompt` is a pure function** `(template, registry) → string` — deterministic,
-  testable in isolation, no opencode SDK dependency.
-- **Cache** — inputs are static within the process, so the current
-  `cachedPerunPrompt` (compute-once) pattern stays; it now caches the rendered result
-  instead of the raw file.
+- **One-way data flow** — modules push metadata → registry → builder → prompt → opencode.
+  No `coordinator → qa` / `agent-registry → src/agents` inversion.
+- **`buildPerunPrompt(template, registry)` is a pure function** `(string, SpecialistInfo[]) → string`
+  — deterministic, no IO, no opencode SDK dependency, fully testable in isolation.
+- **The one IO read stays in `getPerunPrompt()`** — `loadModuleAsset(perun.md)`, exactly as
+  today. The purity claim is scoped to the builder, not to `getPerunPrompt()`.
+- **Cache** — registry and template are static within the process, so the existing
+  `cachedPerunPrompt` compute-once latch is retained; it now caches the rendered result.
+
+### fix-auto: explicit src-side entry (chosen for 1A)
+
+Because `fix-auto` lives in `packages/code-review` and packages cannot import the
+`registerAgentMetadata` bridge from `src/` (migration constraint above), 1A keeps a small
+explicit `SpecialistInfo` for `fix-auto` in `src/modules/agent-registry/fix-auto.metadata.ts`
+and registers it from the agent-registry module itself. This is a localized exception to
+the "module owns its metadata" rule, justified by the build boundary. It preserves the
+fix-auto row with zero drift risk in practice (fix-auto's identity changes rarely). A
+future migration step (out of scope) can let `code-review` own its metadata once a shared
+types package exists or the package is absorbed into the harness.
 
 ### Section headers live in the builder, not the template
 
@@ -107,22 +174,23 @@ a static `### Key Triggers` heading above a placeholder.
 
 | File | Responsibility |
 |---|---|
-| `agent-metadata.ts` | Types: `AgentPromptMetadata` (`category`/`cost`/`keyTrigger`/`useWhen`/`avoidWhen`/`triggers`/`promptAlias`), `AgentCategory` (`exploration`/`specialist`/`advisor`/`utility`), `AgentCost` (`FREE`/`CHEAP`/`EXPENSIVE`), `DelegationTrigger` (`{domain, trigger}`), `SpecialistInfo` (`{name, mode, description, metadata}`). 1:1 with omo `src/agents/types.ts` minus the model guards. |
-| `index.ts` | `loadAgentRegistry(): SpecialistInfo[]` — collects static metadata of all subagents via static imports of `*.metadata.ts`. No dynamic file scan. Re-exports types. |
-| `perun-prompt-builder.ts` | The full renderer. Five functions, each returns a markdown string or `""`: `buildSpecialistsTable`, `buildKeyTriggersSection`, `buildUseAvoidSection(agentName)`, `buildDelegationTable`, `buildPerunPrompt(template, registry)`. |
+| `agent-metadata.ts` | Types: `AgentPromptMetadata` (`category`/`cost`/`keyTrigger`/`useWhen`/`avoidWhen`/`triggers`/`promptAlias`), `AgentCategory` (`exploration`/`specialist`/`advisor`/`utility`), `AgentCost` (`FREE`/`CHEAP`/`EXPENSIVE`), `DelegationTrigger` (`{domain, trigger}`), and our wrapper `SpecialistInfo` (`{name, mode, description, metadata}`). Reuses omo `src/agents/types.ts` field/enum names; `SpecialistInfo` is Pantheon-specific. |
+| `index.ts` | The registry. `registerAgentMetadata(info: SpecialistInfo): void` (push; throws `Error("Duplicate agent metadata: <name>")` on duplicate logical name — mirrors the `mergeTools` duplicate-tool throw in `src/index.ts`). `getAgentMetadataRegistry(): SpecialistInfo[]` (returns a name-sorted copy for deterministic order). **Name chosen to avoid collision** with the existing async `loadAgentRegistry()` in `coordinator/sdk-specialist.ts` (live SDK registry — a different concern). Registers the `fix-auto` entry on load. Re-exports types. |
+| `perun-prompt-builder.ts` | The renderer. Five pure functions, each returns a markdown string or `""`: `buildSpecialistsTable`, `buildKeyTriggersSection`, `buildUseAvoidSection(agentName)`, `buildDelegationTable`, `buildPerunPrompt(template, registry)`. |
+| `fix-auto.metadata.ts` | Explicit src-side `SpecialistInfo` for `fix-auto` (`name: "fix-auto"`, `mode: "subagent"`, description from the current perun.md row, `category: "utility"`, `triggers: [{domain: "Code fixes", trigger: "Auto-fix issues from a report after a QA run"}]`). See "fix-auto: explicit src-side entry" above. |
 
-### New per-agent metadata
+### Module-contributed metadata
 
-| File | Responsibility |
+| Location | Change |
 |---|---|
-| `src/agents/zmora.metadata.ts` | Exports `zmoraMetadata: AgentPromptMetadata`. Logical name `zmora` (the `zmora-fe`/`zmora-be` variants are an implementation detail; metadata has one entry). `category: "specialist"`, no `keyTrigger` (Zmora is dispatched from a parsed QA plan, not phase-0 routing), `triggers: [{domain: "QA execution", trigger: "Execute FE/BE scenarios from a parsed plan"}]`. No `useWhen`/`avoidWhen` — Zmora is not a peer "fire-liberally" tool, so those sections stay empty for it. |
+| `src/modules/qa/index.ts` | In the factory body (next to the existing `registerDispatchExtensions(...)` call), `registerAgentMetadata(zmoraSpecialistInfo)` — **one logical `zmora` entry** despite the three physical `zmora-fe/be/setup` variants. `category: "specialist"`, no `keyTrigger` (Zmora is dispatched from a parsed QA plan, not phase-0 routing), `triggers: [{domain: "QA execution", trigger: "Execute FE/BE scenarios from a parsed plan"}]`. No `useWhen`/`avoidWhen` — Zmora is not a peer "fire-liberally" tool. `name`/`mode`/`description` taken from the same values the module already uses when registering the variants. |
 
 ### Refactored files
 
 | File | Change |
 |---|---|
-| `src/modules/coordinator/index.ts` | `getPerunPrompt()` loads `perun.md` as a template, calls `buildPerunPrompt(template, loadAgentRegistry())`, returns the rendered prompt. Cache key is effectively static (template + registry both static in-process), so the compute-once latch stays. Import direction: coordinator → agent-registry. |
-| `src/agents/perun.md` | Introduce omo-style single-curly placeholders (regex-friendly): `{SPECIALISTS_TABLE}`, `{KEY_TRIGGERS}`, `{DELEGATION_TABLE}`, and per-agent `{USE_AVOID:<agent-name>}` (e.g. `{USE_AVOID:triglav}` lands in 1B). In 1A only `{SPECIALISTS_TABLE}` has content; the rest render to `""` until an agent supplies the data. |
+| `src/modules/coordinator/index.ts` | `getPerunPrompt()` loads `perun.md` as a template, calls `buildPerunPrompt(template, getAgentMetadataRegistry())`, returns the rendered prompt. The compute-once latch (`cachedPerunPrompt`) and the `get prompt()` getter stay. New import: coordinator → agent-registry. Does NOT touch the existing async `loadAgentRegistry` re-export. |
+| `src/agents/perun.md` | Introduce omo-style single-curly placeholders (regex-friendly): `{SPECIALISTS_TABLE}`, `{KEY_TRIGGERS}`, `{DELEGATION_TABLE}`, and per-agent `{USE_AVOID:<agent-name>}` (e.g. `{USE_AVOID:triglav}` lands in 1B). In 1A only `{SPECIALISTS_TABLE}` has content (rendering both `zmora` and `fix-auto` rows); the rest render to `""` until an agent supplies the data. The current hand-written specialist table is removed in favor of `{SPECIALISTS_TABLE}`. |
 
 ## Error handling
 
@@ -132,49 +200,59 @@ internal code (compile-time TS where it suffices).
 
 | Situation | Behavior | Caught by |
 |---|---|---|
-| Malformed metadata shape | No runtime validation — `AgentPromptMetadata` is a TS type, errors are compile-time. No Zod/schema validator. | `tsc` / build |
-| Duplicate agent name in registry | `loadAgentRegistry()` throws `Error("Duplicate agent metadata: <name>")` — fail-fast at startup (mirrors `mergeTools` duplicate-tool throw in `index.ts`). | Runtime startup + unit test |
+| Malformed metadata shape | No runtime validation — `AgentPromptMetadata`/`SpecialistInfo` are TS types, errors are compile-time. No Zod/schema validator. | `tsc` / build |
+| Duplicate logical agent name | `registerAgentMetadata()` throws `Error("Duplicate agent metadata: <name>")` — fail-fast at factory time (mirrors `mergeTools` duplicate-tool throw in `src/index.ts`). | Runtime startup + unit test |
 | Missing placeholder in `perun.md` | Section simply not injected (builder has nowhere to put it). Dev-error, caught by test, not runtime. | `perun-prompt-integration.test.ts` |
-| Unknown placeholder in `perun.md` (typo) | Builder substitutes only known placeholders; unknown stays literally in the prompt. | Test guard: rendered prompt contains no `/\{[A-Z_][A-Z0-9_:-]*\}/` |
+| Unknown placeholder in `perun.md` (typo) | Builder substitutes only known placeholders; unknown stays literally in the prompt. | Test guard: rendered prompt contains no `/\{[A-Z_][A-Za-z0-9_:-]*\}/` (note: char class includes `a-z` so lowercase per-agent targets like `{USE_AVOID:triglav}` are caught). |
+| `{USE_AVOID:<name>}` with empty / unknown agent target | Builder throws `Error("Unknown agent in placeholder: <name>")` for a target not in the registry; empty target is a compile-time-impossible / test-caught dev error. Mirrors the duplicate-name fail-fast. | Unit test |
 | Empty section (agent without `keyTrigger`, etc.) | Builder returns `""`, placeholder disappears with no heading. Intended. | Unit test |
 
-**Primary regression risk — Zmora.** Refactoring `getPerunPrompt()` touches code the
-production QA flow depends on. Mitigation:
+**Primary regression risk — Zmora + fix-auto.** Refactoring `getPerunPrompt()` touches code
+the production QA flow depends on, and replaces the hand-written specialist table.
+Mitigation:
 
-- **Before/after snapshot** of `getPerunPrompt()` output. After the refactor (with
-  `{SPECIALISTS_TABLE}` rendered from Zmora's metadata), the specialist content
-  (zmora/fix-auto, mode, purpose) must match; intentional formatting deltas are
-  reviewed.
-- No new untrusted-input surface → we do NOT add `neutralizeUntrustedOutput` here
-  (that primitive is for specialist output in dispatch, not for our static metadata).
+- **Committed fixture, captured now.** Snapshot the current `getPerunPrompt()` output to a
+  committed fixture file **before** the refactor. After the refactor (with
+  `{SPECIALISTS_TABLE}` rendered from the `zmora` + `fix-auto` metadata), the parsed
+  specialist rows (name, mode, purpose) must equal the rows parsed from the fixture — both
+  rows present, no dropped `fix-auto`. Intentional formatting deltas are reviewed.
+- No new untrusted-input surface → we do NOT add `neutralizeUntrustedOutput` here (that
+  primitive is for specialist output in dispatch, not for our static metadata).
 
 ## Testing
 
 TDD: the renderer is a set of pure functions, so tests are written first.
 
 1. **Unit — `tests/modules/agent-registry/perun-prompt-builder.test.ts`** (core, written first):
-   - `buildSpecialistsTable`: 0 agents → `""`; 1 → one row; N → deterministic order.
+   - `buildSpecialistsTable`: 0 agents → `""`; 1 → one row; N → name-sorted deterministic order.
    - `buildKeyTriggersSection`: agent with `keyTrigger` → bullet; without → skipped;
      all without → `""` (no orphaned heading).
    - `buildUseAvoidSection("zmora")`: Zmora without `useWhen`/`avoidWhen` → `""`.
    - `buildDelegationTable`: expands `triggers[]` into `Domain → agent` rows.
-   - `buildPerunPrompt`: substitutes known placeholders; unknown placeholder stays literal.
-2. **Registry — `tests/modules/agent-registry/agent-registry.test.ts`**: collects
-   registered agents; duplicate name throws; stable order.
+   - `buildPerunPrompt`: substitutes known placeholders; unknown placeholder stays literal;
+     `{USE_AVOID:<unknown>}` throws; lowercase-named placeholder (`{USE_AVOID:triglav}` with a
+     synthetic registered `triglav`) is substituted (regression for the regex char-class fix).
+2. **Registry — `tests/modules/agent-registry/agent-registry.test.ts`**: `registerAgentMetadata`
+   adds; duplicate logical name throws; `getAgentMetadataRegistry()` returns a name-sorted copy.
+   Determinism asserted against **≥2 entries** (real set already has `zmora` + `fix-auto`, so this
+   is meaningful, not a tautology).
 3. **Integration — `tests/modules/agent-registry/perun-prompt-integration.test.ts`**:
    - Snapshot (or fragment assertions) of the full rendered Perun prompt for the current
-     registry (Zmora).
-   - Placeholder guard: no unsubstituted `{...}` remains.
+     registry (`zmora` + `fix-auto`).
+   - Placeholder guard: no unsubstituted `{...}` remains (using the `a-z`-inclusive regex).
    - Every placeholder declared in the builder actually appears in `perun.md` (template↔code sync).
-4. **Anti-drift — `tests/agents/metadata-coverage.test.ts`**: every `src/agents/*.md`
-   with `mode: subagent` has a paired `*.metadata.ts`; exceptions on an explicit
-   allow-list (`perun`; `triglav` until 1B lands).
-5. **Anti-regression Zmora**: baseline snapshot of `getPerunPrompt()` before the
-   refactor; after, specialist content must match.
+4. **Anti-drift — `tests/modules/agent-registry/metadata-coverage.test.ts`**: every agent
+   registered into OpenCode config with `mode: subagent` (the `zmora-*` variants → logical
+   `zmora`; `fix-auto`) is covered by a `SpecialistInfo` in the registry. Exceptions on an
+   explicit allow-list (`triglav` until 1B lands). Note: this checks *registered agents*, not
+   `src/agents/*.md` files (there are none for subagents).
+5. **Anti-regression Zmora + fix-auto**: the committed before-refactor fixture (above); after,
+   parsed specialist rows must match — both `zmora` and `fix-auto` rows present.
 
 **Coverage:** pure functions → realistically ~100% on `perun-prompt-builder.ts`; hold to
-the repo's existing threshold (developer skills cite 80%+). Conventions (vitest,
-`tests/…` layout) follow the existing repo setup — no new test framework.
+the repo's existing convention (developer skills cite 80%+; note `vitest.config.ts` does
+not enforce a hard gate today). Conventions (vitest, `tests/…` layout) follow the existing
+repo setup — no new test framework.
 
 **Not tested:** the opencode SDK config hook (framework integration); model routing
 (out of scope).
@@ -186,21 +264,25 @@ existing code with no separate change.
 
 ### Spec 1B — Triglav (explorer)
 - `src/agents/triglav.md` (prompt: `<analysis>` intent + `<results>`/`<files>`/`<answer>`/`<next_steps>`,
-  absolute paths, read-only, fire 3+ tools in parallel — omo Explore pattern).
-- `src/agents/triglav.metadata.ts` (`category: "exploration"`, `cost: "FREE"`,
-  `keyTrigger`, `useWhen`/`avoidWhen`).
+  absolute paths, read-only, "launch 3+ tools simultaneously" — omo Explore pattern, confirmed in
+  omo `src/agents/explore.ts`).
+- `triglav` metadata registered via `registerAgentMetadata` (`category: "exploration"`,
+  `cost: "FREE"`, `keyTrigger`, `useWhen`/`avoidWhen`).
 - Hard dependency on serena MCP: `allowed-tools` with `serena_*`, guard in the `config`
   hook, installer registers serena MCP.
 - **Blocking** dispatch (like Zmora, via `dispatch_parallel`).
-- Consumes the 1A builders — does NOT touch `perun-prompt-builder.ts`, only adds metadata
-  and a `{USE_AVOID:triglav}` placeholder.
+- Consumes the 1A builders — does NOT touch `perun-prompt-builder.ts`, only registers metadata
+  and adds a `{USE_AVOID:triglav}` placeholder (the first real consumer of the per-agent
+  use/avoid path and the lowercase-target regex fix).
 - To be settled in the 1B brainstorm: exact output format, `useWhen`/`avoidWhen` wording,
   whether QA / code-review workflow gets a "pre-explore" step.
 
 ### Spec 2 — Background dispatch
-- `dispatch_background` / `poll_background` / `wait_background` tools, task state persisted
-  in `.pantheon/background-tasks.json` (analog to omo `.opencode/background-tasks.json`),
-  updated via the `event` hook.
+- `dispatch_background` / `poll_background` / `wait_background` tools. **Note:** in omo the
+  live task state is held **in-memory** in a `TaskStateManager` (Maps), not file-backed; the
+  committed `.opencode/background-tasks.json` is a fixture/snapshot, not a hook-written store.
+  Pantheon's Spec 2 should decide its own persistence strategy (in-memory vs file) explicitly
+  rather than assuming omo persists to that path.
 - Perun prompt section: "when to fire in background vs blocking".
 - Triglav becomes the first client of background mode (switch from blocking).
 
