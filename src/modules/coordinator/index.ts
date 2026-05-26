@@ -18,6 +18,12 @@ import {
   pantheonConfigEmpty,
 } from "../pantheon-config/index.js"
 import { loadModuleAsset } from "../_shared/load-asset.js"
+import {
+  buildPerunPrompt,
+  getAgentMetadataRegistry,
+  registerAgentMetadata,
+} from "../agent-registry/index.js"
+import { fixAutoSpecialistInfo } from "../agent-registry/fix-auto.metadata.js"
 import { getDispatchExtensions } from "../_shared/dispatch-extensions.js"
 
 // Re-export the SDK adapter surface for backward compatibility with existing
@@ -33,7 +39,8 @@ function loadAgentPrompt(name: string): string {
 let cachedPerunPrompt: string | undefined
 function getPerunPrompt(): string {
   if (cachedPerunPrompt === undefined) {
-    cachedPerunPrompt = loadAgentPrompt("perun")
+    const template = loadAgentPrompt("perun")
+    cachedPerunPrompt = buildPerunPrompt(template, getAgentMetadataRegistry())
   }
   return cachedPerunPrompt
 }
@@ -41,6 +48,11 @@ function getPerunPrompt(): string {
 export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
   const { client } = input
   let toastShown = false
+
+  // fix-auto lives in packages/code-review (a separate build unit that cannot
+  // import this bridge); register its metadata here so Perun's specialist table
+  // keeps its row. Explicit src-side entry — see the renderer spec.
+  registerAgentMetadata(fixAutoSpecialistInfo)
 
   const dispatchParallelTool = tool({
     description:

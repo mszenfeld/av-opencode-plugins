@@ -3,6 +3,8 @@ import { buildQATesterAgent } from "./prompt-builder.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
 import { loadModuleAsset } from "../_shared/load-asset.js"
 import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js"
+import { registerAgentMetadata } from "../agent-registry/index.js"
+import { zmoraSpecialistInfo } from "./zmora.metadata.js"
 import { BindingsStore } from "./bindings-store.js"
 import { QaRunState } from "./qa-run-state.js"
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js"
@@ -121,6 +123,10 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }
     },
   })
+
+  // Contribute zmora's metadata to the agent registry so Perun's prompt renders
+  // its specialist row. One logical entry for all three zmora-* variants.
+  registerAgentMetadata(zmoraSpecialistInfo)
 
   // Periodic TTL sweep: purges binding entries older than TTL_MS. Skips pinned
   // entries (active snapshots). Wrapped in try/catch — a background timer must
