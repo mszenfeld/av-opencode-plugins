@@ -80,5 +80,6 @@ export function buildPerunPrompt(
   out = out.replace(/\{USE_AVOID:([A-Za-z0-9_-]+)\}/g, (_match, name: string) =>
     buildUseAvoidSection(name, registry),
   )
+  out = out.replace(/\n{3,}/g, "\n\n")
   return out
 }

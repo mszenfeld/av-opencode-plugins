@@ -159,4 +159,13 @@ describe("buildPerunPrompt", () => {
     ])
     expect(out).toBe("abc")
   })
+
+  it("collapses blank-line runs left by empty sections", () => {
+    const out = buildPerunPrompt("A\n\n{KEY_TRIGGERS}\n\n{DELEGATION_TABLE}\n\nB", [
+      info({ name: "zmora" }),
+    ])
+    expect(out).not.toMatch(/\n{3,}/)
+    expect(out).toContain("A")
+    expect(out).toContain("B")
+  })
 })
