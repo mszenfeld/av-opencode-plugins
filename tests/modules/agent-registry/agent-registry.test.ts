@@ -27,11 +27,21 @@ describe("agent metadata registry", () => {
     expect(getAgentMetadataRegistry().map((a) => a.name)).toEqual(["zmora"])
   })
 
-  it("throws on duplicate logical name", () => {
+  it("throws on a CONFLICTING duplicate logical name (same name, different metadata)", () => {
     registerAgentMetadata(info("zmora"))
-    expect(() => registerAgentMetadata(info("zmora"))).toThrow(
+    const conflicting: SpecialistInfo = {
+      ...info("zmora"),
+      description: "a different description",
+    }
+    expect(() => registerAgentMetadata(conflicting)).toThrow(
       /Duplicate agent metadata: zmora/,
     )
+  })
+
+  it("is a no-op when re-registering identical metadata (factory re-construction)", () => {
+    registerAgentMetadata(info("zmora"))
+    expect(() => registerAgentMetadata(info("zmora"))).not.toThrow()
+    expect(getAgentMetadataRegistry().map((a) => a.name)).toEqual(["zmora"])
   })
 
   it("returns a name-sorted copy", () => {
