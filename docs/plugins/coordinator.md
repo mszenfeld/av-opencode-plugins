@@ -28,7 +28,7 @@ The root plugin bundle (`av-opencode-plugins`) includes this package automatical
 2. Extract every `### FE-XX:` / `### BE-XX:` block into a flat scenario list (preserving source order).
 3. Sanitize every scenario step against the security rules in its prompt; route by prefix (`FE-` → `zmora-fe`, `BE-` → `zmora-be`).
 4. Parse `**Depends-on:**` annotations, validate the dependency graph (no cycles, no self-refs, no dangling refs), and compute dispatch waves via topological sort.
-5. Dispatch each wave sequentially via `dispatch_parallel` — one task per scenario, label rendered as `zmora ×N` (logical-name exception). The 4-worker pool inside `dispatch_parallel` runs at most 4 scenarios concurrently within a wave.
+5. Dispatch each wave sequentially via `dispatch_parallel` — one task per scenario, label rendered as `zmora ×N` (logical-name exception). The tool is hard-capped at 4 tasks per call (matching the 4-worker pool), so waves with >4 scenarios are chunked into multiple sequential `dispatch_parallel` calls of ≤4 tasks each.
 6. Parse specialist responses (JSON-first, markdown fallback). Normalise variant suffixes (`zmora-{fe,be}` → `zmora`) in every user-facing string before display.
 7. Assign deterministic `QA-NNN` IDs via `assign_issue_ids`.
 8. Sort findings by severity and `Write` the report to `docs/testing/reports/<date>-<topic>-report.md`.
@@ -79,7 +79,7 @@ The coordinator implements two workflows, both encoded in `src/agents/perun.md`.
 5. **Build the dependency graph and validate.** Parse each scenario's `**Depends-on:**` field (default: empty). Hard-fail on self-references (`BE-02 **Depends-on:** BE-02`), cycles (Kahn's algorithm — any node unprocessed after the algorithm finishes is on a cycle), or references to non-existent / sanitisation-dropped scenarios. On any violation, abort the run with a clear error pointing at the offending scenario(s); do not call `dispatch_parallel`.
 6. **Compute dispatch waves via topological sort.** Wave 0 = scenarios with no dependencies. Wave N+1 = scenarios whose every dependency was in some earlier wave. When no scenario declares `**Depends-on:**` (the common case, including all existing plans), every scenario lands in Wave 0 — the single-wave fast path.
 7. **Ensure output dir** — `mkdir -p docs/testing/reports`.
-8. **Dispatch each wave sequentially.** For each wave in order: build `tasks[]` (one task per scenario, with `name: "zmora-fe"` or `name: "zmora-be"` per the routing in step 4), call `dispatch_parallel({ agent: "zmora ×N", summary, tasks })`, wait for the wave to complete, accumulate results. The 4-worker pool inside `dispatch_parallel` runs at most 4 scenarios concurrently within a wave. Predecessor failure does not block dependents — failure-as-diagnostic-signal beats silent skip cascades.
+8. **Dispatch each wave sequentially, chunking waves of >4 scenarios.** For each wave in order: build `tasks[]` (one task per scenario, with `name: "zmora-fe"` or `name: "zmora-be"` per the routing in step 4). If `tasks.length > 4`, chunk into batches of ≤4 preserving source order. For each chunk in order, call `dispatch_parallel({ agent: "zmora ×N", summary, tasks: chunk })` where `N` is the chunk size, wait for the chunk to complete, accumulate results. Wait for all chunks of a wave to finish before starting the next wave. The 4-worker pool inside `dispatch_parallel` runs every task in a chunk in parallel — concurrency equals chunk size. Predecessor failure does not block dependents — failure-as-diagnostic-signal beats silent skip cascades.
 9. **Parse responses** — JSON-first, markdown fallback. `status === "error"` or `"timeout"` → mark that scenario `SKIP`. `status === "aborted"` (a never-started task in a Ctrl-C'd run) → mark `SKIP`. `[…truncated…]` → synthesize what is present, do not retry. Normalise `zmora-fe` / `zmora-be` → `zmora` in every user-facing string before display.
 10. **Concatenate findings** — in scenario-source order (the original markdown order, NOT the wave-dispatch order).
 11. **Assign IDs** — `assign_issue_ids({ findings, prefix: "QA" })` → `QA-001`, `QA-002`, …
@@ -110,42 +110,59 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 | Element | Type | Mode | Purpose |
 |---|---|---|---|
 | `@perun` | Agent | `primary` | Coordinator — delegates, synthesizes, proposes next steps. System prompt at `src/agents/perun.md`. |
-| `dispatch_parallel` | Tool | n/a | Parallel session dispatch with a 4-wide worker pool. 1 s poll interval, 5 min per-task timeout, 100 KB result cap, max 50 tasks per call. |
+| `dispatch_parallel` | Tool | n/a | Parallel session dispatch with a 4-wide worker pool. 1 s poll interval, 5 min per-task timeout, 100 KB result cap, **max 4 tasks per call** (caller chunks for larger workloads). |
 | `assign_issue_ids` | Tool | n/a | Pure function — deterministic, zero-padded 3-digit IDs (e.g. `QA-001`). |
+| `compute_waves` | Tool | n/a | Pure function — deterministic dependency-graph → wave grouping via topological sort, with cycle detection. |
 
 ### `@perun` allowed tools
 
 `@perun` is intentionally locked down. Its `allowed-tools` frontmatter lists only:
 
 - `Read`, `Write`, `Edit`, `Glob`, `Grep`
-- `Bash(mkdir:*)`, `Bash(ls:*)` — no general `Bash(*)`, no `git`
+- `Bash(mkdir:*)`, `Bash(ls:*)`, `Bash(./scripts/qa-preflight.sh:*)` — no general `Bash(*)`, no `git`
 - `todowrite`, `question`
-- `dispatch_parallel`, `assign_issue_ids`
+- `dispatch_parallel`, `assign_issue_ids`, `compute_waves`
+- `record_input`, `parse_plan` — Perun-only QA-plugin tools used by the bindings workflow (parsing the plan's `## Setup → **Bindings:**` block and capturing user-pasted inputs during the mid-run dialog). Neither tool is available to any zmora variant; the QA plugin gates them per-agent via `AgentConfig.tools`.
 
 The `Task` tool is **excluded** to force every specialist dispatch through `dispatch_parallel`. There is no fallback.
+
+#### Strict-orchestrator hard rule
+
+Perun is a strict orchestrator — it never executes scenario work in its own context. On every turn (initial dispatch, resume, preflight, mid-run dialog), Perun MUST NOT:
+
+- Read `.env`, `.envrc`, `.env.local`, or any dotfile via `Read` / `Bash(cat)` / `Bash(grep)` / any other path.
+- Invoke `Bash(curl:*)`, `Bash(psql:*)`, `Bash(supabase:*)`, `Bash(docker:*)`, `Bash(make:*)`, `Bash(uv:*)`, or any tool not in the `allowed-tools` frontmatter above.
+- Invoke MCP tools (e.g. `serena_*`, `playwright_browser_*`) — those are not in `allowed-tools` and the runtime gate rejects them.
+- Mint, derive, or capture credentials (JWTs, tokens, session cookies, API keys). Credential acquisition is the job of `execute_recipe` (invoked only by `zmora-setup`) or `record_input` (invoked by Perun when parsing user replies in the mid-run dialog).
+
+If Perun ever observes itself about to perform any of the above, that is a spec violation — it aborts the turn and surfaces the violation to the user. See `src/agents/perun.md` ("Hard rule — strict orchestrator") for the canonical statement; this section is a summary.
 
 ### Specialists `@perun` knows
 
 | Name | Mode | Purpose | When |
 |---|---|---|---|
 | `zmora` | subagent | Execute a single QA scenario (FE or BE). Implemented as two registered variants (`zmora-fe` for Playwright scenarios, `zmora-be` for HTTP + DB scenarios); Perun routes by scenario prefix and dispatches one task per scenario. The logical name `zmora` is what appears in the TUI and the report; variants are an internal implementation detail. See [docs/plugins/qa.md](./qa.md) for the variant-split rationale. | Dispatched once per scenario by Perun |
+| `zmora-setup` | subagent | Provision one Binding per dispatch via `execute_recipe` — the ONLY agent in the bundle with `execute_recipe` enabled. Has no Bash access at all (`SETUP_TOOLS = ["Read", "Glob", "Grep", "execute_recipe"]`); the recipe sandbox is its only actuator. Perun synthesises `SETUP-NN` scenarios for each declared binding in Workflow 1 Step 3.6 and dispatches them in Wave 0 ahead of any FE/BE scenarios that depend on the binding. See [docs/plugins/qa.md → Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning). | Dispatched once per binding by Perun before FE/BE scenarios |
 | `fix-auto` | subagent | Auto-fix code issues from reports | User accepts a fix proposal |
+
+Perun's prefix-routing is therefore **three-way**: `FE-*` → `zmora-fe`, `BE-*` → `zmora-be`, `SETUP-*` → `zmora-setup`. The variant-suffix normalisation rule still applies to user-facing strings: `zmora-fe` / `zmora-be` / `zmora-setup` collapse to `zmora` in the report, terminal output, and error messages (internal log/debug strings may retain variant names).
 
 #### Agent label — logical-name exception
 
 The standard `dispatch_parallel` convention is that the `agent` label reflects `tasks[].name` (bare for one task, `name ×N` for N copies, comma-joined for mixed names). **Logical agents implemented as multiple registered variants are an exception:** the `agent` label uses the logical name, not the variant names. This exception is mandatory, not stylistic — without it the variant suffix leaks into the TUI on every QA dispatch.
 
-Concrete rendering rules for QA dispatch (also encoded in `perun.md`):
+Concrete rendering rules for QA dispatch (also encoded in `perun.md`), where `N` is the per-call task count (chunk size, after Perun has split waves of >4 scenarios):
 
 - `N == 1` → bare `"zmora"`.
-- `2 ≤ N ≤ 10` (any mix of variants) → `"zmora ×N"`. Example: a wave with 4 FE + 3 BE renders as `"zmora ×7"`, never `"zmora-fe ×4, zmora-be ×3"`.
-- `N > 10` → bare `"zmora"` (multiplier dropped to avoid label clutter; `summary` carries the human-meaningful description).
+- `2 ≤ N ≤ 4` (any mix of variants) → `"zmora ×N"`. Example: a chunk with 3 FE + 1 BE renders as `"zmora ×4"`, never `"zmora-fe ×3, zmora-be"`.
+
+With the per-call cap of 4 enforced by `dispatch_parallel`, `×N` always reflects realised concurrency exactly — there is no longer a divergence between label and concurrent burst. Waves with >4 scenarios are chunked by Perun into multiple sequential calls; each call's label reflects its own chunk size.
 
 When adding a new logical agent with variants, document the variant mapping in the dispatching agent's prompt and apply the same exception to its label.
 
 #### Variant-suffix normalisation
 
-Perun normalises `zmora-fe` / `zmora-be` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
+Perun normalises `zmora-fe` / `zmora-be` / `zmora-setup` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
 
 ### `dispatch_parallel` runtime characteristics
 
@@ -155,7 +172,7 @@ Perun normalises `zmora-fe` / `zmora-be` → `zmora` in every user-facing string
 | Per-task timeout | 5 min (300 000 ms) | `DEFAULT_TASK_TIMEOUT_MS` |
 | Result max bytes | 100 KB (102 400 B) | `DEFAULT_RESULT_MAX_BYTES` |
 | Worker pool concurrency | 4 | `DISPATCH_CONCURRENCY` |
-| Max tasks per call | 50 | `DISPATCH_MAX_TASKS` (enforced pre-flight) |
+| Max tasks per call | 4 | `DISPATCH_MAX_TASKS` (enforced pre-flight; equals `DISPATCH_CONCURRENCY`) |
 | Result ordering | Same order as input `tasks[]` | guaranteed |
 
 Oversize results are truncated with a `\n[…truncated…]` marker. Specialist output passes through `neutralizeUntrustedOutput` (see Security model) before being handed back to `@perun`.
@@ -164,15 +181,19 @@ Oversize results are truncated with a `\n[…truncated…]` marker. Specialist o
 
 `dispatch_parallel` drains `tasks[]` through a pool of 4 worker promises. Each worker, in a loop, claims the next un-started task (single-threaded JS — `next++` between `await` points is race-free), runs it, writes the result into `results[index]`, then loops back for another task. The pool resolves when every worker exits because `next >= tasks.length`.
 
-- **Backwards-compatible at low N.** With `tasks.length ≤ 4` the pool starts all tasks immediately — observable behaviour is identical to the pre-pool implementation. Existing 1-2 task callers (`fix-auto` single-task, the old FE+BE dispatch) see no difference.
-- **New behaviour at high N.** With `tasks.length > 4`, only 4 tasks are in flight at any moment; the queue drains as workers free up. This is the per-scenario QA dispatch path — a 30-scenario plan no longer fans out into 30 concurrent child sessions; it streams through 4 workers.
+Because `DISPATCH_MAX_TASKS == DISPATCH_CONCURRENCY == 4`, the queue-drain mechanic only matters when a caller submits 1–3 tasks (which all start immediately); a full 4-task call starts all four in parallel and never queues. The worker pool is kept rather than replaced with a fan-out so the per-task error/timeout/abort accounting stays identical to the previous behaviour.
+
 - **Result ordering preserved.** Workers write into `results[i]` keyed by the task's original index, so the returned array always matches `tasks[]` order regardless of completion order.
+- **Chunking is the caller's job.** Larger workloads (e.g. a QA wave of 10 scenarios) are split by the caller into chunks of ≤4 tasks and dispatched as multiple sequential `dispatch_parallel` calls. The tool does not chunk internally — chunking at the caller lets the caller inspect results between chunks (the foundation for canary-style early-abort patterns).
 
 #### Cap overflow
 
-When `tasks.length > 50`, `dispatch_parallel` rejects the call **before spawning any child session** with the explicit error `"dispatch_parallel: tasks.length (N) exceeds DISPATCH_MAX_TASKS (50)"`. The cap exists to bound cumulative token spend (cost-DoS via a crafted plan) — the worker pool throttles wall-clock concurrency, the cap throttles total cost. 50 is sized so legitimate plans (typically ≤30 scenarios) fit with headroom while plans an order of magnitude larger fail closed.
+When `tasks.length > 4`, `dispatch_parallel` rejects the call **before spawning any child session** with the explicit error `"dispatch_parallel: tasks.length (N) exceeds DISPATCH_MAX_TASKS (4)"`. The cap exists for two reasons:
 
-For the per-scenario QA dispatch path, the cap applies **per wave**, not cumulatively across waves. Practically: a 60-scenario plan is fine as long as no single wave exceeds 50 tasks; if any wave would, Perun surfaces the wave-specific error to the user.
+1. **Truth-in-labeling.** The TUI label `×N` rendered by callers always equals the actual concurrent burst — there is no longer a divergence between "tasks dispatched" and "tasks running in parallel".
+2. **Per-call session-spawn ceiling.** A single `dispatch_parallel` call cannot fan out into more than 4 child sessions. For a 30-scenario QA plan, the caller still spawns 30 sessions total across the run, but in 8 sequential chunks of ≤4 — eliminating the "10 sessions all stuck in identical preflight" failure mode.
+
+For arbitrarily-large workloads, the caller chunks into multiple sequential calls. There is no per-run cap inside `dispatch_parallel` itself.
 
 #### Abort-at-start drain
 
@@ -193,12 +214,19 @@ The coordinator's security posture has two layers. Code-enforced rules cannot be
 | Code-enforced | Anti-recursion default-deny: `dispatch_parallel` rejects any task whose `name` resolves to a `mode: primary` agent. Unknown agents are rejected up front (pre-flight). | `src/modules/coordinator/dispatch.ts` |
 | Code-enforced | Per-task timeout (default 5 min) — long-running specialists are cut off, returned as `status: "timeout"`. | `src/modules/coordinator/dispatch.ts` + `src/modules/coordinator/poller.ts` (`PollerTimeoutError`) |
 | Code-enforced | Result truncation at 100 KB with `[…truncated…]` marker — bounds prompt re-injection surface. | `src/modules/coordinator/dispatch.ts` |
-| Code-enforced | Max 50 tasks per `dispatch_parallel` call; rejected pre-flight with explicit error. Bounds cost-DoS via crafted plans. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_MAX_TASKS`) |
+| Code-enforced | Max 4 tasks per `dispatch_parallel` call (matches worker pool size); rejected pre-flight with explicit error. Bounds per-call session-spawn count and keeps the `×N` label honest. Larger workloads are chunked into multiple sequential calls by the caller. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_MAX_TASKS`) |
 | Code-enforced | Worker pool concurrency capped at 4 — bounds wall-clock concurrency regardless of `tasks.length`. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_CONCURRENCY`) |
 | Code-enforced | Per-variant `allowed-tools` boundary — `zmora-fe` and `zmora-be` register with disjoint stack-specific tool allowlists. Routes a wrong-variant dispatch into a runtime "tool not in allowlist" rejection rather than silent cross-stack execution. | `src/modules/qa/allowed-tools.ts` + OpenCode runtime |
+| Code-enforced | Per-agent tool gating via `AgentConfig.tools` — `execute_recipe` is enabled ONLY on `zmora-setup`; `record_input` and `parse_plan` are enabled ONLY on Perun. Every other registered agent (`zmora-fe`, `zmora-be`, `fix-auto`) has those tools disabled at the runtime registry level. | `src/modules/qa/index.ts` (`AgentConfig.tools`) |
+| Code-enforced | `execute_recipe` AST validation — recipe scripts are parsed into an AST and rejected if they contain anything outside the recipe DSL (no arbitrary shell commands, no eval). The recipe then runs in a sandboxed bash child with an allowlisted env subset built by `buildChildEnv` — host `process.env` is NOT inherited. | `src/modules/qa/recipe-parser.ts` + `src/modules/qa/child-env.ts` |
+| Code-enforced | `record_input` name denylist — user-pasted input names are rejected if they hit the process-control denylist (`PATH`, `LD_PRELOAD`, `NODE_OPTIONS`, `IFS`, `BASH_ENV`, `HOME`, `SSH_AUTH_SOCK`, …) or start with a well-known credential prefix (`AWS_`, `GCP_`, `GITHUB_`, `ANTHROPIC_`, `OPENAI_`, `DATABASE_`, `OP_`, `VAULT_`, `K8S_`, `KUBE`, …). Minted recipe bindings (`QA_BIND_*`) are exempt. | `src/modules/qa/bindings-store.ts` |
+| Code-enforced | `Secret` wrapper around stored binding values — redacts the underlying value from `toString` / `util.inspect` / `JSON.stringify` so a binding cannot leak into a log line, error trace, or specialist response by accident. `execute_recipe` only ever returns enum status payloads to the LLM, never the minted value. | `src/modules/qa/secret.ts` |
+| Code-enforced | `BindingsStore` TTL + cap — entries expire 1 h after last write via a 5-minute sweep, and the store is capped to bound memory + blast radius. The sweep skips pinned entries (`BindingSnapshot` held by an in-flight wave) so the scrubber doesn't lose backing entries mid-scrub. | `src/modules/qa/bindings-store.ts` |
+| Code-enforced | `shell.env` hook scoped to `zmora-*` child sessions — the hook injects resolved bindings into the bash env of dispatched zmora variants only. Perun's own bash never receives binding values; values reach scenarios exclusively through the dispatched child's env. | `src/modules/qa/shell-env-hook.ts` |
 | Code-enforced | Specialist-output neutralization — strips ANSI/CSI escapes, ASCII control chars (except `\n\r\t`), and HTML-escapes `<` / `>`. | `src/modules/coordinator/sanitize.ts` (`neutralizeUntrustedOutput`) |
 | Code-enforced | Deterministic, zero-padded ID assignment — IDs are not LLM-generated. | `src/modules/coordinator/assign-issue-ids.ts` |
 | Code-enforced | Topic validation in `deriveReportPath` — strips `YYYY-MM-DD-` prefix and `-test-plan` suffix, validates against `^[a-z0-9-]+$`, rejects path-traversal or filename injection. | `src/modules/coordinator/sanitize.ts` (`deriveReportPath`) |
+| LLM-requested | Strict-orchestrator hard rule — Perun never executes scenario work in its own context: no `Bash(curl/psql/docker/...)`, no MCP tools, no dotfile reads, no credential minting. Credential acquisition is delegated to `execute_recipe` (zmora-setup only) or `record_input` (Perun only, mid-run dialog). The hard rule is reinforced by code-enforced layers above (`allowed-tools` frontmatter, per-agent `AgentConfig.tools`), but the prompt-level rule is what keeps Perun from improvising on resume / preflight / dialog turns. | `src/agents/perun.md` ("Hard rule — strict orchestrator") |
 | LLM-requested | Plan sanitization rules — block `.env`, `~/.ssh/*`, `~/.aws/*`, `/etc/passwd`, private keys, secrets files. | `src/agents/perun.md` Workflow 1 Step 4 |
 | LLM-requested | Bash subcommand allowlist for scenarios — `playwright`, `curl`, `psql`, `sqlite3` only; everything else is `SKIP`. | `src/agents/perun.md` Workflow 1 Step 4 |
 | LLM-requested | Unauthorized network exfil rejection — destinations not in plan frontmatter → `SKIP`. | `src/agents/perun.md` Workflow 1 Step 4 |
@@ -221,7 +249,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
 - **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
-- **Pre-built specialist set.** `@perun` only knows two specialists (`zmora` — itself split into `zmora-fe` / `zmora-be` variants — and `fix-auto`). Adding more requires updating `perun.md`.
+- **Pre-built specialist set.** `@perun` only knows two logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — and `fix-auto`). Adding more requires updating `perun.md`.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
 

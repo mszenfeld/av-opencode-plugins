@@ -1,3 +1,4 @@
+import type { SessionAgentRegistry } from "../_shared/session-agent-registry.js"
 import {
   pollUntilIdle,
   PollerAbortError,
@@ -52,6 +53,53 @@ export interface DispatchParallelInput {
    * called best-effort so the child session is cancelled server-side.
    */
   signal?: AbortSignal
+  /**
+   * Optional registry that records (childSessionID → task.name) at dispatch
+   * time. Consumed by plugin hooks (e.g. shell.env) that need to know which
+   * agent is running in a given session. Registration persists for the
+   * OpenCode session lifetime; cleanup is the plugin's session.deleted
+   * handler — not unregistered inside dispatch.
+   */
+  sessionAgentRegistry?: SessionAgentRegistry
+  /**
+   * Optional log-scrubber applied to every task result after the untrusted-
+   * output neutraliser, before truncation. Receives (text, parentSessionID)
+   * and returns redacted text. Used by the QA bindings flow to redact known
+   * secret values from Zmora results before they reach the report or TUI.
+   *
+   * If a `scrubberFactory` is also provided, the factory wins and this field
+   * is ignored — the factory yields a pinned-snapshot scrubber, which is the
+   * race-safe path (ARCH-004).
+   */
+  scrubber?: (text: string, parentSessionID: string) => string
+  /**
+   * Optional factory that produces a per-dispatch scrubber session. Called
+   * ONCE at the start of `dispatchParallel`; the returned `scrub(text)` is
+   * applied to every task result; `release()` is invoked in a `finally` after
+   * all tasks complete (success, failure, or abort). Takes precedence over
+   * `scrubber`. This is the only race-safe scrubber path for store-backed
+   * implementations — see `DispatchScrubberFactory` for the contract.
+   */
+  scrubberFactory?: (
+    parentSessionID: string,
+  ) => { scrub: (text: string) => string; release: () => void } | undefined
+  /**
+   * Parent (Perun) session ID — passed to the scrubber/factory. Required if
+   * either is set; ignored otherwise.
+   */
+  parentSessionID?: string
+  /**
+   * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
+   * specialist session is spawned. The QA plugin uses this to lazily parse the
+   * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
+   * `execute_recipe` calls can find recipes by name. Implementations must be
+   * idempotent and must not throw — preflight errors are swallowed so they
+   * cannot break unrelated dispatches.
+   */
+  preflight?: (input: {
+    parentSessionID: string
+    taskNames: readonly string[]
+  }) => Promise<void>
 }
 
 // 1 s tail-latency budget on completion observation. `session.prompt` in the
@@ -60,7 +108,14 @@ export interface DispatchParallelInput {
 export const DEFAULT_POLL_INTERVAL_MS = 1000
 export const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000
 export const DEFAULT_RESULT_MAX_BYTES = 100 * 1024
-export const DISPATCH_MAX_TASKS = 50
+// Aligned with DISPATCH_CONCURRENCY so the per-call cap matches the worker
+// pool size. The label `×N` rendered by the caller (e.g. Perun) now always
+// equals the concurrent burst, and callers with more than 4 tasks must chunk
+// into multiple sequential dispatch_parallel calls. This also caps the number
+// of child sessions a single call can spawn, bounding cost-DoS via crafted
+// plans (the worker pool throttles wall-clock concurrency, the cap throttles
+// per-call session count).
+export const DISPATCH_MAX_TASKS = 4
 export const DISPATCH_CONCURRENCY = 4
 
 export async function dispatchParallel(
@@ -74,6 +129,11 @@ export async function dispatchParallel(
     taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS,
     resultMaxBytes = DEFAULT_RESULT_MAX_BYTES,
     signal,
+    sessionAgentRegistry,
+    scrubber,
+    scrubberFactory,
+    parentSessionID,
+    preflight,
   } = input
 
   if (tasks.length > DISPATCH_MAX_TASKS) {
@@ -96,6 +156,46 @@ export async function dispatchParallel(
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`)
     }
   }
+
+  // Preflight runs ONCE per dispatch, after validation but BEFORE any session
+  // is spawned, so dependent state (e.g. QA bindings) is populated before the
+  // first specialist task starts. Swallow errors so a buggy hook cannot break
+  // unrelated dispatches — the hook is expected to be self-defensive.
+  if (preflight !== undefined && parentSessionID !== undefined && parentSessionID.length > 0) {
+    try {
+      await preflight({
+        parentSessionID,
+        taskNames: tasks.map((t) => t.name),
+      })
+    } catch {
+      // Never let a preflight failure mask a downstream dispatch result.
+    }
+  }
+
+  // Materialise the per-dispatch scrubber session BEFORE any task runs so the
+  // pinned snapshot exists for the full duration of the wave. The factory
+  // takes precedence over the legacy `scrubber` field — when both are set the
+  // factory wins because it is the race-safe path (ARCH-004). Factory failures
+  // are absorbed: a buggy factory must not break unrelated dispatches.
+  let scrubberSession: { scrub: (text: string) => string; release: () => void } | undefined
+  if (
+    scrubberFactory !== undefined &&
+    parentSessionID !== undefined &&
+    parentSessionID.length > 0
+  ) {
+    try {
+      scrubberSession = scrubberFactory(parentSessionID)
+    } catch {
+      scrubberSession = undefined
+    }
+  }
+  // Adapt the per-dispatch scrubber to the per-task `(text, parentSessionID)`
+  // signature so `runTask` can stay agnostic of which path produced it. The
+  // session's `scrub` already closes over the snapshot.
+  const effectiveScrubber: ((text: string, parent: string) => string) | undefined =
+    scrubberSession !== undefined
+      ? (text) => scrubberSession!.scrub(text)
+      : scrubber
 
   // Worker pool: maintain DISPATCH_CONCURRENCY workers draining a shared queue.
   // `nextRef.value++` is race-free in single-threaded JS between `await` points.
@@ -121,12 +221,28 @@ export async function dispatchParallel(
         taskTimeoutMs,
         resultMaxBytes,
         signal,
+        sessionAgentRegistry,
+        scrubber: effectiveScrubber,
+        parentSessionID,
       })
     }
   }
 
-  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  try {
+    const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  } finally {
+    // Release the pinned snapshot regardless of how the wave terminated
+    // (success, abort, or unhandled error in a worker). Swallow release
+    // failures so a buggy plugin can't corrupt the dispatch return value.
+    if (scrubberSession !== undefined) {
+      try {
+        scrubberSession.release()
+      } catch {
+        /* swallow: release is best-effort cleanup */
+      }
+    }
+  }
 
   // Convert the variant-suffix invariant from a prompt-only convention into
   // a code-enforced one. The agent registry still validates input task names
@@ -218,6 +334,9 @@ async function runTask(
     taskTimeoutMs: number
     resultMaxBytes: number
     signal?: AbortSignal
+    sessionAgentRegistry?: SessionAgentRegistry
+    scrubber?: (text: string, parentSessionID: string) => string
+    parentSessionID?: string
   },
 ): Promise<DispatchResult> {
   const startTime = Date.now()
@@ -230,6 +349,12 @@ async function runTask(
     // see the session id even when failure occurs after `startTask` resolves.
     sessionId = id
 
+    // Register (childSessionID → agent name) so plugin hooks (e.g. shell.env)
+    // can resolve which agent owns a given session. Registration persists for
+    // the OpenCode session lifetime; cleanup is the plugin's `session.deleted`
+    // handler, not this dispatcher.
+    options.sessionAgentRegistry?.register(id, task.name)
+
     const rawResult = await pollUntilIdle({
       fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
@@ -241,9 +366,17 @@ async function runTask(
       maxBytes: options.resultMaxBytes,
     })
 
-    // Treat specialist output as untrusted, then truncate by UTF-8 byte
-    // length, not UTF-16 code units.
-    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes)
+    // Treat specialist output as untrusted, then optionally redact known
+    // secret values via the scrubber, then truncate by UTF-8 byte length
+    // (not UTF-16 code units). Scrubber runs AFTER neutralisation so its
+    // input is already control-byte-free, and BEFORE truncation so a long
+    // redacted token cannot be split mid-marker.
+    const neutralized = neutralizeUntrustedOutput(rawResult)
+    const scrubbed =
+      options.scrubber !== undefined && options.parentSessionID !== undefined
+        ? options.scrubber(neutralized, options.parentSessionID)
+        : neutralized
+    const result = truncateBytes(scrubbed, options.resultMaxBytes)
 
     return {
       name: task.name,
@@ -261,7 +394,7 @@ async function runTask(
       status,
       result: "",
       duration_ms: Date.now() - startTime,
-      error: err instanceof Error ? err.message : String(err),
+      error: neutralizeUntrustedOutput(err instanceof Error ? err.message : String(err)),
     }
   }
 }

@@ -14,14 +14,14 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 
 ## Primary agents
 
-| Agent | Description |
-|---|---|
+| Agent     | Description                                                                                                                 |
+| --------- | --------------------------------------------------------------------------------------------------------------------------- |
 | **Perun** | The coordinator. Delegates work to specialists, computes dispatch waves with dependency awareness, and synthesizes results. |
 
 ## Subagents
 
-| Agent | Description |
-|---|---|
+| Agent     | Description                                                                  |
+| --------- | ---------------------------------------------------------------------------- |
 | **Zmora** | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun. |
 
 ## Installation
@@ -41,10 +41,10 @@ Restart OpenCode after installation or any config change.
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `/create-qa-plan` | Analyzes recent changes and generates a structured QA plan in `docs/testing/plans/`. |
-| `/run-qa` | Executes the most recent plan via Perun — dispatches FE/BE scenarios to Zmora and aggregates results into `docs/testing/reports/`. |
+| Command           | Description                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/create-qa-plan` | Analyzes recent changes and generates a structured QA plan in `docs/testing/plans/`.                                                                                                                                                                                                                                                                        |
+| `/run-qa`         | Executes the most recent plan via Perun — dispatches FE/BE scenarios to Zmora and aggregates results into `docs/testing/reports/`. Runs a preflight check on env vars, services, and databases declared in the plan's `## Setup` block (aborts before dispatch on missing items) and pauses mid-run with a resume prompt if a scenario reports `NEED_INFO`. |
 
 ## Configuring agents
 

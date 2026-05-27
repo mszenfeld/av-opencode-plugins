@@ -151,11 +151,43 @@ Using the skill's format, generate the test plan:
 1. Fill in the **Source** section with the resolved diff source
 2. Write the **Changes Summary** based on the analysis
 3. Fill in **Detected Tools** based on tool detection results
-4. Generate **FE Test Scenarios** (if FE changes detected):
+4. Generate the **`## Setup` section** declaring prerequisites the QA run will need. Place this section AFTER frontmatter and BEFORE `## FE Test Scenarios` / `## BE Test Scenarios` so it parses in a single pass.
+
+   Infer prerequisites from the diff:
+   - **New `process.env.X` / `os.environ["X"]` / `getenv("X")` / `ENV["X"]` usage** in PR → add `X` to `**Required environment variables:**`.
+   - **New service URL in code** (matches `https?://localhost:\d+`, `redis://`, `postgres://`, `mongodb://` etc.) → add to `**Required services:**`.
+   - **New DB connection string usage** → add to `**Required databases:**` with explicit scheme (`postgresql://...`, `mysql://...`, `redis://...`, `sqlite:///...`). Schemeless forms are rejected by preflight.
+
+   Format:
+
+   ```markdown
+   ## Setup
+
+   **Required environment variables:**
+   - `TEST_USER_EMAIL` — login email for test account
+   - `TEST_USER_PASSWORD` — login password
+
+   **Required services:**
+   - App at `http://localhost:3000`
+
+   **Required databases:**
+   - `postgresql://localhost:5432/myapp_test`
+   ```
+
+   Rules:
+   - Env var names must match `^[A-Z_][A-Z0-9_]*$` (uppercase + underscore + digits).
+   - One backtick group per item: env-var NAME, service URL, or DB DSN.
+   - Free text after the backtick group (e.g. ` — login email for test account`) is for the human; preflight ignores it.
+   - Soft cap: ≤50 items total. If your inference yields more, group / drop infrequently-used ones.
+   - If no env vars / services / DBs are needed (e.g. a fully static-content scenario), omit the `## Setup` section entirely — preflight will skip with a warning toast, and the run proceeds as today.
+
+   Mark all generated items as best-effort inferences — the user is expected to review and edit before running QA. If you can't tell whether something is needed, include it; the user can delete it.
+
+5. Generate **FE Test Scenarios** (if FE changes detected):
    - One scenario per changed component/page/feature
    - Include concrete steps using actual UI element names from the code
    - Include at least 2 edge cases per scenario
-5. Generate **BE Test Scenarios** (if BE changes detected):
+6. Generate **BE Test Scenarios** (if BE changes detected):
    - One scenario per changed endpoint
    - Include actual API paths, methods, and payload structures from the code
    - Include DB checks with actual table/column names

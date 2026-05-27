@@ -4,7 +4,11 @@ const SHARED_TOOLS = [
   "skill",
   "Bash(mkdir:*)",
   "Bash(command:*)",
-  "Bash(echo:*)"
+  // Bash(echo:*) intentionally removed — shell var-expansion can leak secret
+  // values (e.g. `echo "credentials: $TEST_USER_PASSWORD"` would persist to
+  // the QA report). Use `Bash(printf:*)` for status reporting instead.
+  // See CWE-532 and OWASP A09:2025.
+  "Bash(printf:*)"
 ];
 const FE_TOOLS = [
   "playwright_browser_navigate",
@@ -44,13 +48,26 @@ const BE_TOOLS = [
   "Bash(head:./*)",
   "Bash(tail:./*)"
 ];
+const SETUP_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "execute_recipe"
+];
 function toolsForVariant(stack) {
-  const stackTools = stack === "fe" ? FE_TOOLS : BE_TOOLS;
-  return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...stackTools]));
+  switch (stack) {
+    case "fe":
+      return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...FE_TOOLS]));
+    case "be":
+      return Array.from(/* @__PURE__ */ new Set([...SHARED_TOOLS, ...BE_TOOLS]));
+    case "setup":
+      return SETUP_TOOLS;
+  }
 }
 export {
   BE_TOOLS,
   FE_TOOLS,
+  SETUP_TOOLS,
   SHARED_TOOLS,
   toolsForVariant
 };

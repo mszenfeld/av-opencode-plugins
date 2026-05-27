@@ -18,6 +18,7 @@ import {
   pantheonConfigEmpty
 } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
+import { getDispatchExtensions } from "../_shared/dispatch-extensions.js";
 function loadAgentPrompt(name) {
   return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
 }
@@ -36,8 +37,8 @@ const AppVerkCoordinatorPlugin = async (input) => {
       "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
       "",
       "Guarantees and limits:",
-      "- Maximum 50 tasks per call (over-limit calls are rejected before any session is created).",
-      "- Internally throttled to a 4-worker pool: tasks beyond the first 4 wait until a slot frees up. Result order is preserved.",
+      "- Maximum 4 tasks per call (aligned with the worker pool size; over-limit calls are rejected before any session is created). For larger workloads, chunk into multiple sequential dispatch_parallel calls.",
+      "- A 4-worker pool runs every task in this call in parallel. `tasks.length \u2264 4` is enforced, so concurrency equals the call size. Result order is preserved.",
       '- Each task has a 5-minute hard timeout; on expiry the task is returned with status "timeout" and the partial result is discarded.',
       '- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker "[\u2026truncated\u2026]" \u2014 synthesize what is present, do not retry.',
       "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent, a `mode: primary` agent, or a `mode: all` agent are rejected with a thrown error and no work is dispatched.",
@@ -54,7 +55,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       // bare `dispatch_parallel`. Splitting into `agent` and `summary` lets
       // reviewers see "who" and "what" as two distinct columns inline.
       agent: tool.schema.string().min(1).max(60).describe(
-        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent (total dispatched; \u22644 run concurrently): "name \xD7N" (e.g. "code-reviewer \xD73" or "code-reviewer \xD710")\n- different agents: comma-joined names (e.g. "code-reviewer, security-auditor")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.\n\nException for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `zmora` \u2192 `zmora-fe` + `zmora-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent\'s prompt.'
+        'REQUIRED. Display label for the dispatched agent(s). Free-form, but follow this convention so reviewers can scan the TUI line:\n- single agent: bare name (e.g. "code-reviewer")\n- N copies of one agent (2 \u2264 N \u2264 4): "name \xD7N" (e.g. "code-reviewer \xD73", "code-reviewer \xD74"). N == 1 uses the bare name. N is capped at 4 \u2014 the per-call task limit; chunk larger workloads into multiple sequential calls.\n- different agents: comma-joined names (e.g. "code-reviewer, security-auditor")\n- mixed + duplicates: combine the two (e.g. "code-reviewer \xD72, security-auditor")\nHard cap 60 chars. Do not include prompts, goals, or PII \u2014 `summary` is the place for that.\n\nException for logical agents with multiple variants: when a logical agent is implemented as multiple registered names (e.g. `zmora` \u2192 `zmora-fe` + `zmora-be`), use the logical name in `agent`, not the variant names. Document the mapping in the dispatching agent\'s prompt.'
       ),
       summary: tool.schema.string().min(1).max(80).describe(
         'REQUIRED. One-line description of what is being delegated (e.g. "run login plan", "security/perf/quality review of PR #123", "QA-003 missing CSRF token"). Rendered next to `agent` in the OpenCode TUI. Hard cap 80 chars; do not include prompts or PII.'
@@ -79,6 +80,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID);
       const agentRegistry = await loadAgentRegistry(client);
+      const ext = getDispatchExtensions();
       const results = await dispatchParallel({
         tasks: args.tasks,
         agentRegistry,
@@ -86,7 +88,12 @@ const AppVerkCoordinatorPlugin = async (input) => {
         // Thread the harness abort signal end-to-end: poller checks it at each
         // iteration and during the inter-poll sleep, and child sessions are
         // cancelled server-side when it fires.
-        signal: context.abort
+        signal: context.abort,
+        parentSessionID: context.sessionID,
+        sessionAgentRegistry: ext.sessionAgentRegistry,
+        scrubber: ext.scrubber,
+        scrubberFactory: ext.scrubberFactory,
+        preflight: ext.preflight
       });
       return JSON.stringify(results, null, 2);
     }
@@ -177,7 +184,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       if (event.type !== "session.created") return;
       if (toastShown) return;
       try {
-        const errors = getLoadErrors();
+        const errors = getLoadErrors().map(neutralizeUntrustedOutput);
         for (const e of errors) console.error(e);
         if (errors.length > 0) {
           await client.tui.showToast({

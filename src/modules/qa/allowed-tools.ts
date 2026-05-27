@@ -8,7 +8,11 @@ export const SHARED_TOOLS = [
   "skill",
   "Bash(mkdir:*)",
   "Bash(command:*)",
-  "Bash(echo:*)",
+  // Bash(echo:*) intentionally removed — shell var-expansion can leak secret
+  // values (e.g. `echo "credentials: $TEST_USER_PASSWORD"` would persist to
+  // the QA report). Use `Bash(printf:*)` for status reporting instead.
+  // See CWE-532 and OWASP A09:2025.
+  "Bash(printf:*)",
 ]
 
 export const FE_TOOLS = [
@@ -51,11 +55,26 @@ export const BE_TOOLS = [
   "Bash(tail:./*)",
 ]
 
-export type QaTesterStack = "fe" | "be"
+// zmora-setup has no direct Bash actuators for recipe execution; the plugin's
+// `execute_recipe` tool is the sole channel that mints/refreshes bindings.
+// Read/Glob/Grep are permitted only for inspecting project context when
+// diagnosing recipe failures — not for executing anything.
+export const SETUP_TOOLS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "execute_recipe",
+]
+
+export type QaTesterStack = "fe" | "be" | "setup"
 
 export function toolsForVariant(stack: QaTesterStack): string[] {
-  const stackTools = stack === "fe" ? FE_TOOLS : BE_TOOLS
-  // Dedup is unnecessary (FE_TOOLS and BE_TOOLS are disjoint) but cheap and
-  // future-proof if someone moves an entry into SHARED_TOOLS.
-  return Array.from(new Set([...SHARED_TOOLS, ...stackTools]))
+  switch (stack) {
+    case "fe":
+      return Array.from(new Set([...SHARED_TOOLS, ...FE_TOOLS]))
+    case "be":
+      return Array.from(new Set([...SHARED_TOOLS, ...BE_TOOLS]))
+    case "setup":
+      return SETUP_TOOLS
+  }
 }

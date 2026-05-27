@@ -98,3 +98,20 @@ Invalid numeric values fall back to the default and emit a one-time warning.
   flip a previously-registered session's role once `parentSessionID`
   detection lands)
 
+## Other harness concerns
+
+Pantheon owns notifications, but it is not the only plugin that touches
+harness-level surfaces. The QA plugin (`@AppVerkQAPlugin`) also registers
+process-wide state and child-session hooks as part of its bindings system:
+
+- A `shell.env` hook that fires for every Zmora child session and injects
+  resolved bindings (e.g. minted OAuth tokens, signed JWTs, seed-row IDs)
+  into the bash environment of the right child — never via the LLM context.
+- A process-wide `BindingsStore` that holds minted bindings as redacted
+  `Secret` wrappers, scoped per parent session and bounded by per-parent
+  (32) and global (256) caps.
+
+See [`docs/plugins/qa.md`](./qa.md) — specifically the
+[Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning)
+section — for the full story.
+

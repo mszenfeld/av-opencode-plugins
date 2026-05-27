@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import * as jsoncParser from "jsonc-parser";
+import { neutralizeUntrustedOutput } from "../coordinator/sanitize.js";
 import { validateConfigFile } from "./schema.js";
 import { userGlobalPath, walkUpProjectPaths } from "./paths.js";
 const MAX_PANTHEON_FILE_BYTES = 1024 * 1024;
@@ -27,11 +28,12 @@ function loadFresh(options = {}) {
   const errors = [];
   for (const filePath of ordered) {
     if (!existsSync(filePath)) continue;
+    const safePath = neutralizeUntrustedOutput(filePath);
     try {
       const stats = statSync(filePath);
       if (stats.size > MAX_PANTHEON_FILE_BYTES) {
         errors.push(
-          `[pantheon] ${filePath}: file is ${stats.size} bytes, exceeds ${MAX_PANTHEON_FILE_BYTES}-byte limit \u2014 skipping`
+          `[pantheon] ${safePath}: file is ${stats.size} bytes, exceeds ${MAX_PANTHEON_FILE_BYTES}-byte limit \u2014 skipping`
         );
         continue;
       }
@@ -41,9 +43,8 @@ function loadFresh(options = {}) {
     try {
       raw = readFileSync(filePath, "utf8");
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to read \u2014 ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      errors.push(`[pantheon] ${safePath}: failed to read \u2014 ${neutralizeUntrustedOutput(detail)}`);
       continue;
     }
     let parsed;
@@ -51,14 +52,13 @@ function loadFresh(options = {}) {
     try {
       parsed = jsoncParser.parse(raw, parseErrors, { allowTrailingComma: true });
     } catch (err) {
-      errors.push(
-        `[pantheon] ${filePath}: failed to parse \u2014 ${err instanceof Error ? err.message : String(err)}`
-      );
+      const detail = err instanceof Error ? err.message : String(err);
+      errors.push(`[pantheon] ${safePath}: failed to parse \u2014 ${neutralizeUntrustedOutput(detail)}`);
       continue;
     }
     if (parseErrors.length > 0) {
       const detail = parseErrors.map((e) => `${jsoncParser.printParseErrorCode(e.error)} at ${offsetToLineCol(raw, e.offset)}`).join(", ");
-      errors.push(`[pantheon] ${filePath}: failed to parse \u2014 ${detail}`);
+      errors.push(`[pantheon] ${safePath}: failed to parse \u2014 ${neutralizeUntrustedOutput(detail)}`);
       continue;
     }
     const { config, errors: fileErrors } = validateConfigFile(parsed, filePath);

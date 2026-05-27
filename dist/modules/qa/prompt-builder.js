@@ -6,17 +6,23 @@ function loadSection(name) {
 let cachedCore;
 let cachedOverlayFe;
 let cachedOverlayBe;
+let cachedOverlaySetup;
 function getCore() {
   cachedCore ??= loadSection("core.md");
   return cachedCore;
 }
 function getOverlay(stack) {
-  if (stack === "fe") {
-    cachedOverlayFe ??= loadSection("overlay-fe.md");
-    return cachedOverlayFe;
+  switch (stack) {
+    case "fe":
+      cachedOverlayFe ??= loadSection("overlay-fe.md");
+      return cachedOverlayFe;
+    case "be":
+      cachedOverlayBe ??= loadSection("overlay-be.md");
+      return cachedOverlayBe;
+    case "setup":
+      cachedOverlaySetup ??= loadSection("overlay-setup.md");
+      return cachedOverlaySetup;
   }
-  cachedOverlayBe ??= loadSection("overlay-be.md");
-  return cachedOverlayBe;
 }
 function buildQATesterAgent(stack) {
   const tools = toolsForVariant(stack).join(", ");

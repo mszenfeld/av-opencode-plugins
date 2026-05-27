@@ -8,7 +8,7 @@ import { truncateBytes } from "./truncate-bytes.js";
 const DEFAULT_POLL_INTERVAL_MS = 1e3;
 const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
 const DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
-const DISPATCH_MAX_TASKS = 50;
+const DISPATCH_MAX_TASKS = 4;
 const DISPATCH_CONCURRENCY = 4;
 async function dispatchParallel(input) {
   const {
@@ -18,7 +18,12 @@ async function dispatchParallel(input) {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS,
     resultMaxBytes = DEFAULT_RESULT_MAX_BYTES,
-    signal
+    signal,
+    sessionAgentRegistry,
+    scrubber,
+    scrubberFactory,
+    parentSessionID,
+    preflight
   } = input;
   if (tasks.length > DISPATCH_MAX_TASKS) {
     throw new Error(
@@ -34,6 +39,24 @@ async function dispatchParallel(input) {
       throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`);
     }
   }
+  if (preflight !== void 0 && parentSessionID !== void 0 && parentSessionID.length > 0) {
+    try {
+      await preflight({
+        parentSessionID,
+        taskNames: tasks.map((t) => t.name)
+      });
+    } catch {
+    }
+  }
+  let scrubberSession;
+  if (scrubberFactory !== void 0 && parentSessionID !== void 0 && parentSessionID.length > 0) {
+    try {
+      scrubberSession = scrubberFactory(parentSessionID);
+    } catch {
+      scrubberSession = void 0;
+    }
+  }
+  const effectiveScrubber = scrubberSession !== void 0 ? (text) => scrubberSession.scrub(text) : scrubber;
   const results = new Array(tasks.length);
   const nextRef = { value: 0 };
   async function worker() {
@@ -49,12 +72,24 @@ async function dispatchParallel(input) {
         pollIntervalMs,
         taskTimeoutMs,
         resultMaxBytes,
-        signal
+        signal,
+        sessionAgentRegistry,
+        scrubber: effectiveScrubber,
+        parentSessionID
       });
     }
   }
-  const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  try {
+    const workerCount = Math.min(DISPATCH_CONCURRENCY, tasks.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  } finally {
+    if (scrubberSession !== void 0) {
+      try {
+        scrubberSession.release();
+      } catch {
+      }
+    }
+  }
   for (const r of results) {
     r.name = normalizeVariantSuffix(r.name);
     if (r.error !== void 0) {
@@ -103,6 +138,7 @@ async function runTask(task, specialist, options) {
 ${task.context}` : task.prompt;
     const id = await specialist.startTask(task.name, fullPrompt);
     sessionId = id;
+    options.sessionAgentRegistry?.register(id, task.name);
     const rawResult = await pollUntilIdle({
       fetchMessages: () => specialist.fetchMessages(id),
       timeoutMs: options.taskTimeoutMs,
@@ -113,7 +149,9 @@ ${task.context}` : task.prompt;
       // truncation pass below.
       maxBytes: options.resultMaxBytes
     });
-    const result = truncateBytes(neutralizeUntrustedOutput(rawResult), options.resultMaxBytes);
+    const neutralized = neutralizeUntrustedOutput(rawResult);
+    const scrubbed = options.scrubber !== void 0 && options.parentSessionID !== void 0 ? options.scrubber(neutralized, options.parentSessionID) : neutralized;
+    const result = truncateBytes(scrubbed, options.resultMaxBytes);
     return {
       name: task.name,
       status: "success",
@@ -130,7 +168,7 @@ ${task.context}` : task.prompt;
       status,
       result: "",
       duration_ms: Date.now() - startTime,
-      error: err instanceof Error ? err.message : String(err)
+      error: neutralizeUntrustedOutput(err instanceof Error ? err.message : String(err))
     };
   }
 }

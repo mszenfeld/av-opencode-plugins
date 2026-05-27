@@ -1,3 +1,4 @@
+import { SessionAgentRegistry } from '../_shared/session-agent-registry.js';
 import { PollerMessage } from './poller.js';
 
 interface DispatchTask {
@@ -41,11 +42,59 @@ interface DispatchParallelInput {
      * called best-effort so the child session is cancelled server-side.
      */
     signal?: AbortSignal;
+    /**
+     * Optional registry that records (childSessionID → task.name) at dispatch
+     * time. Consumed by plugin hooks (e.g. shell.env) that need to know which
+     * agent is running in a given session. Registration persists for the
+     * OpenCode session lifetime; cleanup is the plugin's session.deleted
+     * handler — not unregistered inside dispatch.
+     */
+    sessionAgentRegistry?: SessionAgentRegistry;
+    /**
+     * Optional log-scrubber applied to every task result after the untrusted-
+     * output neutraliser, before truncation. Receives (text, parentSessionID)
+     * and returns redacted text. Used by the QA bindings flow to redact known
+     * secret values from Zmora results before they reach the report or TUI.
+     *
+     * If a `scrubberFactory` is also provided, the factory wins and this field
+     * is ignored — the factory yields a pinned-snapshot scrubber, which is the
+     * race-safe path (ARCH-004).
+     */
+    scrubber?: (text: string, parentSessionID: string) => string;
+    /**
+     * Optional factory that produces a per-dispatch scrubber session. Called
+     * ONCE at the start of `dispatchParallel`; the returned `scrub(text)` is
+     * applied to every task result; `release()` is invoked in a `finally` after
+     * all tasks complete (success, failure, or abort). Takes precedence over
+     * `scrubber`. This is the only race-safe scrubber path for store-backed
+     * implementations — see `DispatchScrubberFactory` for the contract.
+     */
+    scrubberFactory?: (parentSessionID: string) => {
+        scrub: (text: string) => string;
+        release: () => void;
+    } | undefined;
+    /**
+     * Parent (Perun) session ID — passed to the scrubber/factory. Required if
+     * either is set; ignored otherwise.
+     */
+    parentSessionID?: string;
+    /**
+     * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
+     * specialist session is spawned. The QA plugin uses this to lazily parse the
+     * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
+     * `execute_recipe` calls can find recipes by name. Implementations must be
+     * idempotent and must not throw — preflight errors are swallowed so they
+     * cannot break unrelated dispatches.
+     */
+    preflight?: (input: {
+        parentSessionID: string;
+        taskNames: readonly string[];
+    }) => Promise<void>;
 }
 declare const DEFAULT_POLL_INTERVAL_MS = 1000;
 declare const DEFAULT_TASK_TIMEOUT_MS: number;
 declare const DEFAULT_RESULT_MAX_BYTES: number;
-declare const DISPATCH_MAX_TASKS = 50;
+declare const DISPATCH_MAX_TASKS = 4;
 declare const DISPATCH_CONCURRENCY = 4;
 declare function dispatchParallel(input: DispatchParallelInput): Promise<DispatchResult[]>;
 
