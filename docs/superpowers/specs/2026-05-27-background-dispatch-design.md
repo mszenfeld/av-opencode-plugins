@@ -47,11 +47,22 @@ concurrency — the omo "explore in background, keep working" pattern), reuses t
 time, exactly like the synchronous path. Cross-turn push is a strict superset and can be a
 later spec once we see that turn-boundary blocking actually hurts.
 
-**Push feasibility (recorded for the future spec):** it IS technically possible —
-`client.session.prompt({ path: { id: <parentSessionID> }, ... })` (the same SDK call
-`createSDKSpecialist` already uses for children) could inject a turn into Perun's session,
-and the plugin `event` hook observes `session.idle`. The risk is behavioral (unsolicited
-Perun turns, wake loops, UX), not primitive availability.
+**The autonomous-progress primitive (linchpin — resolved).** The whole value requires that a
+backgrounded child session keeps running server-side while Perun issues other tool calls. The
+OpenCode SDK exposes a purpose-built endpoint for exactly this: **`session.promptAsync`**
+(`POST /session/{id}/prompt_async`) returns `204 "Prompt accepted"` immediately and the server
+runs the turn autonomously — unlike `session.prompt`, whose HTTP response only resolves after
+the full LLM turn (`dispatch.ts:105-107`). So `startBackground` uses `promptAsync`, NOT a
+detached/un-awaited `session.prompt`. This both removes the fragile dangling-HTTP-connection
+approach and is direct evidence the overlap benefit is real (the server has a first-class
+async-prompt path; omo's `void promptChain` works for the same reason — the turn runs
+server-side regardless of any idle handler). A cheap **validation spike is still the first
+implementation step** (see Testing) to empirically confirm overlap before building the rest.
+
+**Push feasibility (recorded for the future cross-turn spec):** also technically possible —
+`client.session.prompt({ path: { id: <parentSessionID> }, ... })` could inject a turn into
+Perun's session and the `event` hook observes `session.idle`. The risk there is behavioral
+(unsolicited Perun turns, wake loops, UX), not primitive availability.
 
 ## Goal
 
@@ -92,17 +103,21 @@ machinery), reusing `createSDKSpecialist`, `pollUntilIdle`, `sanitize`, `truncat
 ```
 src/modules/coordinator/
   background-store.ts   # BackgroundTaskStore (plain class): register / get /
-                        #   listByParent / countRunningByParent / markError /
-                        #   remove / removeByChild / clearParent. Testable in isolation.
+                        #   listByParent / countRunningByParent / remove / removeByChild /
+                        #   clearParent. Testable in isolation.
   background.ts         # startBackgroundTask(...) and the shared
                         #   collectBackground(store, specialist, ids, { block, timeoutMs })
                         #   that backs both poll_background and wait_background (DRY).
-  index.ts   (modify)   # register dispatch_background / poll_background / wait_background;
-                        #   construct the per-factory store; cleanup in the session.deleted
-                        #   branch of the event hook.
+  index.ts   (modify)   # register dispatch_background / poll_background / wait_background
+                        #   (+ export a PERUN_TOOLS constant for the frontmatter-sync test);
+                        #   construct the per-factory store; ADD a session.deleted branch to
+                        #   the event hook (none exists today — only session.created).
   sdk-specialist.ts (mod) # add startBackground(agent, prompt): creates the child session,
-                        #   fires the prompt DETACHED (not awaited), returns sessionId +
-                        #   the completion promise.
+                        #   then calls session.promptAsync (204 accepted, server runs the turn
+                        #   autonomously) and returns the sessionId. No awaited LLM turn.
+  dispatch.ts (modify)  # extract the inline subagent-only anti-recursion check (currently
+                        #   inside dispatchParallel) into an exported validateDispatchable(
+                        #   registry, name) reused by dispatch_background.
 ```
 
 **Store scope:** `const store = new BackgroundTaskStore()` in the coordinator factory body,
@@ -112,10 +127,12 @@ sufficient and cleaner here. State is in-memory, per process.
 
 **Key difference vs `dispatch_parallel`:** today's `startTask` does `await create` **and**
 `await prompt` (blocks the full LLM turn). Background adds `startBackground`: `await create`,
-then fire `prompt` **detached** (`void`, like omo's `void promptChain`), returning the
-session id immediately along with the prompt's `completion` promise. A rejected `completion`
-is captured and recorded as the task's error so poll/wait report `status:"error"` instead of
-hanging until timeout.
+then `await session.promptAsync` (which returns `204 "accepted"` immediately while the server
+runs the turn autonomously), returning the session id. No LLM turn is awaited, and there is
+no dangling completion promise. If `create` or the `promptAsync` ack fails, `dispatch_background`
+surfaces that synchronously as an error before returning — so there is no detached rejection to
+race. Failures *during* the turn surface later via polling the child session (poll →
+`running`/`success`; wait → `success`/`timeout`).
 
 **Session hierarchy preserved:** background tasks are child sessions with
 `parentID = parentSessionID` (same as the synchronous path), so anti-recursion and session
@@ -135,69 +152,83 @@ is **single-task** (mirrors omo `background_task`); Perun calls it up to the cap
 | Tool | Args | Returns |
 |---|---|---|
 | `dispatch_background` | `agent` (≤60), `summary` (≤80) — TUI label; `prompt` (string); `context?` (string, appended to prompt) | `{ id: "bg_…", agent, status: "running" }` |
-| `poll_background` | `ids: string[]` | `[{ id, agent, status: "running"\|"success"\|"error"\|"not_found", result?, error?, duration_ms? }]` (non-blocking; one `fetchMessages` per id) |
+| `poll_background` | `ids: string[]` | `[{ id, agent, status: "running"\|"success"\|"not_found", result?, duration_ms? }]` (non-blocking; one `fetchMessages` per id) |
 | `wait_background` | `ids: string[]`, `timeoutMs?` (default `DEFAULT_TASK_TIMEOUT_MS` = 5 min) | `[{ id, name: agent, status: "success"\|"error"\|"timeout"\|"aborted", result, duration_ms, error? }]` in `ids` order |
 
 `poll_background` and `wait_background` are thin wrappers over a shared
 `collectBackground(store, specialist, ids, { block })` helper. `dispatch_background` validates
-the agent against the live registry (`loadAgentRegistry`, strict `mode: "subagent"` only —
-reusing the anti-recursion guard) and throws if `countRunningByParent(parent) >= 4`.
+the agent against the live registry via the extracted `validateDispatchable(registry, name)`
+helper (strict `mode: "subagent"` only — the anti-recursion guard, lifted out of
+`dispatchParallel`'s inline loop and shared by both tools) and throws if
+`countRunningByParent(parent) >= 4`. The two tools' status unions are **deliberately disjoint**:
+`poll` is non-blocking so it returns `running`/`not_found` (never `timeout`/`aborted`); `wait`
+is terminal so it returns `timeout`/`aborted` (never `running`/`not_found`).
 
 ### Task record + store
 
 ```typescript
 interface BackgroundTask {
-  id: string             // "bg_" + short uuid
+  id: string             // "bg_" + crypto.randomUUID() (Node built-in; the repo's
+                         //   declared-but-unused `uuid` dep is NOT used)
   childSessionId: string
   parentSessionId: string
   agent: string
   startedAt: number
-  error?: string         // captured detached-prompt rejection
 }
 ```
 
-The store is lean: it holds the parent→child mapping and a possible early error. It does NOT
-store results or proactively detect completion (that is the deferred push concern). Status is
-**derived at collect time**: `error` set → `error`; otherwise the child session is polled
-(`running` vs `success`/`timeout`).
+The store is lean: it holds the parent→child mapping only. It does NOT store results or
+proactively detect completion (that is the deferred push concern). Status is **derived at
+collect time** by polling the child session (`running` vs `success`/`timeout`). There is no
+stored `error` field — a `promptAsync` ack failure is reported synchronously by
+`dispatch_background` (the task is never registered), and in-turn failures surface via polling.
 
 Methods: `register(task)`, `get(id)`, `listByParent(parentId)`, `countRunningByParent(parentId)`,
-`markError(id, msg)`, `remove(id)`, `removeByChild(childId)`, `clearParent(parentId)`.
+`remove(id)`, `removeByChild(childId)`, `clearParent(parentId)`.
 
 ### `startBackground` (new `DispatchSpecialist` method)
 
 ```typescript
-startBackground(agentName: string, prompt: string): Promise<{ sessionId: string; completion: Promise<void> }>
+startBackground(agentName: string, prompt: string): Promise<string>
 ```
 
-Awaits `session.create` (so the session exists and we have its id), fires
-`session.prompt(...)` **without awaiting it**, and returns `{ sessionId, completion }` where
-`completion` is the (unawaited) prompt promise. `background.ts` registers the task, then
-attaches `completion.catch(err => store.markError(id, err))`. Keeps everything behind the
-testable `DispatchSpecialist` interface (a fake specialist supplies a controllable
-`completion`).
+Awaits `session.create` (so the session exists and we have its id), then awaits
+`session.promptAsync(...)` (the `204 "accepted"` ack; the server runs the turn autonomously),
+and returns the `sessionId`. No LLM turn is awaited and there is no completion promise — which
+removes the register/markError ordering race entirely. A `create`/ack failure rejects, and
+`dispatch_background` returns that error to Perun without registering a task. Stays behind the
+testable `DispatchSpecialist` interface (a fake specialist returns a sessionId or throws).
 
 ### Data flow
 
-1. **dispatch_background:** validate agent (registry, subagent-only) → check cap
-   (`countRunningByParent(parent) < 4`) → `startBackground` → `register` → attach
-   `completion.catch → markError` → return `{ id, agent, status: "running" }`.
+1. **dispatch_background:** validate agent (`validateDispatchable`, subagent-only) → check cap
+   (`countRunningByParent(parent) < 4`) → `startBackground` (await create + promptAsync ack) →
+   `register` → return `{ id, agent, status: "running" }`. If `startBackground` rejects
+   (create/ack failure), return the error to Perun and register nothing.
 2. **running:** task sits in the store; the child session runs server-side.
-3. **poll_background(ids):** per id → `get`; missing → `not_found`; `error` → `error`;
-   else `fetchMessages(childSessionId)` → idle? `success` + result (neutralize/scrub/truncate)
+3. **poll_background(ids):** per id → `get`; missing → `not_found`;
+   `fetchMessages(childSessionId)` → idle? `success` + result (neutralize/scrub/truncate)
    : `running`. Read-only — does not remove.
-4. **wait_background(ids, timeoutMs):** per id in parallel (`Promise.all`) → `error` slot, or
+4. **wait_background(ids, timeoutMs):** per id in parallel (`Promise.all`) →
    `pollUntilIdle(childSessionId, timeout, abort)` → `success`/`timeout`/`aborted`;
-   neutralize/scrub/truncate; `normalizeVariantSuffix` on the result name (reuse). After
-   returning, **remove** tasks that reached a terminal state (one-time retrieval).
-5. **cleanup (event hook `session.deleted`):** id = parent → `listByParent` → `abortTask`
-   each child + `clearParent`; id = child → `removeByChild`.
+   neutralize/scrub/truncate; `normalizeVariantSuffix` on the result name (reuse). On
+   **abort**, kill the waited child (`abortTask`) — matching `dispatch_parallel` (the result
+   is discarded; within a turn there is no later poll). After returning, **remove** tasks that
+   reached a terminal state (one-time retrieval; frees a cap slot).
+5. **cleanup — ADD a `session.deleted` branch to the event hook** (none exists today — the
+   coordinator hook only handles `session.created`). Mirror the QA module's both-IDs-safe
+   pattern (`qa/index.ts`): the SDK emits `session.deleted` for BOTH parent and child IDs.
+   id = parent → `listByParent` → `abortTask` each child + `clearParent`; id = child →
+   `removeByChild`. Both calls are no-ops when the id is the other kind — safe to call always.
 
 ### Perun integration
 
 - `perun.md` frontmatter `allowed-tools`: add `dispatch_background`, `poll_background`,
   `wait_background`. Register the three tools in `coordinator/index.ts` (tool names must
-  match the frontmatter — there is already a "keep in sync" comment there; a test enforces it).
+  match the frontmatter — there is already a "keep in sync" comment there). **No anti-drift
+  test exists for Perun's tool list today** (unlike Triglav's `TRIGLAV_TOOLS`); 1B's pattern is
+  worth replicating — export a `PERUN_TOOLS` constant and add a net-new test asserting every
+  `PERUN_TOOLS` name appears in `perun.md`'s `allowed-tools` frontmatter (see Testing #5).
 - `perun.md` "Tool Usage Rules" note (only the non-derivable guidance):
   - Use `dispatch_background` for read-only work you can overlap with your own work —
     especially `triglav` (FREE explorer): fire it, keep reading/planning, then
@@ -214,23 +245,32 @@ testable `DispatchSpecialist` interface (a fake specialist supplies a controllab
 
 | Situation | Behavior | Caught by |
 |---|---|---|
-| Unknown / non-`subagent` agent in `dispatch_background` | Throws (reuses the anti-recursion validation, like `dispatch_parallel`) | validation before spawn |
+| Unknown / non-`subagent` agent in `dispatch_background` | Throws (`validateDispatchable`, the shared anti-recursion guard) | validation before spawn |
 | Cap exceeded | `dispatch_background` throws "max 4 background tasks running — collect first" | `countRunningByParent` |
-| Detached prompt rejection | `store.markError` → `poll`/`wait` report `status:"error"` (no hang-to-timeout) | `completion.catch` |
+| `create` / `promptAsync` ack failure | `dispatch_background` returns the error to Perun synchronously; nothing is registered (no orphan, no detached rejection to race) | `startBackground` rejects |
 | `wait_background` timeout | `status:"timeout"`, task removed | `pollUntilIdle` |
-| `context.abort` during `wait_background` | `status:"aborted"`; the child is **NOT** killed (the task must survive a single `wait` so Perun can poll again); cleaned on `session.deleted` | `pollUntilIdle` honors the signal |
+| `context.abort` during `wait_background` | `status:"aborted"`; the waited child is **killed** (`abortTask`) and removed — matching `dispatch_parallel` (result discarded; within a turn there is no later poll) | `pollUntilIdle` honors the signal |
 | `poll_background` unknown id | `not_found` (not an error) | store |
 | Specialist output (untrusted) | `neutralizeUntrustedOutput` → scrub (if set) → `truncateBytes` | reuse of dispatch internals |
 
-**Abort difference vs `dispatch_parallel` (deliberate):** the synchronous path *kills* the
-child on abort (`cleanupOnAbort`) because its result is discarded. Here, `wait_background`
-abort only *stops waiting* — the child lives on for later retrieval. Children are killed only
-when the parent session is deleted.
+**Abort is consistent with `dispatch_parallel` (revised):** both kill the child on abort —
+the result is discarded and, in the within-turn model, there is no later turn from which to
+poll. (Keeping the child alive would be a cross-turn behavior, which is out of scope and would
+leak a billing session until `session.deleted`.)
 
-**Concurrency:** background tasks are independent detached sessions, not a worker pool;
+**Concurrency:** background tasks are independent server-side sessions, not a worker pool;
 `BACKGROUND_MAX_CONCURRENT = 4` per parent bounds spawn count (DoS). This is separate from the
 `dispatch_parallel` pool, so the worst case is 4 synchronous + 4 background child sessions per
 parent — acceptable and documented.
+
+**Orphan window (accepted risk, prompt-only guard).** "Always collect before ending the turn"
+is prompt guidance, not a code-enforced rule. If Perun ends a turn without `wait`/`poll`/abort,
+its background children keep running (and billing) server-side until `session.deleted` fires —
+which for a long-lived parent session may be a long time. This is **bounded in count** by the
+per-parent cap (≤4) but **not in time**; unlike pooled synchronous tasks, a background child has
+no pool to drain it. We accept this for the within-turn scope (matching 1B's honesty about
+prompt-only guards); a code-level backstop would require the `session.idle` event that the
+cross-turn spec will introduce.
 
 **Memory bounding:** the per-parent cap (4) + `session.deleted` cleanup bound the store. A
 TTL sweep (as in QA `bindings-store`) is deferred — not needed for the within-turn model.
@@ -239,25 +279,37 @@ TTL sweep (as in QA `bindings-store`) is deferred — not needed for the within-
 
 TDD. New tests under `tests/modules/coordinator/`, plus a `perun.md` frontmatter assertion.
 
+0. **Validation spike (FIRST, before building the rest).** Empirically confirm the linchpin
+   against a live OpenCode server: a `session.promptAsync` child makes autonomous progress
+   while the parent issues unrelated work — i.e. `dispatch_background` → do other work →
+   `poll` shows `running` then `success`, with wall-clock < (task A + task B) sequentially.
+   If this fails, the within-turn overlap benefit does not exist and the design must be
+   reconsidered before further implementation. (Manual/throwaway spike — not a committed test.)
 1. **`background-store.test.ts`** — `register`/`get`/`listByParent`/`countRunningByParent`/
-   `markError`/`remove`/`removeByChild`/`clearParent`, including the running-count cap logic.
+   `remove`/`removeByChild`/`clearParent`, including the running-count cap logic and that
+   `remove` (post-collect) drops the count so a freed slot is reusable.
 2. **`background.test.ts`** — `startBackgroundTask`: validates the agent (unknown / non-subagent
-   throws), throws at the cap, registers the task, and routes a rejected `completion` to
-   `markError`. `collectBackground`: blocking vs non-blocking returns `running`/`success`/
-   `error`/`timeout` correctly — driven by a **fake `DispatchSpecialist`** with a controllable
-   `completion` and `fetchMessages`.
-3. **Integration (fake specialist):** dispatch → `poll` (running) → completion → `poll`
+   throws via `validateDispatchable`), throws at the cap, registers on success, and surfaces a
+   `startBackground` rejection (create/ack failure) WITHOUT registering. `collectBackground`:
+   blocking vs non-blocking returns `running`/`success`/`timeout` correctly — driven by a
+   **fake `DispatchSpecialist`** with a controllable `startBackground` + `fetchMessages`.
+3. **Integration (fake specialist):** dispatch → `poll` (running) → child idle → `poll`
    (success) / `wait` (success); `wait` timeout → `timeout`; abort during `wait` → `aborted`
-   AND the task survives (not removed, child not aborted).
-4. **`sdk-specialist` `startBackground`** — creates the session and fires the prompt WITHOUT
-   awaiting it: assert it resolves `sessionId` before `completion` settles (fire-and-forget
-   confirmed) using a fake `OpencodeClient`.
+   AND the child is aborted + task removed. **Cap-reset loop:** fill to 4 running →
+   `dispatch_background` #5 throws → `wait` one → a subsequent dispatch succeeds (collect frees
+   a slot).
+4. **`sdk-specialist` `startBackground`** — uses `session.promptAsync` (not `session.prompt`):
+   assert it resolves the `sessionId` from the `204` ack without awaiting an LLM turn, using a
+   fake `OpencodeClient` (the fake's `promptAsync` resolves immediately; `prompt` is NOT called).
 5. **Tool registration + frontmatter sync** — the three tools are registered in the
-   coordinator; an anti-drift test asserts `perun.md` frontmatter `allowed-tools` lists all
-   three names (guards the manual tool-name sync).
+   coordinator; export a `PERUN_TOOLS` constant and assert every name in it appears in
+   `perun.md`'s `allowed-tools` frontmatter (net-new anti-drift test — none exists for Perun
+   today; mirrors Triglav's `TRIGLAV_TOOLS` test).
 6. **Cleanup** — `session.deleted` for a parent aborts + clears its children; for a child,
-   removes it.
-7. Full `npm run check` + `npm run verify-dist`; commit regenerated `dist/`.
+   removes it; both safe (no-op) when the id is the other kind.
+7. **Independence from the sync pool** — a `dispatch_parallel` wave of 4 and 4 background tasks
+   coexist; the background cap is independent of the sync 4-worker pool (no shared counter).
+8. Full `npm run check` + `npm run verify-dist`; commit regenerated `dist/`.
 
 **Not tested:** the live OpenCode SDK/server (framework integration); whether Perun *chooses*
 to dispatch in background (prompt-driven, non-deterministic).
