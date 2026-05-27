@@ -144,6 +144,7 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
 | `zmora` | subagent | Execute a single QA scenario (FE or BE). Implemented as two registered variants (`zmora-fe` for Playwright scenarios, `zmora-be` for HTTP + DB scenarios); Perun routes by scenario prefix and dispatches one task per scenario. The logical name `zmora` is what appears in the TUI and the report; variants are an internal implementation detail. See [docs/plugins/qa.md](./qa.md) for the variant-split rationale. | Dispatched once per scenario by Perun |
 | `zmora-setup` | subagent | Provision one Binding per dispatch via `execute_recipe` — the ONLY agent in the bundle with `execute_recipe` enabled. Has no Bash access at all (`SETUP_TOOLS = ["Read", "Glob", "Grep", "execute_recipe"]`); the recipe sandbox is its only actuator. Perun synthesises `SETUP-NN` scenarios for each declared binding in Workflow 1 Step 3.6 and dispatches them in Wave 0 ahead of any FE/BE scenarios that depend on the binding. See [docs/plugins/qa.md → Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning). | Dispatched once per binding by Perun before FE/BE scenarios |
 | `fix-auto` | subagent | Auto-fix code issues from reports | User accepts a fix proposal |
+| `triglav` | subagent | Read-only codebase explorer: maps structure, finds definitions/references/patterns via serena LSP (Grep/Glob fallback). Returns a synthesized answer, not edits. | Before planning when 2+ modules / an unfamiliar area is involved; for where/how-does-X-work questions |
 
 Perun's prefix-routing is therefore **three-way**: `FE-*` → `zmora-fe`, `BE-*` → `zmora-be`, `SETUP-*` → `zmora-setup`. The variant-suffix normalisation rule still applies to user-facing strings: `zmora-fe` / `zmora-be` / `zmora-setup` collapse to `zmora` in the report, terminal output, and error messages (internal log/debug strings may retain variant names).
 
@@ -163,6 +164,19 @@ When adding a new logical agent with variants, document the variant mapping in t
 #### Variant-suffix normalisation
 
 Perun normalises `zmora-fe` / `zmora-be` / `zmora-setup` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
+
+#### How the specialist roster reaches `perun.md` (render pipeline)
+
+`src/agents/perun.md` is **not** a fully hand-authored prompt. It is a template containing machine-filled placeholders for the specialist roster and delegation rules:
+
+- `{SPECIALISTS_TABLE}` — the Name / Mode / Purpose table.
+- `{KEY_TRIGGERS}` — the "check BEFORE classification" trigger bullets.
+- `{DELEGATION_TABLE}` — the Domain / Agent / Trigger table.
+- `{USE_AVOID:<name>}` — the per-agent "use when / avoid when" block for the named agent.
+
+At init, `getPerunPrompt()` (`src/modules/coordinator/index.ts`) loads the template and calls `buildPerunPrompt(template, getAgentMetadataRegistry())` (`src/modules/agent-registry/perun-prompt-builder.ts`), which replaces each placeholder with content rendered from the agent **metadata registry**. The registry is populated by each agent's `*.metadata.ts` entry — e.g. `triglav.metadata.ts` (`src/modules/explore/`), `zmora.metadata.ts` (`src/modules/qa/`), and `fix-auto.metadata.ts` (`src/modules/agent-registry/`, registered explicitly in `index.ts` because `packages/code-review` cannot import this bridge).
+
+**To change Perun's specialist roster or delegation triggers, edit the agent's `*.metadata.ts` entry — never the placeholder regions of `perun.md`.** Those regions are overwritten by `buildPerunPrompt` on every load, so direct edits there are silently lost. The hand-authored prose around the placeholders (workflows, safety rules) is yours to edit; the placeholder-filled tables and trigger blocks are not.
 
 ### `dispatch_parallel` runtime characteristics
 
@@ -249,7 +263,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
 - **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
-- **Pre-built specialist set.** `@perun` only knows two logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — and `fix-auto`). Adding more requires updating `perun.md`.
+- **Pre-built specialist set.** `@perun` only knows three logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — `fix-auto`, and `triglav`). Adding more is done by registering a new agent `*.metadata.ts` entry in the metadata registry — `perun.md`'s specialist table and delegation triggers are then re-rendered from that registry at init (see [How the specialist roster reaches `perun.md`](#how-the-specialist-roster-reaches-perunmd-render-pipeline)). You do not hand-edit `perun.md`'s placeholder regions.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
 
@@ -267,16 +281,24 @@ src/modules/coordinator/
 └── truncate-bytes.ts       # Byte-aware truncation for oversize specialist output
 
 src/agents/
-└── perun.md                # @perun system prompt — canonical control flow for the coordinator.
-                            # Delegates wave computation to the `compute_waves` tool
-                            # (`src/modules/coordinator/compute-waves.ts`); still owns scenario
-                            # sanitisation, prefix routing to zmora-fe/zmora-be variants,
-                            # and merging of specialist results. See Limitations.
+└── perun.md                # @perun system-prompt TEMPLATE — hand-authored control flow with
+                            # machine-filled placeholders ({SPECIALISTS_TABLE}, {KEY_TRIGGERS},
+                            # {DELEGATION_TABLE}, {USE_AVOID:<name>}). Owns scenario sanitisation,
+                            # prefix routing to zmora-fe/zmora-be variants, and merging of
+                            # specialist results; delegates wave computation to `compute_waves`
+                            # (`src/modules/coordinator/compute-waves.ts`). The placeholder regions
+                            # are rendered from the metadata registry — do not hand-edit them.
+                            # See "How the specialist roster reaches perun.md".
+
+src/modules/agent-registry/
+├── agent-metadata.ts       # SpecialistInfo type + the metadata registry (getAgentMetadataRegistry)
+├── perun-prompt-builder.ts # buildPerunPrompt(): fills perun.md placeholders from the registry
+└── fix-auto.metadata.ts    # fix-auto's metadata entry (registered src-side; see index.ts)
 
 tests/modules/coordinator/  # Vitest unit + integration tests
 ```
 
-The `@perun` prompt asset is copied into `dist/agents/perun.md` by the root build (`scripts/copy-root-assets.mjs`); the TypeScript modules build into `dist/modules/coordinator/` via `tsup.root.config.ts`.
+Agent metadata entries also live alongside their owning module — e.g. `src/modules/qa/zmora.metadata.ts` and `src/modules/explore/triglav.metadata.ts` — and are registered into the metadata registry at init. The `@perun` prompt template is copied into `dist/agents/perun.md` by the root build (`scripts/copy-root-assets.mjs`) and rendered at runtime; the TypeScript modules build into `dist/modules/coordinator/` via `tsup.root.config.ts`.
 
 ## Related documentation
 

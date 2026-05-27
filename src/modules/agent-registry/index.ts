@@ -30,6 +30,15 @@ const registry: SpecialistInfo[] = []
 export function registerAgentMetadata(info: SpecialistInfo): void {
   const existing = registry.find((a) => a.name === info.name)
   if (existing !== undefined) {
+    // Idempotence check via JSON.stringify is intentionally a serialized-form
+    // comparison, NOT structural equality: it is sensitive to object key order
+    // and to present-as-`undefined` fields. This is safe because every call
+    // site passes a canonical module-level `SpecialistInfo` literal with a
+    // stable key order. A dynamically-constructed metadata object (e.g. built
+    // via spread + conditional fields, or with fields in a different
+    // declaration order) could serialize differently and falsely trip the
+    // `Duplicate agent metadata` throw below — if such call sites are ever
+    // added, switch this to an order-insensitive comparison.
     if (JSON.stringify(existing) === JSON.stringify(info)) return
     throw new Error(`Duplicate agent metadata: ${info.name}`)
   }

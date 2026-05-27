@@ -20,9 +20,10 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 
 ## Subagents
 
-| Agent     | Description                                                                  |
-| --------- | ---------------------------------------------------------------------------- |
-| **Zmora** | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun. |
+| Agent       | Description                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Zmora**   | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun.                                                |
+| **Triglav** | Read-only codebase explorer. Maps structure and finds definitions/references/patterns; dispatched by Perun before planning. See [`docs/exploration.md`](docs/exploration.md). |
 
 ## Installation
 

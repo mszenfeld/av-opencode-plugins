@@ -1,6 +1,6 @@
 # Configuring Pantheon Agents
 
-Pantheon agents (Perun, Zmora) can be assigned specific Anthropic models via a `pantheon.json` configuration file. This document is the canonical reference for that file.
+Pantheon agents Perun and Zmora can be assigned specific Anthropic models via a `pantheon.json` configuration file. This document is the canonical reference for that file. (Triglav is also a registered agent but is **not** model-configurable via `pantheon.json` — see [Available agents](#available-agents).)
 
 ## TL;DR
 
@@ -58,12 +58,15 @@ Effective configuration when running inside `/my-project`:
 
 ## Available agents
 
-| Pantheon key | Registered as | Description |
-|---|---|---|
-| `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. |
-| `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. |
+| Pantheon key | Registered as | Description | Model-configurable? |
+|---|---|---|---|
+| `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. | Yes — via `pantheon.json` |
+| `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. | Yes — via `pantheon.json` |
+| `triglav` | `triglav` (subagent) | Read-only codebase explorer. | No — model is fixed / inherited |
 
 > Internal variants of Zmora (`zmora-fe`, `zmora-be`, `zmora-setup`) are subagents dispatched by Perun. They are not user-facing, but the model you set under `zmora` applies to all three.
+
+> **Triglav is not model-configurable via `pantheon.json`.** Unlike `perun` and `zmora`, the explore plugin does not read a `triglav` model entry from `pantheon.json`, so adding one has no effect — its model is fixed / inherited from OpenCode's default. The `triglav` key is included above for completeness as a registered agent, not as a configurable one.
 
 ## Schema
 

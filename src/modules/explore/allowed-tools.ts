@@ -2,10 +2,16 @@
 //
 // The REAL read-only boundary is the exclusion of every structured write tool
 // (Write/Edit/serena-write) — OpenCode's allow-list is deny-by-default, so an
-// unlisted write tool is not callable. The Bash entries below are a best-effort
-// rail, NOT a sandbox: `:*` permits arbitrary args, so `git log` (pager /
-// GIT_EXTERNAL_DIFF / --output), `rg --pre`, and shell redirection are real
-// escape vectors. We knowingly accept this (omo-parity); per AGENTS.md, Bash
+// unlisted write tool is not callable.
+//
+// The Bash entries below have been tightened from raw omo-parity: git is
+// invoked with `--no-pager` to neutralize the pager/GIT_EXTERNAL_DIFF spawn
+// vector, and the search verbs (grep/rg) are scoped to the working tree
+// (`./*`) like the cat/head/tail entries. This is still NOT a sandbox.
+// Token-matching cannot inspect flag values, so residual code-exec/file-write
+// vectors remain — e.g. `rg --pre <prog>` (runs an arbitrary preprocessor) and
+// `git -c core.pager=<cmd>` (re-introduces a pager). Closing those fully
+// requires an exec sandbox, which is out of scope here. Per AGENTS.md, Bash
 // token-matching is defense-in-depth, not a security boundary.
 
 const SERENA_READ_TOOLS = [
@@ -21,13 +27,13 @@ const SERENA_READ_TOOLS = [
 const STRUCTURED_READ_TOOLS = ["Read", "Glob", "Grep"]
 
 const READONLY_BASH_TOOLS = [
-  "Bash(grep:*)",
+  "Bash(grep:./*)",
   "Bash(cat:./*)",
   "Bash(head:./*)",
   "Bash(tail:./*)",
-  "Bash(rg:*)",
-  "Bash(git log:*)",
-  "Bash(git blame:*)",
+  "Bash(rg:./*)",
+  "Bash(git --no-pager log:*)",
+  "Bash(git --no-pager blame:*)",
 ]
 
 export const TRIGLAV_TOOLS: string[] = [

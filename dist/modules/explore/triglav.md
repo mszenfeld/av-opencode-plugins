@@ -25,7 +25,7 @@ Reach for serena's semantic LSP tools first; Grep/Glob are peer fallbacks for a 
 | Raw strings / comments | `Grep` |
 | Files by name / extension | `Glob` |
 | File contents | `serena_read_file` / `Read` |
-| History / who-changed | `Bash(git log:*)`, `Bash(git blame:*)` |
+| History / who-changed | `Bash(git --no-pager log:*)`, `Bash(git --no-pager blame:*)` |
 
 **If a `serena_*` call errors** (server unavailable), do NOT retry it — switch to `Grep`/`Glob`/`Read` and continue. Exploration still works without serena, just less semantically.
 

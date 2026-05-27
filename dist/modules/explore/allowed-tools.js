@@ -9,13 +9,13 @@ const SERENA_READ_TOOLS = [
 ];
 const STRUCTURED_READ_TOOLS = ["Read", "Glob", "Grep"];
 const READONLY_BASH_TOOLS = [
-  "Bash(grep:*)",
+  "Bash(grep:./*)",
   "Bash(cat:./*)",
   "Bash(head:./*)",
   "Bash(tail:./*)",
-  "Bash(rg:*)",
-  "Bash(git log:*)",
-  "Bash(git blame:*)"
+  "Bash(rg:./*)",
+  "Bash(git --no-pager log:*)",
+  "Bash(git --no-pager blame:*)"
 ];
 const TRIGLAV_TOOLS = [
   ...SERENA_READ_TOOLS,
