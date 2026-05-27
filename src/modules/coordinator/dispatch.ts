@@ -39,6 +39,25 @@ export interface AgentInfo {
   mode: "primary" | "subagent" | "all"
 }
 
+/**
+ * Anti-recursion guard: only strict `subagent`-mode agents are dispatchable.
+ * Both `primary` and `all` are rejected (an `all` agent can run as a primary,
+ * so dispatching it from a primary would re-open the anti-recursion hole).
+ * Shared by `dispatchParallel` and the background dispatch path.
+ */
+export function validateDispatchable(
+  agentRegistry: Record<string, AgentInfo>,
+  name: string,
+): void {
+  const agentInfo = agentRegistry[name]
+  if (agentInfo === undefined) {
+    throw new Error(`Unknown agent: ${name}`)
+  }
+  if (agentInfo.mode !== "subagent") {
+    throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${name}`)
+  }
+}
+
 export interface DispatchParallelInput {
   tasks: DispatchTask[]
   agentRegistry: Record<string, AgentInfo>
@@ -144,17 +163,7 @@ export async function dispatchParallel(
 
   // Anti-recursion: validate every task BEFORE any session spawns.
   for (const task of tasks) {
-    const agentInfo = agentRegistry[task.name]
-    if (agentInfo === undefined) {
-      throw new Error(`Unknown agent: ${task.name}`)
-    }
-    // Default-deny: only strict "subagent" mode is dispatchable. Both "primary"
-    // and "all" modes are rejected to prevent anti-recursion bypass — an "all"
-    // agent can be invoked as a primary, so dispatching it from a primary
-    // would re-open the anti-recursion guarantee.
-    if (agentInfo.mode !== "subagent") {
-      throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`)
-    }
+    validateDispatchable(agentRegistry, task.name)
   }
 
   // Preflight runs ONCE per dispatch, after validation but BEFORE any session
