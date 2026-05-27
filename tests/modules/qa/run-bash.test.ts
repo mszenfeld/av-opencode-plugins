@@ -102,3 +102,59 @@ describe("makeRunBash — timeout enforcement", () => {
     expect(result.stderr).not.toContain("[killed by timeout]")
   })
 })
+
+describe("makeRunBash — output byte ceiling (PERF-001 / CWE-400)", () => {
+  it("caps high-volume stdout and kills the child early", async () => {
+    // `yes` emits unbounded output far faster than the 5s timeout; with a
+    // tiny cap the run must terminate on the output ceiling, NOT the clock.
+    const cap = 4096
+    const runBash = makeRunBash({ timeoutMs: 5_000, maxOutputBytes: cap })
+
+    const start = Date.now()
+    const result = await runBash("yes AAAAAAAAAAAAAAAA", {})
+    const elapsed = Date.now() - start
+
+    // Output is capped at the ceiling (never the full unbounded stream).
+    expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(cap)
+    // Treated like the timeout/abort path so execute-recipe buckets it as
+    // a benign resource ceiling rather than an arbitrary recipe exit code.
+    expect(result.exitCode).toBe(124)
+    expect(result.stderr).toContain(`[killed: output exceeded ${cap} bytes]`)
+    // Killed on the cap, well before the 5s wall-clock would ever fire.
+    expect(elapsed).toBeLessThan(4_000)
+  })
+
+  it("caps high-volume stderr and kills the child early", async () => {
+    const cap = 4096
+    const runBash = makeRunBash({ timeoutMs: 5_000, maxOutputBytes: cap })
+
+    const result = await runBash("yes AAAAAAAAAAAAAAAA 1>&2", {})
+
+    expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(
+      cap + `\n[killed: output exceeded ${cap} bytes]`.length,
+    )
+    expect(result.exitCode).toBe(124)
+    expect(result.stderr).toContain(`[killed: output exceeded ${cap} bytes]`)
+  })
+
+  it("does NOT cap or kill a normal small-output recipe", async () => {
+    // Default cap is 1 MiB; a small recipe stays well under it and must
+    // return its real stdout and exit code untouched.
+    const runBash = makeRunBash({ timeoutMs: 5_000, maxOutputBytes: 1024 * 1024 })
+    const result = await runBash("printf 'small output'", {})
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("small output")
+    expect(result.stderr).not.toContain("output exceeded")
+    expect(result.stderr).not.toContain("[killed by timeout]")
+  })
+
+  it("preserves a non-zero exit code for output well under the cap", async () => {
+    const runBash = makeRunBash({ timeoutMs: 5_000, maxOutputBytes: 1024 * 1024 })
+    const result = await runBash("printf 'partial'; exit 3", {})
+
+    expect(result.exitCode).toBe(3)
+    expect(result.stdout).toBe("partial")
+    expect(result.stderr).not.toContain("output exceeded")
+  })
+})

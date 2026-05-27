@@ -8,7 +8,13 @@ export type ShellChain = Promise<ShellOutput> & {
   nothrow(): ShellChain
 }
 
-export type ShellTag = (parts: TemplateStringsArray, ...values: unknown[]) => ShellChain
+// Rest param is `string[]` (not `unknown[]`) for two reasons: (1) every call
+// site in this module only interpolates strings — binary paths, notification
+// title/message, the assembled AppleScript — so this is tighter, not looser;
+// (2) it makes this structural alias assignable-from Bun's `BunShell`, whose
+// own call signature takes `ShellExpression[]` (a superset of `string`). That
+// assignability lets the plugin pass OpenCode's `ctx` straight in with no cast.
+export type ShellTag = (parts: TemplateStringsArray, ...values: string[]) => ShellChain
 
 export interface NotificationSenderContext {
   readonly $?: ShellTag

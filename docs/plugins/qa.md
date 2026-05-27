@@ -377,13 +377,13 @@ src/modules/qa/
 ├── prompt-builder.ts              # buildQATesterAgent(stack) → composes full prompt at plugin init
 ├── allowed-tools.ts               # SHARED_TOOLS, FE_TOOLS, BE_TOOLS, SETUP_TOOLS constants
 ├── secret.ts                      # Secret value-object: opaque wrapper that never serialises into logs / reports
-├── bindings-store.ts              # In-memory registry of resolved bindings keyed by run-id (scoped to one /run-qa invocation)
+├── bindings-store.ts              # In-memory bindings store keyed by parent session ID; TTL sweep + per-parent / global caps
 ├── binding-parser.ts              # Parses **Bindings:** frontmatter blocks from QA test plans into typed recipe descriptors
 ├── qa-run-state.ts                # Per-run state (current wave, scenarios in flight, NEED_INFO ledger) used by Perun
 ├── scrubber.ts                    # Redacts known Secret values from text before it reaches logs / chat / reports
-├── record-input.ts                # Captures the original /run-qa invocation so `resume` can re-enter with the same plan
-├── execute-recipe.ts              # Strict-orchestrator entry point: runs a single Binding recipe and returns redacted env vars
-├── shell-env-hook.ts              # Child-process spawn hook that scrubs the inherited env and injects resolved bindings
+├── record-input.ts                # Records user-pasted NAME=value inputs into the BindingsStore during the mid-run dialog; validates name denylist + charset
+├── execute-recipe.ts              # Strict-orchestrator entry point: runs one Binding recipe in the sandbox and returns ONLY an enum status (ok / need_info / recipe_failed / unknown_binding) — never the minted value or env
+├── shell-env-hook.ts              # `shell.env` hook that injects resolved bindings into the correct Zmora child session's bash env (keyed by session); does not scrub the inherited env
 ├── child-env.ts                   # Helpers that compute the exact env snapshot handed to each Zmora subagent
 └── prompt-sections/
     ├── core.md                    # Shared single-scenario execution loop + result format
@@ -392,8 +392,8 @@ src/modules/qa/
     └── overlay-setup.md           # zmora-setup variant: runs Binding recipes only, no test execution
 
 src/modules/_shared/               # Sibling modules reused by both qa and perun
-├── dispatch-extensions.ts         # Wraps `dispatch_parallel` with per-task timeout, error normalisation, and result merging
-├── session-agent-registry.ts      # Maps logical agent name (`zmora`) → variant subagent for the current session
+├── dispatch-extensions.ts         # Write-once cross-module registry the QA plugin populates (sessionAgentRegistry + scrubberFactory); the coordinator reads it at dispatch time (timeout/merging live in coordinator's dispatch.ts/poller.ts)
+├── session-agent-registry.ts      # Maps `childSessionID → agent name` so the `shell.env` hook can resolve agent identity per session
 └── load-asset.ts                  # Loads prompt fragments / templates from the built `dist/` tree at runtime
 
 src/commands/

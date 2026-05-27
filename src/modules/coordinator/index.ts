@@ -131,7 +131,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       const agentRegistry = await loadAgentRegistry(client)
       // Source plugin-supplied extensions (QA bindings registry / scrubber /
       // preflight) from the shared module — keeps the coordinator free of
-      // direct imports from feature modules (ARCH-002: avoids layer inversion).
+      // direct imports from feature modules (avoids layer inversion).
       // Extensions are wire-time; `undefined` fields are dispatch no-ops.
       const ext = getDispatchExtensions()
       const results = await dispatchParallel({

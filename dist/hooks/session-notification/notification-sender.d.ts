@@ -8,7 +8,7 @@ type ShellChain = Promise<ShellOutput> & {
     quiet(): ShellChain;
     nothrow(): ShellChain;
 };
-type ShellTag = (parts: TemplateStringsArray, ...values: unknown[]) => ShellChain;
+type ShellTag = (parts: TemplateStringsArray, ...values: string[]) => ShellChain;
 interface NotificationSenderContext {
     readonly $?: ShellTag;
 }

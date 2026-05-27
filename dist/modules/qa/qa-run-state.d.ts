@@ -1,6 +1,7 @@
 import { ParsedBinding } from './binding-parser.js';
 import './bindings-store.js';
 import './secret.js';
+import './recipe-validator.js';
 
 /**
  * Maximum number of mid-run dialog rounds per QA run. After the 3rd round

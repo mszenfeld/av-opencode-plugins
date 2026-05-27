@@ -38,7 +38,7 @@ const MODEL_REGEX = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/
 // rendered form at this length and append an ellipsis when truncated.
 // 120 chars is well above any real `<providerID>/<modelID>` identifier
 // (longest observed is ~60 chars for aggregator paths) but small enough to
-// keep diagnostics scannable. SEC-003 / CWE-117.
+// keep diagnostics scannable. CWE-117.
 const MAX_SHOWN_LEN = 120
 
 // Unknown top-level sections are silently ignored (forward-compat per
@@ -93,7 +93,7 @@ export function validateConfigFile(raw: unknown, sourcePath?: string): Validatio
   // The allow-list lookup `KNOWN_AGENT_FIELDS.has(...)` and the config storage
   // key `result.agents[name]` MUST keep using the raw key — only the rendered
   // form is sanitized, otherwise unknown-field detection would be weakened.
-  // SEC-001 also wraps `getLoadErrors()` at the sink, but `validateConfigFile`
+  // The sink also wraps `getLoadErrors()`, but `validateConfigFile`
   // is exported independently (consumed by tests and potentially other
   // callers), so neutralizing at the source is required for defense-in-depth.
   for (const [rawName, agentRaw] of Object.entries(agents as Record<string, unknown>)) {
@@ -118,7 +118,7 @@ export function validateConfigFile(raw: unknown, sourcePath?: string): Validatio
       // Both branches go through `neutralizeUntrustedOutput` and then a length
       // cap. The non-string branch matters because JSONC permits structured
       // values (objects, arrays) where a string is expected — and an attacker
-      // can supply a hostile `toString()` that emits control bytes. SEC-003 /
+      // can supply a hostile `toString()` that emits control bytes.
       // CWE-117. Defining the constant at module scope (see `MAX_SHOWN_LEN`)
       // keeps the magic number discoverable.
       const raw = typeof model === "string" ? model : String(model)

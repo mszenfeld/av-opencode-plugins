@@ -69,7 +69,7 @@ export interface DispatchParallelInput {
    *
    * If a `scrubberFactory` is also provided, the factory wins and this field
    * is ignored — the factory yields a pinned-snapshot scrubber, which is the
-   * race-safe path (ARCH-004).
+   * race-safe path.
    */
   scrubber?: (text: string, parentSessionID: string) => string
   /**
@@ -175,7 +175,7 @@ export async function dispatchParallel(
   // Materialise the per-dispatch scrubber session BEFORE any task runs so the
   // pinned snapshot exists for the full duration of the wave. The factory
   // takes precedence over the legacy `scrubber` field — when both are set the
-  // factory wins because it is the race-safe path (ARCH-004). Factory failures
+  // factory wins because it is the race-safe path. Factory failures
   // are absorbed: a buggy factory must not break unrelated dispatches.
   let scrubberSession: { scrub: (text: string) => string; release: () => void } | undefined
   if (

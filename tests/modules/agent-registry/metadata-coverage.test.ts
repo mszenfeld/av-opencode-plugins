@@ -6,7 +6,6 @@ import {
   buildPerunPrompt,
   clearAgentMetadataRegistry,
   getAgentMetadataRegistry,
-  registerAgentMetadata,
 } from "../../../src/modules/agent-registry/index.js"
 import { zmoraSpecialistInfo } from "../../../src/modules/qa/zmora.metadata.js"
 import { fixAutoSpecialistInfo } from "../../../src/modules/agent-registry/fix-auto.metadata.js"

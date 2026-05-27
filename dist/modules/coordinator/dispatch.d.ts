@@ -58,7 +58,7 @@ interface DispatchParallelInput {
      *
      * If a `scrubberFactory` is also provided, the factory wins and this field
      * is ignored — the factory yields a pinned-snapshot scrubber, which is the
-     * race-safe path (ARCH-004).
+     * race-safe path.
      */
     scrubber?: (text: string, parentSessionID: string) => string;
     /**

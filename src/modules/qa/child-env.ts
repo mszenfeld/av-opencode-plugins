@@ -1,4 +1,4 @@
-// COMP-002: child-process env allowlist for recipe execution.
+// Child-process env allowlist for recipe execution.
 //
 // The recipe executor spawns `bash -c <recipe>` inside the OpenCode plugin
 // host. Inheriting the full `process.env` exposes the recipe to every secret

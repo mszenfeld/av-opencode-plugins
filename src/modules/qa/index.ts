@@ -76,7 +76,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
     resolveParentID,
     // `makeRunBash` owns wall-clock timeout enforcement: AbortController +
     // `spawn`'s `signal` so an over-budget recipe is actually killed
-    // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
+    // (CWE-404). Default timeout (30s) lives in run-bash.ts.
     runBash: makeRunBash(),
     processEnv: process.env,
   })
@@ -86,7 +86,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
   // Bridge plugin-owned state into the coordinator's `dispatch_parallel` via
   // the shared dispatch-extensions module. The coordinator reads this at
   // execute time — see `src/modules/_shared/dispatch-extensions.ts` for the
-  // contract and rationale (ARCH-002: avoids coordinator → qa layer inversion).
+  // contract and rationale (avoids coordinator → qa layer inversion).
   //
   //   - `sessionAgentRegistry`: dispatch records (childSessionID → task.name)
   //     so the `shell.env` hook can resolve agent identity per session.
@@ -95,7 +95,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
   //     scrubber closed over that snapshot. This protects the scrub from
   //     interleaving with `execute_recipe` writes / `clearParent` purges that
   //     would otherwise reveal a newly-minted secret in the moment between
-  //     write and the next scrub (ARCH-004 / CWE-362). `releaseSnapshot` is
+  //     write and the next scrub (CWE-362). `releaseSnapshot` is
   //     invoked by the coordinator in a `finally` after the wave completes,
   //     letting `sweepExpired` and `clearParent` reclaim the entries.
   //
@@ -293,7 +293,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       //    mapping store (childSessionID → agent name) that gates the
       //    `shell.env` hook; a stale entry plus a recycled SDK session ID
       //    would in principle leak bindings into the wrong session, so we
-      //    drop it whether the deleted ID is a parent or a child (ARCH-003).
+      //    drop it whether the deleted ID is a parent or a child.
       //  - `store.clearParent` / `state.clearRun` — no-op when `deletedID`
       //    is a child (they're keyed by parent ID). Cheap to call always.
       //  - `parentIDCache` — drop the entry for the deleted ID itself, then
