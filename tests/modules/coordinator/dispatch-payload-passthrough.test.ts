@@ -38,6 +38,9 @@ function makeEchoSpecialist(payload: string): DispatchSpecialist {
     async abortTask(): Promise<void> {
       /* never aborted in these tests */
     },
+    async startBackground(): Promise<string> {
+      return "fake-session"
+    },
   }
 }
 

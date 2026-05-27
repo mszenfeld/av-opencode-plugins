@@ -33,6 +33,13 @@ export interface DispatchSpecialist {
    * an "aborted" result).
    */
   abortTask(sessionId: string): Promise<void>
+  /**
+   * Start a task in the background: create the child session, then fire it via
+   * `session.promptAsync` (returns a 204 immediately; the server runs the LLM
+   * turn autonomously). Resolves the child session id WITHOUT awaiting the turn.
+   * Rejects if session creation or the async-prompt acknowledgement fails.
+   */
+  startBackground(agentName: string, prompt: string): Promise<string>
 }
 
 export interface AgentInfo {
