@@ -1,0 +1,37 @@
+// Read-only allow-list for the Triglav exploration agent.
+//
+// The REAL read-only boundary is the exclusion of every structured write tool
+// (Write/Edit/serena-write) — OpenCode's allow-list is deny-by-default, so an
+// unlisted write tool is not callable. The Bash entries below are a best-effort
+// rail, NOT a sandbox: `:*` permits arbitrary args, so `git log` (pager /
+// GIT_EXTERNAL_DIFF / --output), `rg --pre`, and shell redirection are real
+// escape vectors. We knowingly accept this (omo-parity); per AGENTS.md, Bash
+// token-matching is defense-in-depth, not a security boundary.
+
+const SERENA_READ_TOOLS = [
+  "serena_find_symbol",
+  "serena_find_referencing_symbols",
+  "serena_get_symbols_overview",
+  "serena_search_for_pattern",
+  "serena_find_file",
+  "serena_list_dir",
+  "serena_read_file",
+]
+
+const STRUCTURED_READ_TOOLS = ["Read", "Glob", "Grep"]
+
+const READONLY_BASH_TOOLS = [
+  "Bash(grep:*)",
+  "Bash(cat:./*)",
+  "Bash(head:./*)",
+  "Bash(tail:./*)",
+  "Bash(rg:*)",
+  "Bash(git log:*)",
+  "Bash(git blame:*)",
+]
+
+export const TRIGLAV_TOOLS: string[] = [
+  ...SERENA_READ_TOOLS,
+  ...STRUCTURED_READ_TOOLS,
+  ...READONLY_BASH_TOOLS,
+]
