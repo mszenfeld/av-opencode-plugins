@@ -127,8 +127,10 @@ export function registerDispatchExtensions(extensions: DispatchExtensions): void
 }
 
 /**
- * Read the current extensions bundle. Returns the same object reference for
- * the lifetime of the process — callers should NOT mutate.
+ * Read the current extensions bundle. The returned reference is NOT stable:
+ * `registerDispatchExtensions()` replaces the bundle with a fresh object on each
+ * call, and `clearDispatchExtensions()` resets it. Callers must re-read after any
+ * registration rather than caching the result, and should NOT mutate the bundle.
  */
 export function getDispatchExtensions(): DispatchExtensions {
   return registered

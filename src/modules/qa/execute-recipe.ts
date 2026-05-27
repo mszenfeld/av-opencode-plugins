@@ -16,7 +16,6 @@ export interface ExecuteRecipeDeps {
   resolveParentID: (sessionID: string) => Promise<string | undefined>
   runBash: (cmd: string, env: Record<string, string>) => Promise<BashResult>
   processEnv: Record<string, string | undefined>
-  nowMs: () => number
 }
 
 export interface ExecuteRecipeArgs {

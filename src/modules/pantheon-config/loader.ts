@@ -76,6 +76,14 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
   for (const filePath of ordered) {
     if (!existsSync(filePath)) continue
 
+    // Source-side CWE-117 hardening: `getLoadErrors()` is exported, so any
+    // future consumer can read these strings without the coordinator's
+    // sink-side neutralization. Paths can carry control bytes on some
+    // platforms, so neutralize once here and interpolate the safe value into
+    // every error entry below. Mirrors the sanitized `err.message` paths and
+    // the source-side guard in `schema.ts`.
+    const safePath = neutralizeUntrustedOutput(filePath)
+
     // Oversized-file guard: stat BEFORE read so a multi-GB file can never
     // be slurped into memory. Stat errors fall through to the read attempt
     // so the existing error path still owns the messaging.
@@ -83,7 +91,7 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
       const stats = statSync(filePath)
       if (stats.size > MAX_PANTHEON_FILE_BYTES) {
         errors.push(
-          `[pantheon] ${filePath}: file is ${stats.size} bytes, exceeds ${MAX_PANTHEON_FILE_BYTES}-byte limit — skipping`,
+          `[pantheon] ${safePath}: file is ${stats.size} bytes, exceeds ${MAX_PANTHEON_FILE_BYTES}-byte limit — skipping`,
         )
         continue
       }
@@ -104,7 +112,7 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
       // before interpolating. CWE-117. Mirrors the source-side guard in
       // `schema.ts`.
       const detail = err instanceof Error ? err.message : String(err)
-      errors.push(`[pantheon] ${filePath}: failed to read — ${neutralizeUntrustedOutput(detail)}`)
+      errors.push(`[pantheon] ${safePath}: failed to read — ${neutralizeUntrustedOutput(detail)}`)
       continue
     }
 
@@ -122,7 +130,7 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
       // surrounding context interpolated by future error messages is not, so
       // sanitize at the source rather than relying on the coordinator sink.
       const detail = err instanceof Error ? err.message : String(err)
-      errors.push(`[pantheon] ${filePath}: failed to parse — ${neutralizeUntrustedOutput(detail)}`)
+      errors.push(`[pantheon] ${safePath}: failed to parse — ${neutralizeUntrustedOutput(detail)}`)
       continue
     }
 
@@ -130,7 +138,7 @@ export function loadFresh(options: LoadFreshOptions = {}): LoadResult {
       const detail = parseErrors
         .map((e) => `${jsoncParser.printParseErrorCode(e.error)} at ${offsetToLineCol(raw, e.offset)}`)
         .join(", ")
-      errors.push(`[pantheon] ${filePath}: failed to parse — ${detail}`)
+      errors.push(`[pantheon] ${safePath}: failed to parse — ${neutralizeUntrustedOutput(detail)}`)
       continue
     }
 

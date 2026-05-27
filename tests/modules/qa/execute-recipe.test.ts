@@ -25,7 +25,6 @@ function makeHandler(opts: {
     resolveParentID: async () => opts.parent ?? "p1",
     runBash: opts.bashRun ?? (async () => ({ exitCode: 0, stdout: "TOKEN_VALUE", stderr: "" })),
     processEnv: opts.processEnv ?? {},
-    nowMs: () => 1000,
   })
 }
 
@@ -104,7 +103,7 @@ describe("execute_recipe handler", () => {
     }
   })
 
-  it("scrubs the full stderr before truncating so secrets at the tail boundary do not leak (MAINT-004)", async () => {
+  it("scrubs the full stderr before truncating so secrets at the tail boundary do not leak", async () => {
     const store = new BindingsStore()
     // Recipe inputs (irrelevant to this test; given short safe values).
     store.writeBinding("p1", "TEST_USER_EMAIL", "x", "secret", "user-paste")

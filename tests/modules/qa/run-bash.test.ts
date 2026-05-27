@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { execFileSync } from "node:child_process"
 import { makeRunBash } from "../../../src/modules/qa/run-bash.js"
 
-// PERF-001 / CWE-404: the previous `Promise.race`-based timeout in
+// CWE-404: the previous `Promise.race`-based timeout in
 // `execute-recipe.ts` resolved with `exitCode: 124` but let the underlying
 // `bash` child keep running. These tests prove the new `makeRunBash` path:
 //   - returns exit code 124 on timeout (contract preserved), AND
@@ -47,7 +47,7 @@ function findChildPid(parentPid: number, cmdContains: string): number {
   return 0
 }
 
-describe("makeRunBash — timeout enforcement (PERF-001)", () => {
+describe("makeRunBash — timeout enforcement", () => {
   it("returns exitCode 124 when the recipe exceeds the wall-clock cap", async () => {
     const runBash = makeRunBash({ timeoutMs: 100 })
     const result = await runBash("sleep 5", {})

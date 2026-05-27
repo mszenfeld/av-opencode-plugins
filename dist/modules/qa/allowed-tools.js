@@ -7,7 +7,7 @@ const SHARED_TOOLS = [
   // Bash(echo:*) intentionally removed — shell var-expansion can leak secret
   // values (e.g. `echo "credentials: $TEST_USER_PASSWORD"` would persist to
   // the QA report). Use `Bash(printf:*)` for status reporting instead.
-  // See SEC-002 (CWE-532, OWASP A09:2025).
+  // See CWE-532 and OWASP A09:2025.
   "Bash(printf:*)"
 ];
 const FE_TOOLS = [

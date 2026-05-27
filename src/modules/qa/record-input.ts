@@ -27,7 +27,7 @@ export function makeRecordInputHandler(
   return async (args, ctx) => {
     const parentID = (await deps.resolveParentID(ctx.sessionID)) ?? ctx.sessionID
 
-    // Enforce the mid-run dialog round cap deterministically (MAINT-002).
+    // Enforce the mid-run dialog round cap deterministically.
     // The spec in `src/agents/perun.md` caps Perun's NAME=value request loop
     // at 3 rounds; counting in code (rather than only in the prompt) means
     // the cap holds even if the LLM miscounts or is jailbroken into trying

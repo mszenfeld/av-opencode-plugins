@@ -59,8 +59,7 @@ const AppVerkQAPlugin = async ({ client }) => {
     // `spawn`'s `signal` so an over-budget recipe is actually killed
     // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
     runBash: makeRunBash(),
-    processEnv: process.env,
-    nowMs: () => Date.now()
+    processEnv: process.env
   });
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID });
   registerDispatchExtensions({

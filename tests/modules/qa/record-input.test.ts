@@ -68,7 +68,7 @@ describe("record_input tool handler", () => {
   })
 })
 
-describe("record_input — dialog round cap (MAINT-002)", () => {
+describe("record_input — dialog round cap", () => {
   it("counts multiple pairs in a single round as ONE round", async () => {
     const { state, handler } = makeDeps("p1")
     await handler({ name: "A", value: "1" }, makeContext("p1"))

@@ -77,7 +77,6 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
     // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
     runBash: makeRunBash(),
     processEnv: process.env,
-    nowMs: () => Date.now(),
   })
 
   const shellEnvHook = makeShellEnvHook({ store, registry, resolveParentID })

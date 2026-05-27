@@ -49,7 +49,6 @@ describe("end-to-end happy path", () => {
       store, state, runBash: fakeBash,
       resolveParentID: async () => parentID,
       processEnv: { URL: "https://api.example.com" },
-      nowMs: () => Date.now(),
     })
 
     // Simulate user paste.
