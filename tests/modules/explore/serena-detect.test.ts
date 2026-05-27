@@ -21,4 +21,12 @@ describe("isSerenaAvailable", () => {
   it("returns false when serena is explicitly disabled", () => {
     expect(isSerenaAvailable({ mcp: { serena: { enabled: false } } })).toBe(false)
   })
+
+  it("returns false for a null serena entry (malformed config)", () => {
+    expect(isSerenaAvailable({ mcp: { serena: null } } as never)).toBe(false)
+  })
+
+  it("returns false for a non-object serena entry", () => {
+    expect(isSerenaAvailable({ mcp: { serena: true } } as never)).toBe(false)
+  })
 })
