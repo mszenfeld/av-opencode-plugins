@@ -8,13 +8,14 @@ import {
 } from "../../../src/modules/agent-registry/index.js"
 import { zmoraSpecialistInfo } from "../../../src/modules/qa/zmora.metadata.js"
 import { fixAutoSpecialistInfo } from "../../../src/modules/agent-registry/fix-auto.metadata.js"
+import { triglavSpecialistInfo } from "../../../src/modules/explore/triglav.metadata.js"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const PERUN_MD = path.resolve(here, "../../../src/agents/perun.md")
 
 function render(): string {
   const template = readFileSync(PERUN_MD, "utf8")
-  return buildPerunPrompt(template, [fixAutoSpecialistInfo, zmoraSpecialistInfo])
+  return buildPerunPrompt(template, [fixAutoSpecialistInfo, zmoraSpecialistInfo, triglavSpecialistInfo])
 }
 
 describe("perun prompt integration", () => {
@@ -26,6 +27,15 @@ describe("perun prompt integration", () => {
 
   it("leaves no unsubstituted placeholder", () => {
     expect(render()).not.toMatch(/\{[A-Z_][A-Za-z0-9_:-]*\}/)
+  })
+
+  it("renders Triglav's table row, key-trigger, delegation row, and use/avoid section", () => {
+    const out = render()
+    expect(out).toContain("| `triglav` | subagent |")
+    expect(out).toContain("fire `triglav` before planning")
+    expect(out).toContain("| Code exploration | `triglav` |")
+    expect(out).toContain("### Use `triglav` when:")
+    expect(out).toContain("Multiple search angles needed")
   })
 
   it("declares every builder placeholder in perun.md", () => {

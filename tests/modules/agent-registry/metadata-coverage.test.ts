@@ -9,6 +9,7 @@ import {
 } from "../../../src/modules/agent-registry/index.js"
 import { zmoraSpecialistInfo } from "../../../src/modules/qa/zmora.metadata.js"
 import { fixAutoSpecialistInfo } from "../../../src/modules/agent-registry/fix-auto.metadata.js"
+import { triglavSpecialistInfo } from "../../../src/modules/explore/triglav.metadata.js"
 import { AppVerkQAPlugin } from "../../../src/modules/qa/index.js"
 import { AppVerkCoordinatorPlugin } from "../../../src/modules/coordinator/index.js"
 
@@ -31,11 +32,18 @@ describe("anti-regression: specialist rows preserved", () => {
     expect(baselineNames).toEqual(["fix-auto", "zmora"])
 
     const template = readFileSync(PERUN_MD, "utf8")
+    // triglavSpecialistInfo is required so the {USE_AVOID:triglav} placeholder
+    // resolves; it also adds a `triglav` row, so the baseline (fix-auto, zmora)
+    // must be a subset of — not equal to — the rendered specialist set.
     const rendered = buildPerunPrompt(template, [
       fixAutoSpecialistInfo,
       zmoraSpecialistInfo,
+      triglavSpecialistInfo,
     ])
-    expect(specialistNames(rendered)).toEqual(baselineNames)
+    const renderedNames = new Set(specialistNames(rendered))
+    for (const name of baselineNames) {
+      expect(renderedNames.has(name)).toBe(true)
+    }
   })
 })
 
@@ -50,6 +58,8 @@ describe("anti-drift: every registered subagent has metadata", () => {
     const fakeClient = {} as never
     const qa = await AppVerkQAPlugin({ client: fakeClient } as never)
     const coord = await AppVerkCoordinatorPlugin({ client: fakeClient } as never)
+    const { AppVerkExplorePlugin } = await import("../../../src/modules/explore/index.js")
+    await AppVerkExplorePlugin({ client: { tui: { showToast: async () => {} } } } as never)
 
     const config: { agent?: Record<string, { mode?: string }> } = {}
     await qa.config?.(config as never)
@@ -62,7 +72,7 @@ describe("anti-drift: every registered subagent has metadata", () => {
     )
 
     const registered = new Set(getAgentMetadataRegistry().map((a) => a.name))
-    const allowList = new Set<string>(["triglav"])
+    const allowList = new Set<string>() // triglav now ships metadata (Spec 1B)
 
     for (const name of subagentLogicalNames) {
       if (allowList.has(name)) continue
@@ -71,5 +81,6 @@ describe("anti-drift: every registered subagent has metadata", () => {
 
     expect(registered.has("zmora")).toBe(true)
     expect(registered.has("fix-auto")).toBe(true)
+    expect(registered.has("triglav")).toBe(true)
   })
 })
