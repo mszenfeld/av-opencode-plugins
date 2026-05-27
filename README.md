@@ -16,7 +16,7 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 
 | Agent     | Description                                                                                                                 |
 | --------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Perun** | The coordinator. Delegates work to specialists, computes dispatch waves with dependency awareness, and synthesizes results. |
+| **Perun** | The coordinator. Delegates work to specialists (blocking or in the background so it can overlap exploration with its own work), computes dispatch waves with dependency awareness, and synthesizes results. |
 
 ## Subagents
 
