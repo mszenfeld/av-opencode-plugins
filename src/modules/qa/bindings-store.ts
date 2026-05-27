@@ -40,7 +40,7 @@ const NAME_DENYLIST = new Set([
 ])
 
 /**
- * Prefix denylist for `user-paste` bindings (SEC-007 / CWE-15). A malicious
+ * Prefix denylist for `user-paste` bindings (CWE-15). A malicious
  * plan can ask the user to paste under a plausible name and exfil to
  * attacker-controlled egress, so we reject any name that begins with a
  * well-known credential / secret-manager / cloud-provider / database prefix.
