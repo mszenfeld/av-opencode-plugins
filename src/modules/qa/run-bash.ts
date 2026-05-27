@@ -5,7 +5,7 @@ import { buildChildEnv } from "./child-env.js"
 // factory takes an override for tests that need a tight loop without
 // depending on real time. Enforced INSIDE `runBash` via AbortController so the
 // child is actually killed on timeout — a previous `Promise.race`-based
-// guard (PERF-001 / CWE-404) resolved with exitCode 124 but leaked the
+// guard (CWE-404) resolved with exitCode 124 but leaked the
 // running bash child past resolution.
 export const DEFAULT_BASH_TIMEOUT_MS = 30_000
 
