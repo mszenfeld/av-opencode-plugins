@@ -12,6 +12,7 @@ import { fixAutoSpecialistInfo } from "../../../src/modules/agent-registry/fix-a
 import { triglavSpecialistInfo } from "../../../src/modules/explore/triglav.metadata.js"
 import { AppVerkQAPlugin } from "../../../src/modules/qa/index.js"
 import { AppVerkCoordinatorPlugin } from "../../../src/modules/coordinator/index.js"
+import { AppVerkExplorePlugin } from "../../../src/modules/explore/index.js"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const PERUN_MD = path.resolve(here, "../../../src/agents/perun.md")
@@ -58,7 +59,6 @@ describe("anti-drift: every registered subagent has metadata", () => {
     const fakeClient = {} as never
     const qa = await AppVerkQAPlugin({ client: fakeClient } as never)
     const coord = await AppVerkCoordinatorPlugin({ client: fakeClient } as never)
-    const { AppVerkExplorePlugin } = await import("../../../src/modules/explore/index.js")
     await AppVerkExplorePlugin({ client: { tui: { showToast: async () => {} } } } as never)
 
     const config: { agent?: Record<string, { mode?: string }> } = {}

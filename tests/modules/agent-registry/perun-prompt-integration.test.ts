@@ -15,6 +15,9 @@ const PERUN_MD = path.resolve(here, "../../../src/agents/perun.md")
 
 function render(): string {
   const template = readFileSync(PERUN_MD, "utf8")
+  // Every {USE_AVOID:<name>} placeholder in perun.md MUST have its agent here —
+  // buildUseAvoidSection throws "Unknown agent in placeholder" otherwise. When you
+  // add a new specialist with a use/avoid section, add its SpecialistInfo to this array.
   return buildPerunPrompt(template, [fixAutoSpecialistInfo, zmoraSpecialistInfo, triglavSpecialistInfo])
 }
 
