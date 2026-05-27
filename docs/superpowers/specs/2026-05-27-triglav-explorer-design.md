@@ -37,10 +37,16 @@ techniques (see "Agent prompt") and its metadata shape (`category: "exploration"
 ### Current Pantheon facts this design fits
 
 - Agents are registered by a module's `config` hook into `config.agent[name]` with a
-  frontmatter `allowed-tools` string (the **runtime security boundary** — an agent
-  physically cannot invoke a tool outside its allow-list). The QA module registers the
-  three `zmora-*` variants; the coordinator registers Perun; `packages/code-review`
-  registers `fix-auto`.
+  frontmatter `allowed-tools` string. OpenCode's allow-list controls **which tools** an agent
+  may invoke (a real boundary for structured tools — an unlisted `Write`/`Edit`/serena-write
+  tool simply isn't callable). For `Bash(<cmd>:*)` entries, however, the token pattern gates
+  only the command name, not its arguments — per `AGENTS.md` doctrine, Bash token-matching is
+  **defense-in-depth, not a security boundary**. The QA module registers the three `zmora-*`
+  variants; the coordinator registers Perun; `packages/code-review` registers `fix-auto`.
+- The serena MCP server is registered under the key **`serena`** in the user's global
+  OpenCode config (`~/.config/opencode/opencode.json` → `mcp.serena`, `type: local`,
+  oraios/serena). Confirmed 2026-05-27. So MCP tool names take the form `serena_<tool>` and
+  presence is detectable via `config.mcp?.serena`.
 - Plugin factories run via `Promise.all` in `src/index.ts` **before** any `config` hook,
   so metadata pushed in a factory body is present when `getPerunPrompt()` renders lazily.
 - `dispatch_parallel` (Perun's only dispatch path) is hard-capped at 4 tasks, validates
@@ -55,7 +61,10 @@ return a synthesized answer. Triglav:
 
 1. Prefers **serena MCP** (semantic LSP) tools, with **Grep/Glob/Read fallback** when
    serena is unavailable or a serena call fails.
-2. Is **read-only** (enforced by `allowed-tools` + prompt).
+2. Is **read-only** — structured write tools (`Write`/`Edit`/serena write tools) are excluded
+   from `allowed-tools` (a real boundary), and the prompt enforces read-only conduct. The
+   read-only Bash entries (git/grep/rg/cat) are a best-effort rail, **not** an airtight
+   sandbox — see "allowed-tools" and Error handling for the accepted escape surface.
 3. Outputs **omo-style blocks** (`<analysis>` + `<results>` wrapping
    `<files>`/`<answer>`/`<next_steps>`) for Perun to parse and optionally surface.
 4. Registers its `SpecialistInfo` via the 1A bridge, activating Perun's
@@ -72,9 +81,15 @@ return a synthesized answer. Triglav:
 - **No change to `buildPerunPrompt` / the 1A builders** — they already support
   `keyTrigger`/`useWhen`/`avoidWhen`/`triggers` and the `{USE_AVOID:<name>}` form
   (exercised by 1A unit tests with synthetic agents). 1B only registers metadata and adds
-  one placeholder to `perun.md`.
+  one placeholder to `perun.md`. **Caveat (mandatory + coupled):** `buildUseAvoidSection`
+  *throws* on an unknown agent target, and `perun-prompt-integration.test.ts` asserts no
+  leftover `{...}`. So adding `{USE_AVOID:triglav}` to `perun.md` and updating that test's
+  render array to include `triglav` MUST happen in the same change — it is not a free,
+  isolated edit.
 - **No installer work** — serena installation/registration is out of scope; 1B handles
-  serena *absence* gracefully at runtime (see Error handling).
+  serena *absence* gracefully at runtime (see Error handling). **This intentionally supersedes
+  Spec 1A's forward-looking "hard dependency on serena … guard in the config hook" note**: 1B
+  chooses register + warn + degrade, not a hard gate. A future installer spec may harden it.
 - **No per-model prompt variants** — one universal `triglav.md`.
 
 ## Architecture
@@ -128,25 +143,43 @@ except that Perun's rendered prompt automatically gains Triglav's content.
 
 **Wiring:** add `AppVerkExplorePlugin` to `defaultPluginFactories` in `src/index.ts`.
 
-### `allowed-tools` (the security boundary)
+### `allowed-tools` (read-only allow-list)
 
-`TRIGLAV_TOOLS` (read-only):
+`TRIGLAV_TOOLS` (read-only). Server key confirmed as `serena` (see Current Pantheon facts),
+so the `serena_<tool>` prefix is correct for this environment.
 
 - **serena (semantic LSP, read-only subset):** `serena_find_symbol`,
   `serena_find_referencing_symbols`, `serena_get_symbols_overview`,
   `serena_search_for_pattern`, `serena_find_file`, `serena_list_dir`, `serena_read_file`.
-  (Plus `serena_find_declaration` / `serena_find_implementations` /
-  `serena_get_diagnostics_for_file` if present in the installed serena build — the plan
-  pins the exact list against the available tool names.)
-- **fallback search:** `Read`, `Glob`, `Grep`.
-- **read-only Bash:** `Bash(grep:*)`, `Bash(cat:./*)`, `Bash(head:./*)`, `Bash(tail:./*)`,
-  `Bash(rg:*)`, `Bash(git log:*)`, `Bash(git blame:*)`.
+  (`serena_find_declaration` / `serena_find_implementations` /
+  `serena_get_diagnostics_for_file` are deferred to the plan — include them only after
+  confirming the names against the installed serena build, since they are unverified here.)
+- **fallback search (structured, safe):** `Read`, `Glob`, `Grep`.
+- **read-only Bash (best-effort rail, accepted escape surface — see below):**
+  `Bash(grep:*)`, `Bash(cat:./*)`, `Bash(head:./*)`, `Bash(tail:./*)`, `Bash(rg:*)`,
+  `Bash(git log:*)`, `Bash(git blame:*)`.
 
-Explicitly EXCLUDED (must never appear): `Write`, `Edit`, any `serena_*` write/edit tool
-(`serena_create_text_file`, `serena_replace_symbol_body`, `serena_insert_*`,
+**Read-only enforcement model (be honest about it).** The real boundary is OpenCode's
+allow-list excluding all structured *write* tools — `Write`, `Edit`, and every `serena_*`
+write/IO tool. The Bash entries above are **not** a sandbox: `:*` permits arbitrary args, so
+`git log` (pager / `GIT_EXTERNAL_DIFF` / `--output`), `rg --pre <cmd>`, and shell
+redirection are real escape/exec vectors. We **knowingly accept this**, matching omo, which
+keeps raw shell+git for its Explore/Librarian agents and treats read-only as
+prompt-convention + denying file-write tools (an accepted-risk model, not a hard sandbox).
+Per `AGENTS.md`, Bash token-matching is defense-in-depth, not a boundary. (If we ever want
+genuine read-only, the safe move is to drop raw Bash and wrap git history in a fixed-form
+`scripts/triglav-git.sh` — deferred, not chosen for 1B.)
+
+**EXCLUDED from the allow-list (the real boundary).** Any structured write tool must be
+absent: `Write`, `Edit`, `dispatch_parallel` (no recursive dispatch), `Task`, and every
+serena write/IO/mutation tool. Because the allow-list is deny-by-default, the test asserts
+this by **pattern, not enumeration**: no `TRIGLAV_TOOLS` entry may match
+`/create|replace|insert|rename|delete|write|edit|memory|execute_shell|activate|onboarding/`
+(catches `serena_create_text_file`, `serena_replace_symbol_body`, `serena_insert_*`,
 `serena_rename_symbol`, `serena_replace_content`, `serena_safe_delete_symbol`,
-`serena_write_memory`, `serena_execute_shell_command`, `serena_activate_project`),
-`dispatch_parallel` (no recursive dispatch), `Task`.
+`serena_write_memory`, `serena_edit_memory`, `serena_delete_memory`, `serena_rename_memory`,
+`serena_onboarding`, `serena_execute_shell_command`, `serena_activate_project`, and any
+future write tool with a new name).
 
 ## Components
 
@@ -176,6 +209,12 @@ deliberate and pinned by an anti-regression test, mirroring omo's `explore-tool-
 7. **Output discipline:** always end with the **exact** `<results>` skeleton below; in
    `<answer>` **explain the mechanism**, never paste whole files; all paths **absolute**
    (start with `/`); **no emojis** — keep output machine-parseable.
+7b. **Output-size discipline (truncation safety):** `dispatch_parallel` truncates every
+   result to ~100KB and a cut mid-`<results>` would break Perun's parse. So: **never paste
+   file bodies**; cap `<files>` to the ~15-20 most relevant entries (one line each) and
+   summarize the long tail in `<answer>`. Bounded output keeps Triglav well under the cap;
+   `<analysis>` + an early, complete `<answer>` are the load-bearing parts and must not be
+   sacrificed to an exhaustive file list.
 8. **FAILED checklist (negative self-audit):** "Your response has FAILED if: any path is
    relative; you missed obvious matches; the caller must still ask 'but where exactly?';
    you answered only the literal question; or there is no `<results>` block."
@@ -224,25 +263,31 @@ triglavSpecialistInfo: SpecialistInfo = {
 ### `perun.md` edit (the only template change in 1B)
 
 Add a `{USE_AVOID:triglav}` placeholder (e.g. under the Available Specialists block, after
-`{DELEGATION_TABLE}`). The 1A builder renders it from Triglav's `useWhen`/`avoidWhen`. Also
-add a short static note to "Tool Usage Rules":
+`{DELEGATION_TABLE}`). The 1A builder renders it from Triglav's `useWhen`/`avoidWhen`.
 
-- Fire `triglav` *liberally* (cost FREE) for exploratory questions / unfamiliar areas; up
-  to **4 in parallel** via `dispatch_parallel` for different search angles (cap 4, **blocking**
-  — Perun waits for the result).
+The static "Tool Usage Rules" note is trimmed to ONLY the parts the metadata cannot express
+(when/avoid guidance is already rendered by `{KEY_TRIGGERS}` + `{USE_AVOID:triglav}` — do not
+duplicate it in prose, that is the hand-prose drift the 1A renderer exists to eliminate):
+
 - **Delegation Trust Rule:** once you dispatch `triglav` for a search, do NOT redo that same
   search yourself.
-- Do NOT fire `triglav` for a location you already know (see its Avoid-when list).
+- **Dispatch mechanics:** Triglav is blocking; fire up to **4 in parallel** via
+  `dispatch_parallel` (the cap) for different search angles, then wait.
 
 No change to Perun's frontmatter: `dispatch_parallel` is already allowed and its
 anti-recursion preflight accepts `triglav` (`mode: subagent`).
 
 ### `serena-detect.ts`
 
-`isSerenaAvailable(config): boolean` — a pure function that inspects the resolved OpenCode
-config for a registered `serena` MCP server entry. No IO; takes the config object the hook
-already receives. (The plan pins the exact config field by inspecting the OpenCode config
-shape; conceptually it checks the MCP server map for a `serena` key.)
+`isSerenaAvailable(config): boolean` — a pure function checking `config.mcp?.serena` (the
+`@opencode-ai/plugin` `Config` type exposes `mcp?: Record<string, McpLocalConfig | McpRemoteConfig>`;
+key confirmed as `serena`). No IO; takes the config object the hook already receives.
+
+**Advisory-only — not load-bearing.** Detection powers exactly one thing: the one-time
+warning toast. The feature is fully correct *without* it, because the prompt's runtime
+fallback (rule 5) handles serena being absent/erroring. So if the config shape differs from
+expectations at implementation time, the blast radius is "no toast" — never a broken Triglav.
+Treat it as a UX nicety, not a dependency.
 
 ## Error handling
 
@@ -252,8 +297,9 @@ every specialist result. Internal code is trusted (compile-time TS).
 | Situation | Behavior | Caught by |
 |---|---|---|
 | serena MCP absent at startup | Register `triglav` anyway; emit a **one-time** warning toast + `console.error` ("Triglav registered but serena MCP not found — exploration runs in degraded mode; install serena for semantic search"). Mirrors the coordinator's `toastShown` latch. | `serena-detect` unit test + toast test |
-| `serena_*` call fails mid-session | Prompt rule: do NOT retry; switch to `Grep`/`Glob`/`Read`. Degraded mode still returns useful results. | prompt phrase-pin test |
-| Triglav attempts a write/edit tool | Rejected by the runtime `allowed-tools` gate (tool not in list). Defense in depth: prompt's read-only capability statement. | `allowed-tools` test (no write/edit/serena-write present) |
+| `serena_*` call fails mid-session | Prompt rule: do NOT retry; switch to `Grep`/`Glob`/`Read`. **This no-retry guard is prompt-enforced only** — there is no code-level circuit breaker. Blast radius if the model ignores it: wasted tool calls within the 5-min task timeout, not a hang. | prompt phrase-pin test |
+| Triglav attempts a structured write tool (`Write`/`Edit`/serena-write) | Not callable — absent from the deny-by-default allow-list. This is the real read-only boundary. | `allowed-tools` write-verb-pattern test |
+| Triglav abuses a Bash entry (`git log` pager/`--output`, `rg --pre`, redirection) | **Accepted escape surface** — Bash token-matching is not a boundary (AGENTS.md); read-only conduct for Bash is prompt-enforced only, matching omo's accepted-risk model. Documented, not mitigated, in 1B. | n/a (accepted risk; revisit if it bites — wrap git in a script) |
 | `triglav` task returns error/timeout from `dispatch_parallel` | Perun handles it like any specialist result (existing machinery; `neutralizeUntrustedOutput` + truncation already applied). No new handling. | existing dispatch tests |
 | Malformed metadata | Compile-time TS (`SpecialistInfo`); `registerAgentMetadata` is idempotent on identical re-registration and throws only on a genuine name conflict (1A behavior). | `tsc` / 1A registry tests |
 
@@ -267,10 +313,11 @@ TDD. New tests under `tests/modules/explore/`, plus extensions to two existing 1
 
 1. **`serena-detect.test.ts`** — `isSerenaAvailable` returns true when a `serena` MCP entry
    is present in the config, false when absent / config has no MCP map.
-2. **`allowed-tools.test.ts`** (security boundary) — `TRIGLAV_TOOLS` includes the read-only
-   serena subset + `Read`/`Glob`/`Grep` + read-only Bash; and asserts it contains **none** of
-   the forbidden tools (`Write`, `Edit`, any `serena_*` write/edit, `serena_execute_shell_command`,
-   `dispatch_parallel`, `Task`). A regex/denylist assertion so a future careless edit fails loudly.
+2. **`allowed-tools.test.ts`** (read-only allow-list) — `TRIGLAV_TOOLS` includes the read-only
+   serena subset + `Read`/`Glob`/`Grep` + the read-only Bash entries; and asserts that **no
+   entry matches the write-verb pattern** `/create|replace|insert|rename|delete|write|edit|memory|execute_shell|activate|onboarding/`
+   and that `Write`/`Edit`/`dispatch_parallel`/`Task` are absent. Pattern-based (not an
+   enumerated denylist) so a future serena write tool with a new name still fails the test.
 3. **`triglav-prompt.test.ts`** (anti-regression phrase-pin, mirrors omo) — `triglav.md`
    contains the load-bearing phrases: `3+`, "first action", "Read-only" (capability statement),
    "absolute" (path rule), the `<results>`/`<files>`/`<answer>`/`<next_steps>` skeleton, the
@@ -283,18 +330,26 @@ TDD. New tests under `tests/modules/explore/`, plus extensions to two existing 1
 5. **`serena-toast.test.ts`** — when `isSerenaAvailable` is false, the config hook attempts the
    warning toast exactly once (best-effort; headless failure must not throw). When serena is
    present, no toast.
-6. **Extend `tests/modules/agent-registry/perun-prompt-integration.test.ts`** — with `triglav`
-   in the registry, the rendered Perun prompt contains: a `triglav` specialists-table row, a
-   Key-Triggers bullet (from `keyTrigger`), a Delegation-Table row (from `triggers`), and a
-   `Use \`triglav\` when:` section (from `{USE_AVOID:triglav}` in `perun.md`); and still no
-   unsubstituted `{...}` placeholder.
+6. **Extend `tests/modules/agent-registry/perun-prompt-integration.test.ts`** — **mandatory and
+   coupled with the `perun.md` edit** (see Non-goals caveat): this test currently renders with
+   `[fixAutoSpecialistInfo, zmoraSpecialistInfo]` and asserts no leftover `{...}`. Once
+   `{USE_AVOID:triglav}` is in `perun.md`, `buildUseAvoidSection` THROWS unless `triglav` is in
+   the render array — so the same change must add `triglavSpecialistInfo` to it. After that:
+   the rendered Perun prompt contains a `triglav` specialists-table row, a Key-Triggers bullet
+   (from `keyTrigger`), a Delegation-Table row (from `triggers`), and a `Use \`triglav\` when:`
+   section; and still no unsubstituted `{...}` placeholder.
 7. **Update `tests/modules/agent-registry/metadata-coverage.test.ts`** — remove `triglav` from
    the anti-drift allow-list (it now MUST have metadata) and assert the registry covers
    `triglav` (alongside `zmora`, `fix-auto`). Construct the explore plugin so its registration
    participates.
-8. **`tests/root-plugin.test.ts` (+ cross-plugin if it asserts the plugin set)** — update for
-   the added `AppVerkExplorePlugin` so the plugin count / merge expectations stay correct.
-9. Full `npm run check` + `npm run verify-dist`; commit regenerated `dist/`.
+8. **`tests/root-plugin.test.ts`** — update for the added `AppVerkExplorePlugin`. Concretely
+   verified: this test asserts a `package.json` `files[]` allow-list (≈ lines 150-178), so the
+   new `dist/modules/explore/*.js` + `.d.ts` paths must be added to `package.json` `files` AND
+   to that test's expectation. (Cross-plugin integration test only checks category→prefix
+   mapping — no change needed there.)
+9. Full `npm run check` + `npm run verify-dist`; commit regenerated `dist/`. Also confirm the
+   exact serena read-only tool names against the installed build before finalizing
+   `allowed-tools.ts`.
 
 **Not tested:** the live serena MCP itself (framework integration); model routing; whether
 Perun *chooses* to dispatch Triglav (prompt-driven behavior, not deterministic).
