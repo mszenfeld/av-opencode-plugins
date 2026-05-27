@@ -27,6 +27,26 @@ function createSDKSpecialist(client, parentSessionID) {
     },
     async abortTask(sessionId) {
       await client.session.abort({ path: { id: sessionId } });
+    },
+    async startBackground(agentName, prompt) {
+      const created = await client.session.create({
+        body: {
+          parentID: parentSessionID,
+          title: `[perun] background ${agentName}`
+        }
+      });
+      const sessionId = created.data?.id ?? "";
+      if (sessionId.length === 0) {
+        throw new Error(`startBackground returned no session id for agent ${agentName}`);
+      }
+      await client.session.promptAsync({
+        path: { id: sessionId },
+        body: {
+          agent: agentName,
+          parts: [{ type: "text", text: prompt }]
+        }
+      });
+      return sessionId;
     }
   };
 }

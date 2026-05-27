@@ -24,10 +24,24 @@ interface DispatchSpecialist {
      * an "aborted" result).
      */
     abortTask(sessionId: string): Promise<void>;
+    /**
+     * Start a task in the background: create the child session, then fire it via
+     * `session.promptAsync` (returns a 204 immediately; the server runs the LLM
+     * turn autonomously). Resolves the child session id WITHOUT awaiting the turn.
+     * Rejects if session creation or the async-prompt acknowledgement fails.
+     */
+    startBackground(agentName: string, prompt: string): Promise<string>;
 }
 interface AgentInfo {
     mode: "primary" | "subagent" | "all";
 }
+/**
+ * Anti-recursion guard: only strict `subagent`-mode agents are dispatchable.
+ * Both `primary` and `all` are rejected (an `all` agent can run as a primary,
+ * so dispatching it from a primary would re-open the anti-recursion hole).
+ * Shared by `dispatchParallel` and the background dispatch path.
+ */
+declare function validateDispatchable(agentRegistry: Record<string, AgentInfo>, name: string): void;
 interface DispatchParallelInput {
     tasks: DispatchTask[];
     agentRegistry: Record<string, AgentInfo>;
@@ -98,4 +112,4 @@ declare const DISPATCH_MAX_TASKS = 4;
 declare const DISPATCH_CONCURRENCY = 4;
 declare function dispatchParallel(input: DispatchParallelInput): Promise<DispatchResult[]>;
 
-export { type AgentInfo, DEFAULT_POLL_INTERVAL_MS, DEFAULT_RESULT_MAX_BYTES, DEFAULT_TASK_TIMEOUT_MS, DISPATCH_CONCURRENCY, DISPATCH_MAX_TASKS, type DispatchParallelInput, type DispatchResult, type DispatchSpecialist, type DispatchTask, dispatchParallel };
+export { type AgentInfo, DEFAULT_POLL_INTERVAL_MS, DEFAULT_RESULT_MAX_BYTES, DEFAULT_TASK_TIMEOUT_MS, DISPATCH_CONCURRENCY, DISPATCH_MAX_TASKS, type DispatchParallelInput, type DispatchResult, type DispatchSpecialist, type DispatchTask, dispatchParallel, validateDispatchable };
