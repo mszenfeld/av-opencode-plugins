@@ -55,8 +55,9 @@ Per-agent model selection lives in `pantheon.json`:
 // ~/.config/opencode/pantheon.json
 {
   "agents": {
-    "perun": { "model": "anthropic/claude-opus-4-7" },
-    "zmora": { "model": "anthropic/claude-sonnet-4-6" },
+    "perun":   { "model": "anthropic/claude-opus-4-7" },
+    "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
+    "triglav": { "model": "opencode/claude-haiku-4-5" },
   },
 }
 ```

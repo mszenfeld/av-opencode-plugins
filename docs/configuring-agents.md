@@ -9,13 +9,14 @@ Create `~/.config/opencode/pantheon.json`:
 ```jsonc
 {
   "agents": {
-    "perun": { "model": "anthropic/claude-opus-4-7" },
-    "zmora": { "model": "anthropic/claude-sonnet-4-6" }
+    "perun":   { "model": "anthropic/claude-opus-4-7" },
+    "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
+    "triglav": { "model": "opencode/claude-haiku-4-5" }
   }
 }
 ```
 
-Restart OpenCode. Perun will run on Opus, Zmora on Sonnet.
+Restart OpenCode. Perun will run on Opus, Zmora on Sonnet, Triglav on Haiku (subscription-routed).
 
 ## Where the file lives
 
