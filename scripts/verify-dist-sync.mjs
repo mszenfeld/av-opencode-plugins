@@ -25,7 +25,7 @@ console.log("Running bun run build...")
 try {
   execSync("bun run build", { stdio: "inherit" })
 } catch (err) {
-  console.error("Build failed (exit", err.status, "). Fix build errors before checking dist sync.")
+  console.error("Build failed (exit", err.status ?? err.signal ?? "unknown", "). Fix build errors before checking dist sync.")
   process.exit(1)
 }
 

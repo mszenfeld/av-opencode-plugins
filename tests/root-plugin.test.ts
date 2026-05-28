@@ -61,8 +61,7 @@ function deriveExpectedFilesFromPackageJson(
     for (const dirent of dirEntries) {
       if (dirent.isDirectory()) continue
       if (isSkippable(dirent.name)) continue
-      const parentPath = dirent.parentPath ?? absPath
-      const relativePath = path.relative(absPath, path.join(parentPath, dirent.name))
+      const relativePath = path.relative(absPath, path.join(dirent.parentPath, dirent.name))
       result.push(path.posix.join(entry, relativePath.split(path.sep).join("/")))
     }
   }
