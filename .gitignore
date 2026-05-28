@@ -19,3 +19,9 @@ coverage/
 .serena/
 *.tsbuildinfo
 .worktrees/
+
+# Local (private) evaluation scenarios — never commit
+# Authored copies for non-public codebases live here; the playbook at
+# docs/eval/playbook.md treats them as one of two safe locations.
+docs/eval/scenarios/**/local-*.md
+docs/eval/scenarios/**/private/
