@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
@@ -24,6 +25,49 @@ async function loadRootModule() {
   expect(existsSync(entrypointPath)).toBe(true)
 
   return import(pathToFileURL(entrypointPath).href)
+}
+
+function deriveExpectedFilesFromPackageJson(
+  packageJson: { files?: string[] },
+  rootDir: string,
+): string[] {
+  const SKIP_FILES = new Set([".DS_Store", "Thumbs.db"])
+  const SKIP_EXTENSIONS = [".tsbuildinfo"]
+  const isSkippable = (name: string): boolean =>
+    name.startsWith(".") ||
+    SKIP_FILES.has(name) ||
+    SKIP_EXTENSIONS.some((ext) => name.endsWith(ext))
+
+  const entries = packageJson.files ?? []
+  const result: string[] = []
+
+  for (const entry of entries) {
+    // Assumption (verified): mszenfeld package.json `files` has no glob patterns
+    if (entry.includes("*")) {
+      throw new Error(`Glob in files array not supported: ${entry}`)
+    }
+    const absPath = path.join(rootDir, entry)
+    if (!existsSync(absPath)) {
+      throw new Error(`File or directory not found: ${absPath}`)
+    }
+    const stat = statSync(absPath)
+    if (stat.isFile()) {
+      const basename = path.basename(entry)
+      if (!isSkippable(basename)) result.push(entry)
+      continue
+    }
+    // Directory — recurse
+    const dirEntries = readdirSync(absPath, { recursive: true, withFileTypes: true })
+    for (const dirent of dirEntries) {
+      if (dirent.isDirectory()) continue
+      if (isSkippable(dirent.name)) continue
+      const parentPath = dirent.parentPath ?? absPath
+      const relativePath = path.relative(absPath, path.join(parentPath, dirent.name))
+      result.push(path.posix.join(entry, relativePath.split(path.sep).join("/")))
+    }
+  }
+
+  return result
 }
 
 type ShellEnvHook = NonNullable<Hooks["shell.env"]>
@@ -113,81 +157,32 @@ describe("AppVerkPlugins", () => {
       ]),
     )
 
-    const packResult = JSON.parse(
-      execFileSync("npm", ["pack", "--dry-run", "--json"], {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), "bun-pack-"))
+    try {
+      execFileSync("bun", ["pm", "pack", "--destination", tmpDir], {
         cwd: rootDirectory,
+      })
+
+      const tarball = readdirSync(tmpDir).find((entry) => entry.endsWith(".tgz"))
+      if (!tarball) {
+        throw new Error(`No .tgz file found in ${tmpDir}`)
+      }
+
+      const packedFiles = execFileSync("tar", ["-tzf", path.join(tmpDir, tarball)], {
         encoding: "utf8",
-      }),
-    ) as Array<{ files: Array<{ path: string }> }>
+      })
+        .trim()
+        .split("\n")
+        .map((entry) => entry.replace(/^package\//, ""))
+        .filter((entry) => entry.length > 0)
 
-    const packedFiles = packResult[0]?.files.map((file) => file.path) ?? []
-
-    expect(packedFiles).toEqual(
-      expect.arrayContaining([
-        "package.json",
-        "dist/index.js",
-        "dist/index.d.ts",
-        "dist/commands/commit.md",
-        "dist/modules/commit/index.js",
-        "dist/modules/commit/index.d.ts",
-        "packages/frontend-developer/dist/index.js",
-        "packages/frontend-developer/dist/index.d.ts",
-        "packages/frontend-developer/dist/commands/frontend.md",
-        "packages/python-developer/dist/index.js",
-        "packages/python-developer/dist/index.d.ts",
-        "packages/python-developer/dist/commands/python.md",
-        "packages/code-review/dist/index.js",
-        "packages/code-review/dist/index.d.ts",
-        "packages/code-review/dist/commands/review.md",
-        "packages/skill-registry/dist/index.js",
-        "packages/skill-registry/dist/index.d.ts",
-        "packages/swift-developer/dist/index.js",
-        "packages/swift-developer/dist/index.d.ts",
-        "packages/swift-developer/dist/commands/swift.md",
-        "packages/swift-developer/dist/agent-prompt.md",
-        "packages/swift-developer/dist/skills/swift-coding-standards/SKILL.md",
-        "dist/modules/coordinator/index.js",
-        "dist/modules/coordinator/index.d.ts",
-        "dist/modules/qa/index.js",
-        "dist/modules/qa/index.d.ts",
-        "dist/modules/qa/prompt-builder.js",
-        "dist/modules/qa/prompt-builder.d.ts",
-        "dist/modules/qa/allowed-tools.js",
-        "dist/modules/qa/allowed-tools.d.ts",
-        "dist/modules/qa/prompt-sections/core.md",
-        "dist/modules/qa/prompt-sections/overlay-fe.md",
-        "dist/modules/qa/prompt-sections/overlay-be.md",
-        "dist/modules/_shared/load-asset.js",
-        "dist/modules/_shared/load-asset.d.ts",
-        "dist/modules/pantheon-config/index.js",
-        "dist/modules/pantheon-config/index.d.ts",
-        "dist/modules/pantheon-config/loader.js",
-        "dist/modules/pantheon-config/loader.d.ts",
-        "dist/modules/pantheon-config/paths.js",
-        "dist/modules/pantheon-config/paths.d.ts",
-        "dist/modules/pantheon-config/schema.js",
-        "dist/modules/pantheon-config/schema.d.ts",
-        "dist/agents/perun.md",
-        "dist/commands/create-qa-plan.md",
-        "dist/commands/run-qa.md",
-        "dist/skills/qa/test-plan-format/SKILL.md",
-        "dist/skills/qa/report-format/SKILL.md",
-        "dist/skills/qa/fe-testing/SKILL.md",
-        "dist/skills/qa/be-testing/SKILL.md",
-        "dist/hooks/session-notification/plugin.js",
-        "dist/hooks/session-notification/plugin.d.ts",
-        "dist/hooks/session-notification/env-config.js",
-        "dist/hooks/session-notification/env-config.d.ts",
-        "dist/hooks/session-notification/idle-scheduler.js",
-        "dist/hooks/session-notification/idle-scheduler.d.ts",
-        "dist/hooks/session-notification/notification-sender.js",
-        "dist/hooks/session-notification/notification-sender.d.ts",
-        "dist/hooks/session-notification/session-notification.js",
-        "dist/hooks/session-notification/session-notification.d.ts",
-        "dist/hooks/session-notification/session-tracker.js",
-        "dist/hooks/session-notification/session-tracker.d.ts",
-      ]),
-    )
+      // Derive expected files from package.json `files` (ulepszenie #9):
+      // any new path added to `files` is auto-asserted without test maintenance
+      const expectedFiles = deriveExpectedFilesFromPackageJson(packageJson, rootDirectory)
+      expect(packedFiles).toEqual(expect.arrayContaining(expectedFiles))
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 
   it("registers the Pantheon session-notification event hook", async () => {

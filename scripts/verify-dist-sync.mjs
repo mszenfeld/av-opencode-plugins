@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Verifies that committed dist/ artifacts are in sync with src/.
- * Run this after `npm run build` in CI to prevent drift.
+ * Run this after `bun run build` in CI to prevent drift.
  */
-import { execSync } from "node:child_process"
+import { execFileSync, execSync } from "node:child_process"
 import process from "node:process"
 
 // Root `dist/` covers `dist/modules/*` (commit, qa, coordinator,
@@ -21,11 +21,11 @@ const trackedDistPaths = [
 ]
 
 // Run build first
-console.log("Running npm run build...")
+console.log("Running bun run build...")
 try {
-  execSync("npm run build", { stdio: "inherit" })
-} catch {
-  console.error("Build failed. Fix build errors before checking dist sync.")
+  execSync("bun run build", { stdio: "inherit" })
+} catch (err) {
+  console.error("Build failed (exit", err.status, "). Fix build errors before checking dist sync.")
   process.exit(1)
 }
 
@@ -33,12 +33,15 @@ try {
 let changedFiles
 
 try {
-  const output = execSync("git status --short -- " + trackedDistPaths.join(" "), {
-    encoding: "utf8",
-  })
+  const output = execFileSync(
+    "git",
+    ["status", "--short", "--", ...trackedDistPaths],
+    { encoding: "utf8" },
+  )
   changedFiles = output.trim()
-} catch {
-  console.error("Failed to run git status. Ensure this is a git repository.")
+} catch (err) {
+  console.error("Failed to run git status:", err.message)
+  console.error("Ensure this is a git repository.")
   process.exit(1)
 }
 
@@ -46,7 +49,7 @@ if (changedFiles) {
   console.error("\n❌ DIST SYNC FAILED")
   console.error("The following built artifacts are out of sync with src/:")
   console.error(changedFiles)
-  console.error("\nRun 'npm run build' locally and commit the updated dist/ files.")
+  console.error("\nRun 'bun run build' locally and commit the updated dist/ files.")
   process.exit(1)
 }
 
