@@ -4,8 +4,8 @@ Manual procedure for evaluating which model best fits a given Pantheon agent
 (`triglav`, `zmora`, `perun`). No CI, no automation, no framework — Claude Code
 runs this interactively when asked. The artefact you are reading IS the tool.
 
-The spec that justifies every choice below lives at
-[`docs/superpowers/specs/2026-05-28-model-eval-playbook-design.md`](../superpowers/specs/2026-05-28-model-eval-playbook-design.md).
+This playbook was crystallised from the session that benchmarked Triglav's
+model — see `git log` for the design context behind each choice below.
 
 ## When to use this playbook
 
@@ -94,22 +94,43 @@ servers, e.g. 22227 / 37373):
 PORT=$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close();});')
 ```
 
+> **TOCTOU caveat (CWE-362).** The snippet above closes the probe socket
+> before `opencode serve` binds, so another process may grab the port in
+> that window. The readiness probe below fails safe (the server will exit
+> with an `EADDRINUSE` and `curl` will keep failing), but a verbatim run
+> must be prepared to retry. If the readiness loop times out, treat it as
+> a bind collision: kill `SERVER_PID` if still alive, pick a fresh `PORT`,
+> respawn the server, and retry — give up after **3 attempts** and abort
+> the run with an explicit `not-tested: port-bind-failed` note in the
+> report. Do **not** silently reuse a port from a previous attempt.
+
 Start the dedicated headless OpenCode server in the target directory and
-capture its PID:
+capture its PID. `TARGET` MUST be an absolute path with no shell
+metacharacters; the quoting below tolerates spaces but rejects nothing —
+keep the path tame:
 
 ```bash
-sh -c "cd <target> && opencode serve --port $PORT --hostname 127.0.0.1" \
-  > /tmp/oc_eval_server_$PORT.log 2>&1 &
+TARGET="<absolute path with no shell metachars>"
+(cd "$TARGET" && exec opencode serve --port "$PORT" --hostname 127.0.0.1) \
+  >/tmp/oc_eval_server_"$PORT".log 2>&1 &
 SERVER_PID=$!
 ```
 
-Poll for readiness (cap at ~10 s):
+Poll for readiness (cap at ~10 s). If the loop exits without a successful
+probe, follow the TOCTOU-retry policy above (re-pick `PORT`, respawn,
+retry up to 3 times):
 
 ```bash
+READY=0
 for i in $(seq 1 50); do
-  curl -sf "http://127.0.0.1:$PORT/app" >/dev/null && break
+  curl -sf "http://127.0.0.1:$PORT/app" >/dev/null && { READY=1; break; }
   sleep 0.2
 done
+if [ "$READY" -ne 1 ]; then
+  # Likely port-bind collision (TOCTOU) or server crash.
+  # Inspect /tmp/oc_eval_server_"$PORT".log, then retry with a fresh PORT.
+  kill "$SERVER_PID" 2>/dev/null || true
+fi
 ```
 
 **Never** point the SDK at the user's active TUI server — always spawn a

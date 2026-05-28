@@ -18,7 +18,7 @@ Triglav reaches for serena's semantic LSP tools first (`serena_find_symbol`, `se
 
 ### The degraded-mode warning toast
 
-When serena MCP is **not** detected, Pantheon shows a **one-time** warning toast on the first session (`src/modules/explore/index.ts:25-39`):
+When serena MCP is **not** detected, Pantheon shows a **one-time** warning toast on the first session (`src/modules/explore/index.ts`, `event` handler):
 
 > Triglav registered but serena MCP not found — exploration runs in degraded mode (Grep/Glob). Install serena for semantic search.
 

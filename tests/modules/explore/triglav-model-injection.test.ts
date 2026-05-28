@@ -1,14 +1,15 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
+import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { tmpdir } from "node:os"
 import type { Config } from "@opencode-ai/plugin"
 import { AppVerkExplorePlugin } from "../../../src/modules/explore/index.js"
+import { TRIGLAV_AGENT_KEY } from "../../../src/modules/explore/triglav.metadata.js"
 import { __resetCacheForTests } from "../../../src/modules/pantheon-config/index.js"
 import { clearAgentMetadataRegistry } from "../../../src/modules/agent-registry/index.js"
 
 function fakeInput() {
-  return { client: { tui: { showToast: vi.fn(async () => {}) } } } as never
+  return { client: { tui: { showToast: async () => {} } } } as never
 }
 
 describe("AppVerkExplorePlugin triglav model injection", () => {
@@ -16,6 +17,10 @@ describe("AppVerkExplorePlugin triglav model injection", () => {
   let origHome: string | undefined
   let origCwd: string
 
+  // `clearAgentMetadataRegistry()` in before/afterEach is defensive: the explore
+  // factory calls `registerAgentMetadata(triglavSpecialistInfo)`, and while
+  // re-registration is idempotent for identical metadata, clearing keeps each
+  // test independent of registry state leaked from other suites.
   beforeEach(() => {
     __resetCacheForTests()
     clearAgentMetadataRegistry()
@@ -48,14 +53,14 @@ describe("AppVerkExplorePlugin triglav model injection", () => {
     const plugin = await AppVerkExplorePlugin(fakeInput())
     const config: Config = { agent: {} }
     await plugin.config?.(config)
-    expect(config.agent!["triglav"]!.model).toBe("opencode/claude-haiku-4-5")
+    expect(config.agent![TRIGLAV_AGENT_KEY]!.model).toBe("opencode/claude-haiku-4-5")
   })
 
   it("leaves model unset when no pantheon.json exists", async () => {
     const plugin = await AppVerkExplorePlugin(fakeInput())
     const config: Config = { agent: {} }
     await plugin.config?.(config)
-    expect(config.agent!["triglav"]!.model).toBeUndefined()
+    expect(config.agent![TRIGLAV_AGENT_KEY]!.model).toBeUndefined()
   })
 
   it("leaves model unset when triglav key is absent", async () => {
@@ -63,6 +68,19 @@ describe("AppVerkExplorePlugin triglav model injection", () => {
     const plugin = await AppVerkExplorePlugin(fakeInput())
     const config: Config = { agent: {} }
     await plugin.config?.(config)
-    expect(config.agent!["triglav"]!.model).toBeUndefined()
+    expect(config.agent![TRIGLAV_AGENT_KEY]!.model).toBeUndefined()
+  })
+
+  // Defense-in-depth: confirm the plugin seam rejects adversarial model
+  // strings even though the schema (MODEL_REGEX in
+  // src/modules/pantheon-config/schema.ts) already filters them. Covers
+  // CWE-117/CWE-1188 — an ANSI/BiDi/control-byte payload must never reach
+  // `config.agent["triglav"].model` and downstream TUI sinks.
+  it("leaves model unset when pantheon.json provides an invalid model", async () => {
+    writeUserGlobal(`{ "agents": { "triglav": { "model": "bad model\\u001b[31m" } } }`)
+    const plugin = await AppVerkExplorePlugin(fakeInput())
+    const config: Config = { agent: {} }
+    await plugin.config?.(config)
+    expect(config.agent![TRIGLAV_AGENT_KEY]!.model).toBeUndefined()
   })
 })

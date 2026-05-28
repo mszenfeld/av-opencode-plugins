@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { registerAgentMetadata } from "../agent-registry/index.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
-import { triglavSpecialistInfo } from "./triglav.metadata.js"
+import { TRIGLAV_AGENT_KEY, triglavSpecialistInfo } from "./triglav.metadata.js"
 import { buildTriglavPrompt } from "./prompt.js"
 import { isSerenaAvailable } from "./serena-detect.js"
 
@@ -14,22 +14,20 @@ export const AppVerkExplorePlugin: Plugin = async ({ client }) => {
   return {
     config: async (config) => {
       config.agent ??= {}
-      config.agent["triglav"] = {
+      config.agent[TRIGLAV_AGENT_KEY] = {
         description: triglavSpecialistInfo.description,
         mode: "subagent",
         get prompt() {
           return buildTriglavPrompt()
         },
       }
-      // Inject model AFTER registration (mirrors perun/zmora). The model string
-      // is restricted to a printable-ASCII allow-list by `MODEL_REGEX` in
-      // pantheon-config/schema.ts, so no control characters can reach this TUI
-      // sink (CWE-117). When the user has not configured `agents.triglav.model`
-      // the field is left unset and Triglav inherits OpenCode's session default —
-      // same behaviour as perun/zmora.
+      // Inject model AFTER registration (mirrors perun/zmora). When
+      // `agents.triglav.model` is unset, Triglav inherits OpenCode's session
+      // default. Model already validated by MODEL_REGEX — see
+      // src/modules/pantheon-config/schema.ts for the CWE-117 rationale.
       const triglavModel = loadPantheonConfig().agents.triglav?.model
       if (triglavModel !== undefined) {
-        config.agent["triglav"].model = triglavModel
+        config.agent[TRIGLAV_AGENT_KEY].model = triglavModel
       }
       serenaMissing = !isSerenaAvailable(config)
     },

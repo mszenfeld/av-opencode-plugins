@@ -1,10 +1,19 @@
 import type { SpecialistInfo } from "../agent-registry/agent-metadata.js"
 
+/**
+ * Canonical agent key for the Triglav exploration specialist. Centralised so
+ * the literal `"triglav"` is not duplicated across registration, config
+ * injection, tests, and docs — mirrors the convention used for `zmora` variants
+ * and Perun's coordinator name. Use this constant whenever referencing the
+ * agent key programmatically (config.agent[…], pantheon.json agents.<key>).
+ */
+export const TRIGLAV_AGENT_KEY = "triglav" as const
+
 export const TRIGLAV_DESCRIPTION =
   "Read-only codebase explorer: maps structure, finds definitions/references/patterns via serena LSP (Grep/Glob fallback). Returns a synthesized answer, not edits."
 
 export const triglavSpecialistInfo: SpecialistInfo = {
-  name: "triglav",
+  name: TRIGLAV_AGENT_KEY,
   mode: "subagent",
   description: TRIGLAV_DESCRIPTION,
   metadata: {

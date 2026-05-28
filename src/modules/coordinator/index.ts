@@ -352,7 +352,8 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       }
       // Inject model AFTER registration so we don't have to merge it into the
       // object literal above — the non-null assertion is safe because we just
-      // set the key on the line above.
+      // set the key on the line above. Model already validated by MODEL_REGEX
+      // — see src/modules/pantheon-config/schema.ts for the CWE-117 rationale.
       const perunModel = loadPantheonConfig().agents.perun?.model
       if (perunModel !== undefined) {
         config.agent["Perun - Coordinator"]!.model = perunModel

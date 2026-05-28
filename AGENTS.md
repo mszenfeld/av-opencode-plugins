@@ -254,6 +254,16 @@ Exceptions (these IDs are *system documentation*, not review residue, and may st
 
 When in doubt: if removing the ID would make the comment less useful, the ID was load-bearing and the comment is wrong; rewrite the prose to stand on its own.
 
+### Where review reports live
+
+Code-review reports are **permanent artefacts** that get committed to the repo. They live under `docs/reviews/` and follow the naming convention `YYYY-MM-DD-<branch-slug>.md`, with a `-N` suffix on collisions when the same branch is re-reviewed on the same day (e.g. `2026-05-27-feature-explore.md`, `2026-05-27-feature-explore-2.md`).
+
+Conventions:
+
+- **Commit the report** as soon as the review run produces it. An untracked report file under `docs/reviews/` is ambiguous (forgotten? leftover? local-only?) and should never linger across sessions.
+- **Keep "Fixed" status in the report**, not in commit messages — the report itself is the audit trail for which findings shipped on which branch.
+- **Do not link to `docs/reviews/*.md` from source or other docs.** Like superpowers artefacts, individual reports are point-in-time records; references to them rot once the branch is merged or the file is archived. Inline anything load-bearing into the permanent doc that needs it.
+
 ## Common Pitfalls
 
 - Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead. This bash gate (`classifyBashCommand` in `src/modules/commit/bash-policy.ts`) is **defense-in-depth / a workflow rail, not a security boundary** — it keeps the `/commit` workflow consistent but is bypassable by shapes the literal `git` token-match misses (`/usr/bin/git …`, `bash -c "git …"`, `hub commit`, `command git …`, alias indirection, `$(echo git) commit`, plumbing subcommands like `commit-tree` / `fast-import` / `update-ref`). Per project doctrine ([`docs/plugins/coordinator.md`](docs/plugins/coordinator.md): *"Treat code-enforced rules as the security boundary. The LLM-requested rules are defense in depth — they raise the cost of a successful prompt-injection escalation but are not the last line of defense."*), real shell-execution boundaries live outside this plugin. See [`docs/plugins/commit.md`](docs/plugins/commit.md#classifybashcommand-is-defense-in-depth-not-a-security-boundary) for the full bypass list.

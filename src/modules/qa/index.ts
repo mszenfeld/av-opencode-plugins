@@ -166,9 +166,8 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }
 
       // Inject model AFTER registration so we don't merge it into every literal
-      // above. The model string is restricted to a printable-ASCII allow-list
-      // by `MODEL_REGEX` in pantheon-config/schema.ts, so no control characters
-      // can reach this TUI sink (CWE-117).
+      // above. Model already validated by MODEL_REGEX — see
+      // src/modules/pantheon-config/schema.ts for the CWE-117 rationale.
       const zmoraModel = loadPantheonConfig().agents.zmora?.model
       if (zmoraModel !== undefined) {
         for (const stack of VARIANTS) {

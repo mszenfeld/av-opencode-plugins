@@ -2,11 +2,13 @@
 
 The coordinator plugin provides **`@perun`**, the Pantheon coordinator agent for the AppVerk OpenCode bundle. `@perun` does not execute work directly. Instead, it delegates to specialist subagents in parallel, synthesizes their results into structured reports, and proposes follow-up actions (typically a fix workflow). It is the orchestration layer that lets multi-step QA → Fix flows run inside a single conversation without manual hand-offs.
 
-The plugin ships three pieces:
+The plugin ships:
 
 - **`@perun` agent** — `mode: primary`, system prompt embedded in the package, communicates in Polish.
 - **`dispatch_parallel` tool** — runs specialist agents concurrently with deterministic ordering, polling, timeouts, and result-size caps.
 - **`assign_issue_ids` tool** — assigns deterministic zero-padded IDs (e.g. `QA-001`, `QA-002`) to a list of findings.
+- **`compute_waves` tool** — pure function that turns a flat scenario list with `**Depends-on:**` annotations into ordered dispatch waves via Kahn's topological sort.
+- **`dispatch_background` / `poll_background` / `wait_background` tools** — non-blocking, within-turn overlap. Perun fires a read-only specialist (typically `triglav`) into a child session via `session.promptAsync` (fire-and-forget), keeps working in the same turn, and collects the result later. See [Background dispatch (within-turn overlap)](#background-dispatch-within-turn-overlap).
 
 ## Installation
 
@@ -113,6 +115,9 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 | `dispatch_parallel` | Tool | n/a | Parallel session dispatch with a 4-wide worker pool. 1 s poll interval, 5 min per-task timeout, 100 KB result cap, **max 4 tasks per call** (caller chunks for larger workloads). |
 | `assign_issue_ids` | Tool | n/a | Pure function — deterministic, zero-padded 3-digit IDs (e.g. `QA-001`). |
 | `compute_waves` | Tool | n/a | Pure function — deterministic dependency-graph → wave grouping via topological sort, with cycle detection. |
+| `dispatch_background` | Tool | n/a | Fire-and-forget: starts a single specialist task via `session.promptAsync`, returns `{ id: "bg_…", agent, status: "running" }` immediately. Per-session cap of 4 concurrent background tasks. See [Background dispatch (within-turn overlap)](#background-dispatch-within-turn-overlap). |
+| `poll_background` | Tool | n/a | Non-blocking snapshot of given `bg_…` ids. Returns `running` / `success` / `not_found` per id; does NOT remove successful tasks (collect with `wait_background` to free the slot). |
+| `wait_background` | Tool | n/a | Blocks until the given `bg_…` ids are idle (or per-task timeout fires), returns `success` / `error` / `timeout` / `aborted` / `not_found`. **Removes collected tasks** — one-time retrieval, frees background slots. Honors `context.abort`: aborting cancels the wait AND kills the waited child sessions. |
 
 ### `@perun` allowed tools
 
@@ -219,6 +224,60 @@ When the caller aborts (e.g. user Ctrl-C) before all tasks have started, each wo
 
 In-flight tasks honour the existing abort threading (poller checks signal each iteration, returns `status: "aborted"`). The result array still matches `tasks[]` order — Perun can see exactly which scenarios were dropped versus completed.
 
+### Background dispatch (within-turn overlap)
+
+`dispatch_parallel` is **blocking** — Perun waits for the entire chunk to finish before its next thought. That is the right shape for ordered QA waves (where you cannot start wave N+1 until wave N completes) and for issue-fix dispatches (where you need the fix result before deciding the next step). It is the wrong shape for **read-only exploration that overlaps with Perun's own work**: classifying a user request, drafting a follow-up question, or planning the next dispatch can all proceed in parallel with a `triglav` reconnaissance run.
+
+The three background-dispatch tools (`dispatch_background`, `poll_background`, `wait_background`) provide that overlap. They use OpenCode's `session.promptAsync` endpoint to start a child session as **fire-and-forget** — the HTTP call returns 204 immediately and the server runs the LLM turn autonomously. Perun's own turn is never blocked on the child's progress; completion is observed later by polling the child session (which is what `poll_background` / `wait_background` do under the hood, reusing the same `pollUntilIdle` machinery as `dispatch_parallel`).
+
+#### Tool signatures
+
+| Tool | Args | Returns |
+|---|---|---|
+| `dispatch_background` | `{ agent: string, summary: string, prompt: string, context?: string }` — single task per call. | `{ id: "bg_<8hex>", agent, status: "running" }`. |
+| `poll_background` | `{ ids: string[] }` — task ids returned by `dispatch_background`. | One entry per id: `{ id, agent, status: "running" \| "success" \| "not_found", result?, duration_ms? }`. **Does not remove successful tasks** — call `wait_background` to collect and free the slot. |
+| `wait_background` | `{ ids: string[], timeoutMs?: number }` — blocks until each id is idle. | One entry per id: `{ id, agent, status: "success" \| "error" \| "timeout" \| "aborted" \| "not_found", result, duration_ms, error? }`. **Removes collected tasks**. |
+
+Defaults match `dispatch_parallel`: 1 s poll interval (`DEFAULT_POLL_INTERVAL_MS`), 5 min per-task timeout (`DEFAULT_TASK_TIMEOUT_MS`), 100 KB result cap (`DEFAULT_RESULT_MAX_BYTES`). Result strings pass through the same `neutralizeUntrustedOutput` and `truncateBytes` pipeline as `dispatch_parallel`.
+
+#### Per-session cap
+
+The number of in-flight background tasks **per parent session** is capped at 4 (`BACKGROUND_MAX_CONCURRENT` in `src/modules/coordinator/background.ts`). The cap mirrors the synchronous worker pool but is enforced independently — synchronous `dispatch_parallel` calls and background tasks do not share a budget. `dispatch_background` rejects with an explicit error when the cap is reached:
+
+```text
+dispatch_background: max 4 background tasks running for this session — collect one (wait_background / poll_background) before firing more
+```
+
+The cap exists to bound spawn count (cost-DoS). A confused agent that calls `dispatch_background` in a loop without ever collecting cannot mint unbounded child sessions.
+
+#### Factory-scoped store
+
+The plugin holds one `BackgroundTaskStore` (`src/modules/coordinator/background-store.ts`) — constructed inside `AppVerkCoordinatorPlugin` and shared by all three background tools. It is **in-memory, per process**, indexed by task id and scoped by parent session. The store holds the parent → child mapping only — no results, no proactive completion detection. Status is derived at collect time by polling the child session.
+
+Because the store is factory-scoped (not module-scoped), each plugin instance gets a fresh store. Tests can instantiate the plugin multiple times without cross-test pollution; production runs a single plugin instance whose store lives as long as the process.
+
+#### `session.deleted` cleanup
+
+The coordinator subscribes to OpenCode's `session.deleted` event. When fired, the event handler:
+
+1. Looks up all background tasks whose `parentSessionId` matches the deleted id (parent session deletion → Perun went away) and best-effort aborts each child session via `specialist.abortTask`.
+2. Removes those tasks from the store (`clearParent`).
+3. Also calls `removeByChild(deletedID)` to handle the inverse case — a child background session that died independently of its parent.
+
+Both store calls are no-ops for the "wrong" kind of id, so calling both is safe. This handler is the only place where child sessions are cancelled server-side on parent death; without it, a Ctrl-C'd Perun turn would leak running specialist sessions until the OpenCode server restarted.
+
+#### When to use which
+
+| Scenario | Tool |
+|---|---|
+| Ordered QA waves; need result before next dispatch | `dispatch_parallel` |
+| Issue-fix dispatches (sequential, one issue at a time) | `dispatch_parallel` |
+| `triglav` exploration overlapped with Perun's own classification / planning | `dispatch_background` + `wait_background` |
+| Check whether a background task has finished without blocking | `poll_background` |
+| Collect background results, freeing slots for new tasks | `wait_background` |
+
+Always collect (`wait_background` / `poll_background`) what you started before ending the turn — uncollected background work is wasted compute.
+
 ## Security model — code-enforced vs LLM-requested
 
 The coordinator's security posture has two layers. Code-enforced rules cannot be bypassed by the model; LLM-requested rules live in `perun.md` and depend on the agent following its prompt.
@@ -271,9 +330,16 @@ This package is intentionally MVP scope. Known deferrals:
 
 ```
 src/modules/coordinator/
-├── index.ts                # Plugin factory — registers @perun, dispatch_parallel, assign_issue_ids, compute_waves
+├── index.ts                # Plugin factory — registers @perun, dispatch_parallel, assign_issue_ids,
+│                           # compute_waves, dispatch_background, poll_background, wait_background.
+│                           # Owns the factory-scoped BackgroundTaskStore and the session.deleted
+│                           # cleanup branch. Exported PERUN_TOOLS lists every coordinator tool name.
 ├── dispatch.ts             # dispatchParallel(): worker pool, cap enforcement, abort-at-start drain
-├── sdk-specialist.ts       # SDK adapter — createSDKSpecialist, loadAgentRegistry, toPollerMessage
+├── background.ts           # startBackgroundTask() + collectBackground(); BACKGROUND_MAX_CONCURRENT = 4
+├── background-store.ts     # BackgroundTaskStore — in-memory parent→child registry
+│                           # (register/get/listByParent/countRunningByParent/remove/removeByChild/clearParent)
+├── sdk-specialist.ts       # SDK adapter — createSDKSpecialist (incl. startBackground via session.promptAsync),
+│                           # loadAgentRegistry, toPollerMessage
 ├── poller.ts               # pollUntilIdle() + PollerTimeoutError
 ├── assign-issue-ids.ts     # Deterministic zero-padded ID assignment (pure function)
 ├── compute-waves.ts        # computeWaves(): deterministic dependency-graph → wave grouping, cycle detection
