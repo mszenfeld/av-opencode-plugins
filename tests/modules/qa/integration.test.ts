@@ -319,6 +319,9 @@ describe("COMP-001 wire-up: parse_plan + dispatch + shell.env + scrub", () => {
       async abortTask(): Promise<void> {
         /* no-op */
       },
+      async startBackground(): Promise<string> {
+        return childSessionID
+      },
     }
 
     // Seed the BindingsStore via the BindingsStore behind the singleton.

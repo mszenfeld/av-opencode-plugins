@@ -2,6 +2,7 @@ import { BindingsStore } from './bindings-store.js';
 import { QaRunState } from './qa-run-state.js';
 import './secret.js';
 import './binding-parser.js';
+import './recipe-validator.js';
 
 interface RecordInputHandlerDeps {
     store: BindingsStore;

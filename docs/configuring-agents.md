@@ -1,6 +1,6 @@
 # Configuring Pantheon Agents
 
-Pantheon agents (Perun, Zmora) can be assigned specific Anthropic models via a `pantheon.json` configuration file. This document is the canonical reference for that file.
+Pantheon agents Perun, Zmora, and Triglav can be assigned specific models via a `pantheon.json` configuration file. This document is the canonical reference for that file.
 
 ## TL;DR
 
@@ -9,13 +9,14 @@ Create `~/.config/opencode/pantheon.json`:
 ```jsonc
 {
   "agents": {
-    "perun": { "model": "anthropic/claude-opus-4-7" },
-    "zmora": { "model": "anthropic/claude-sonnet-4-6" }
+    "perun":   { "model": "anthropic/claude-opus-4-7" },
+    "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
+    "triglav": { "model": "opencode/claude-haiku-4-5" }
   }
 }
 ```
 
-Restart OpenCode. Perun will run on Opus, Zmora on Sonnet.
+Restart OpenCode. Perun will run on Opus, Zmora on Sonnet, Triglav on Haiku (subscription-routed).
 
 ## Where the file lives
 
@@ -58,12 +59,15 @@ Effective configuration when running inside `/my-project`:
 
 ## Available agents
 
-| Pantheon key | Registered as | Description |
-|---|---|---|
-| `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. |
-| `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. |
+| Pantheon key | Registered as | Description | Model-configurable? |
+|---|---|---|---|
+| `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. | Yes — via `pantheon.json` |
+| `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. | Yes — via `pantheon.json` |
+| `triglav` | `triglav` (subagent) | Read-only codebase explorer. Dispatched up to 4× in parallel (and now in the background) — favor fast/cheap models. | Yes — via `pantheon.json` |
 
 > Internal variants of Zmora (`zmora-fe`, `zmora-be`, `zmora-setup`) are subagents dispatched by Perun. They are not user-facing, but the model you set under `zmora` applies to all three.
+
+> **Triglav model defaults.** When `agents.triglav.model` is not set, Triglav inherits OpenCode's session default model (same pattern as `perun`/`zmora`). Because Triglav is dispatched many-in-parallel and in the background, a fast/cheap model is the natural choice — for example `opencode/claude-haiku-4-5` (subscription) or `opencode/deepseek-v4-flash-free` (zero marginal cost). The OpenCode-subscription provider prefix `opencode/<modelID>` lets you route through the subscription rather than per-token Anthropic billing.
 
 ## Schema
 

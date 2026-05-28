@@ -64,6 +64,29 @@ export function createSDKSpecialist(
       // so this remains best-effort end to end.
       await client.session.abort({ path: { id: sessionId } })
     },
+    async startBackground(agentName: string, prompt: string): Promise<string> {
+      const created = await client.session.create({
+        body: {
+          parentID: parentSessionID,
+          title: `[perun] background ${agentName}`,
+        },
+      })
+      const sessionId: string = created.data?.id ?? ""
+      if (sessionId.length === 0) {
+        throw new Error(`startBackground returned no session id for agent ${agentName}`)
+      }
+      // Fire-and-forget: promptAsync returns 204 immediately; the server runs
+      // the LLM turn autonomously. We do NOT await the turn — completion is
+      // observed later by polling the child session (poll_background/wait_background).
+      await client.session.promptAsync({
+        path: { id: sessionId },
+        body: {
+          agent: agentName,
+          parts: [{ type: "text", text: prompt }],
+        },
+      })
+      return sessionId
+    },
   }
 }
 

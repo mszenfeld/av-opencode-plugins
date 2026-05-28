@@ -33,10 +33,36 @@ export interface DispatchSpecialist {
    * an "aborted" result).
    */
   abortTask(sessionId: string): Promise<void>
+  /**
+   * Start a task in the background: create the child session, then fire it via
+   * `session.promptAsync` (returns a 204 immediately; the server runs the LLM
+   * turn autonomously). Resolves the child session id WITHOUT awaiting the turn.
+   * Rejects if session creation or the async-prompt acknowledgement fails.
+   */
+  startBackground(agentName: string, prompt: string): Promise<string>
 }
 
 export interface AgentInfo {
   mode: "primary" | "subagent" | "all"
+}
+
+/**
+ * Anti-recursion guard: only strict `subagent`-mode agents are dispatchable.
+ * Both `primary` and `all` are rejected (an `all` agent can run as a primary,
+ * so dispatching it from a primary would re-open the anti-recursion hole).
+ * Shared by `dispatchParallel` and the background dispatch path.
+ */
+export function validateDispatchable(
+  agentRegistry: Record<string, AgentInfo>,
+  name: string,
+): void {
+  const agentInfo = agentRegistry[name]
+  if (agentInfo === undefined) {
+    throw new Error(`Unknown agent: ${name}`)
+  }
+  if (agentInfo.mode !== "subagent") {
+    throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${name}`)
+  }
 }
 
 export interface DispatchParallelInput {
@@ -69,7 +95,7 @@ export interface DispatchParallelInput {
    *
    * If a `scrubberFactory` is also provided, the factory wins and this field
    * is ignored — the factory yields a pinned-snapshot scrubber, which is the
-   * race-safe path (ARCH-004).
+   * race-safe path.
    */
   scrubber?: (text: string, parentSessionID: string) => string
   /**
@@ -144,17 +170,7 @@ export async function dispatchParallel(
 
   // Anti-recursion: validate every task BEFORE any session spawns.
   for (const task of tasks) {
-    const agentInfo = agentRegistry[task.name]
-    if (agentInfo === undefined) {
-      throw new Error(`Unknown agent: ${task.name}`)
-    }
-    // Default-deny: only strict "subagent" mode is dispatchable. Both "primary"
-    // and "all" modes are rejected to prevent anti-recursion bypass — an "all"
-    // agent can be invoked as a primary, so dispatching it from a primary
-    // would re-open the anti-recursion guarantee.
-    if (agentInfo.mode !== "subagent") {
-      throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`)
-    }
+    validateDispatchable(agentRegistry, task.name)
   }
 
   // Preflight runs ONCE per dispatch, after validation but BEFORE any session
@@ -175,7 +191,7 @@ export async function dispatchParallel(
   // Materialise the per-dispatch scrubber session BEFORE any task runs so the
   // pinned snapshot exists for the full duration of the wave. The factory
   // takes precedence over the legacy `scrubber` field — when both are set the
-  // factory wins because it is the race-safe path (ARCH-004). Factory failures
+  // factory wins because it is the race-safe path. Factory failures
   // are absorbed: a buggy factory must not break unrelated dispatches.
   let scrubberSession: { scrub: (text: string) => string; release: () => void } | undefined
   if (

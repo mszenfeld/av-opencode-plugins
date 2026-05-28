@@ -1,6 +1,6 @@
 # AppVerk OpenCode Plugins — Agent Guide
 
-This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `zmora` logical agent, `pantheon-config` — the harness configuration library, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel`, `assign_issue_ids`, and `compute_waves` tools) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
+This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins (a Python `/python` workflow, a TypeScript + React `/frontend` workflow, a Swift `/swift` workflow, a `/review` code review workflow, and shared `skill-utils` helpers), plus absorbed modules under `src/modules/<name>/` (currently: `commit`, `qa` — the `/create-qa-plan` + `/run-qa` workflow with the `zmora` logical agent, `pantheon-config` — the harness configuration library, and `coordinator` — the Pantheon `@perun` primary agent with `dispatch_parallel`, `assign_issue_ids`, `compute_waves`, and the background-dispatch tools `dispatch_background` / `poll_background` / `wait_background`) and a Pantheon session-notification hook (`src/hooks/session-notification/`). The root package re-exports all of them and handles plugin merging.
 
 ## Monorepo Layout
 
@@ -14,8 +14,10 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `packages/skill-utils` | Shared helpers for creating skill-based plugins. Output shipped at `packages/skill-utils/dist/`. |
 | `packages/skill-registry` | Global skill registry — scans skill folders, parses frontmatter, registers unified `load_appverk_skill` tool, injects activation rules into every agent's system prompt. Output shipped at `packages/skill-registry/dist/`. |
 | `src/modules/qa/` | Absorbed QA plugin — TS source only. Assets: `src/commands/{create-qa-plan,run-qa}.md`, `src/skills/qa/**`, `src/modules/qa/prompt-sections/{core,overlay-fe,overlay-be,overlay-setup}.md`. Registers three `zmora-{fe,be,setup}` subagent variants composed via `prompt-builder.ts` (overlay-setup.md joins overlay-fe/overlay-be on top of `core.md`); logical agent name `zmora` everywhere user-facing. Also registers the `parse_plan` (Perun-only, populates per-run recipe AST from the plan's `## Setup` → `**Bindings:**` block), `execute_recipe` (zmora-setup only, mints/refreshes bindings), and `record_input` (Perun-only, captures user-pasted `NAME=value` inputs) plugin tools, plus the `shell.env` hook that injects per-parent bindings into child shells, the `BindingsStore` / `scrubSecrets` pipeline, and a periodic TTL sweep that purges expired (non-pinned) entries. Tests: `tests/modules/qa/`. Built into `dist/modules/qa/`, `dist/commands/`, `dist/skills/qa/`. |
+| `src/modules/explore/` | Absorbed explore plugin — TS source only. Registers the `triglav` read-only explorer subagent (`mode: "subagent"`) and calls `registerAgentMetadata()` so Perun can route to it. Semantic search is gated on the optional serena MCP; if serena is absent the agent still registers but runs in degraded mode (Grep/Glob) and emits a one-time warning toast on `session.created`. Tests: `tests/modules/explore/`. Built into `dist/modules/explore/`. |
 | `packages/swift-developer` | Swift-developer plugin source, tests, skills, build scripts. Output shipped at `packages/swift-developer/dist/`. |
-| `src/modules/coordinator/` | Absorbed coordinator plugin — TS source only. Asset: `src/agents/perun.md`. Registers `dispatch_parallel` (worker pool, concurrency 4, cap 4 — chunk larger workloads), `assign_issue_ids`, and `compute_waves` tools alongside the `@perun` primary agent. Tests: `tests/modules/coordinator/`. Built into `dist/modules/coordinator/` and `dist/agents/`. |
+| `src/modules/agent-registry/` | Harness-resident **library** (no plugin export) — process-wide `SpecialistInfo` registry. Exposes `registerAgentMetadata()` (fail-fast on a conflicting duplicate logical name; idempotent on identical re-registration) / `getAgentMetadataRegistry()` (returns a name-sorted copy), and the `buildPerunPrompt` placeholder renderer that fills Perun's prompt template from the registered specialists. Agent-registering modules call `registerAgentMetadata()` in their factory bodies; `coordinator/` consumes the registry via `buildPerunPrompt` when it builds Perun's prompt. Tests: `tests/modules/agent-registry/`. Built into `dist/modules/agent-registry/`. |
+| `src/modules/coordinator/` | Absorbed coordinator plugin — TS source only. Asset: `src/agents/perun.md`. Registers `dispatch_parallel` (worker pool, concurrency 4, cap 4 — chunk larger workloads), `assign_issue_ids`, and `compute_waves` tools alongside the `@perun` primary agent. Also registers the **background-dispatch** tools `dispatch_background` / `poll_background` / `wait_background` (non-blocking, within-turn overlap; `session.promptAsync` fire-and-forget + a factory-scoped in-memory `BackgroundTaskStore`, per-session cap 4, `session.deleted` cleanup). The exported `PERUN_TOOLS` constant lists every coordinator tool and `tests/modules/coordinator/perun-tools-sync.test.ts` enforces it matches perun.md's `allowed-tools` frontmatter. Tests: `tests/modules/coordinator/`. Built into `dist/modules/coordinator/` and `dist/agents/`. |
 | `src/modules/pantheon-config/` | Harness-resident **library** (no plugin export) — reads `pantheon.json` (user-global + per-project walk-up, closest-wins merge) and exposes `loadPantheonConfig()` / `getLoadErrors()` / `pantheonConfigEmpty()`. Consumed by `coordinator/` and `qa/` in their `config` hooks. Tests: `tests/modules/pantheon-config/`. Built into `dist/modules/pantheon-config/`. |
 | `src/modules/_shared/` | Cross-module helpers: `loadModuleAsset` (sibling markdown loading under tsup's `bundle: false` layout), `SessionAgentRegistry` (childSessionID → agentName), `register/getDispatchExtensions` (QA publishes scrubberFactory + registry that coordinator reads at dispatch time). Consumed by `coordinator/` and `qa/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
@@ -194,9 +196,10 @@ For small absorbed modules (no separate workspace), follow this pattern instead:
 2. Place `.md` assets under `src/commands/`, `src/agents/`, or `src/skills/` (the layout `scripts/copy-root-assets.mjs` knows about).
 3. Place tests under `tests/modules/<name>/`. Import sources via `from "../../../src/modules/<name>/<file>.js"`.
 4. Import and register the plugin factory in `src/index.ts` (see [Root Entrypoint Registration](#root-entrypoint-registration)).
-5. Build and test via root `npm run build:root` and `npm run check` — no per-package scripts.
-6. Update `tests/root-plugin.test.ts` packed-file assertions to include the new `dist/modules/<name>/*` and `dist/commands/<file>.md` paths.
-7. Update `README.md` and this `AGENTS.md` per the [Documentation Checklist](#documentation-checklist).
+5. **If the module registers an agent Perun should route to**, call `registerAgentMetadata()` (from `src/modules/agent-registry/`) with the agent's `SpecialistInfo` in the module's factory body — otherwise the agent is invocable but invisible to Perun's routing (it never renders into Perun's prompt). **Ordering matters:** every agent must register *before* the coordinator builds Perun's prompt. `getPerunPrompt()` snapshots the registry on its first call and caches the result, so any agent-registering module must appear *before* `AppVerkCoordinatorPlugin` in the `defaultPluginFactories` array in `src/index.ts`. The coordinator is registered last precisely to satisfy this; place a new agent-registering module ahead of it (e.g. as `src/modules/explore/` does with `triglav`).
+6. Build and test via root `npm run build:root` and `npm run check` — no per-package scripts.
+7. Update `tests/root-plugin.test.ts` packed-file assertions to include the new `dist/modules/<name>/*` and `dist/commands/<file>.md` paths.
+8. Update `README.md` and this `AGENTS.md` per the [Documentation Checklist](#documentation-checklist).
 
 ## Versioning & Git Installation
 
@@ -250,6 +253,16 @@ Exceptions (these IDs are *system documentation*, not review residue, and may st
 - `src/skills/qa/report-format/SKILL.md` — illustrative examples for `/fix` routing.
 
 When in doubt: if removing the ID would make the comment less useful, the ID was load-bearing and the comment is wrong; rewrite the prose to stand on its own.
+
+### Where review reports live
+
+Code-review reports are **permanent artefacts** that get committed to the repo. They live under `docs/reviews/` and follow the naming convention `YYYY-MM-DD-<branch-slug>.md`, with a `-N` suffix on collisions when the same branch is re-reviewed on the same day (e.g. `2026-05-27-feature-explore.md`, `2026-05-27-feature-explore-2.md`).
+
+Conventions:
+
+- **Commit the report** as soon as the review run produces it. An untracked report file under `docs/reviews/` is ambiguous (forgotten? leftover? local-only?) and should never linger across sessions.
+- **Keep "Fixed" status in the report**, not in commit messages — the report itself is the audit trail for which findings shipped on which branch.
+- **Do not link to `docs/reviews/*.md` from source or other docs.** Like superpowers artefacts, individual reports are point-in-time records; references to them rot once the branch is merged or the file is archived. Inline anything load-bearing into the permanent doc that needs it.
 
 ## Common Pitfalls
 

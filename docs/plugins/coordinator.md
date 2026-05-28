@@ -2,11 +2,13 @@
 
 The coordinator plugin provides **`@perun`**, the Pantheon coordinator agent for the AppVerk OpenCode bundle. `@perun` does not execute work directly. Instead, it delegates to specialist subagents in parallel, synthesizes their results into structured reports, and proposes follow-up actions (typically a fix workflow). It is the orchestration layer that lets multi-step QA → Fix flows run inside a single conversation without manual hand-offs.
 
-The plugin ships three pieces:
+The plugin ships:
 
 - **`@perun` agent** — `mode: primary`, system prompt embedded in the package, communicates in Polish.
 - **`dispatch_parallel` tool** — runs specialist agents concurrently with deterministic ordering, polling, timeouts, and result-size caps.
 - **`assign_issue_ids` tool** — assigns deterministic zero-padded IDs (e.g. `QA-001`, `QA-002`) to a list of findings.
+- **`compute_waves` tool** — pure function that turns a flat scenario list with `**Depends-on:**` annotations into ordered dispatch waves via Kahn's topological sort.
+- **`dispatch_background` / `poll_background` / `wait_background` tools** — non-blocking, within-turn overlap. Perun fires a read-only specialist (typically `triglav`) into a child session via `session.promptAsync` (fire-and-forget), keeps working in the same turn, and collects the result later. See [Background dispatch (within-turn overlap)](#background-dispatch-within-turn-overlap).
 
 ## Installation
 
@@ -113,6 +115,9 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 | `dispatch_parallel` | Tool | n/a | Parallel session dispatch with a 4-wide worker pool. 1 s poll interval, 5 min per-task timeout, 100 KB result cap, **max 4 tasks per call** (caller chunks for larger workloads). |
 | `assign_issue_ids` | Tool | n/a | Pure function — deterministic, zero-padded 3-digit IDs (e.g. `QA-001`). |
 | `compute_waves` | Tool | n/a | Pure function — deterministic dependency-graph → wave grouping via topological sort, with cycle detection. |
+| `dispatch_background` | Tool | n/a | Fire-and-forget: starts a single specialist task via `session.promptAsync`, returns `{ id: "bg_…", agent, status: "running" }` immediately. Per-session cap of 4 concurrent background tasks. See [Background dispatch (within-turn overlap)](#background-dispatch-within-turn-overlap). |
+| `poll_background` | Tool | n/a | Non-blocking snapshot of given `bg_…` ids. Returns `running` / `success` / `not_found` per id; does NOT remove successful tasks (collect with `wait_background` to free the slot). |
+| `wait_background` | Tool | n/a | Blocks until the given `bg_…` ids are idle (or per-task timeout fires), returns `success` / `error` / `timeout` / `aborted` / `not_found`. **Removes collected tasks** — one-time retrieval, frees background slots. Honors `context.abort`: aborting cancels the wait AND kills the waited child sessions. |
 
 ### `@perun` allowed tools
 
@@ -144,6 +149,7 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
 | `zmora` | subagent | Execute a single QA scenario (FE or BE). Implemented as two registered variants (`zmora-fe` for Playwright scenarios, `zmora-be` for HTTP + DB scenarios); Perun routes by scenario prefix and dispatches one task per scenario. The logical name `zmora` is what appears in the TUI and the report; variants are an internal implementation detail. See [docs/plugins/qa.md](./qa.md) for the variant-split rationale. | Dispatched once per scenario by Perun |
 | `zmora-setup` | subagent | Provision one Binding per dispatch via `execute_recipe` — the ONLY agent in the bundle with `execute_recipe` enabled. Has no Bash access at all (`SETUP_TOOLS = ["Read", "Glob", "Grep", "execute_recipe"]`); the recipe sandbox is its only actuator. Perun synthesises `SETUP-NN` scenarios for each declared binding in Workflow 1 Step 3.6 and dispatches them in Wave 0 ahead of any FE/BE scenarios that depend on the binding. See [docs/plugins/qa.md → Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning). | Dispatched once per binding by Perun before FE/BE scenarios |
 | `fix-auto` | subagent | Auto-fix code issues from reports | User accepts a fix proposal |
+| `triglav` | subagent | Read-only codebase explorer: maps structure, finds definitions/references/patterns via serena LSP (Grep/Glob fallback). Returns a synthesized answer, not edits. | Before planning when 2+ modules / an unfamiliar area is involved; for where/how-does-X-work questions |
 
 Perun's prefix-routing is therefore **three-way**: `FE-*` → `zmora-fe`, `BE-*` → `zmora-be`, `SETUP-*` → `zmora-setup`. The variant-suffix normalisation rule still applies to user-facing strings: `zmora-fe` / `zmora-be` / `zmora-setup` collapse to `zmora` in the report, terminal output, and error messages (internal log/debug strings may retain variant names).
 
@@ -163,6 +169,19 @@ When adding a new logical agent with variants, document the variant mapping in t
 #### Variant-suffix normalisation
 
 Perun normalises `zmora-fe` / `zmora-be` / `zmora-setup` → `zmora` in every user-facing string before display: the report, terminal output, error messages, the All Scenarios table. Internal log/debug strings may retain variant names. This pairs with the logical-name label exception to keep the user-visible surface free of variant suffixes even when the underlying dispatch returns errors stamped with the variant name (e.g. `"Task zmora-fe timed out"` is rendered as `"Task zmora timed out"`).
+
+#### How the specialist roster reaches `perun.md` (render pipeline)
+
+`src/agents/perun.md` is **not** a fully hand-authored prompt. It is a template containing machine-filled placeholders for the specialist roster and delegation rules:
+
+- `{SPECIALISTS_TABLE}` — the Name / Mode / Purpose table.
+- `{KEY_TRIGGERS}` — the "check BEFORE classification" trigger bullets.
+- `{DELEGATION_TABLE}` — the Domain / Agent / Trigger table.
+- `{USE_AVOID:<name>}` — the per-agent "use when / avoid when" block for the named agent.
+
+At init, `getPerunPrompt()` (`src/modules/coordinator/index.ts`) loads the template and calls `buildPerunPrompt(template, getAgentMetadataRegistry())` (`src/modules/agent-registry/perun-prompt-builder.ts`), which replaces each placeholder with content rendered from the agent **metadata registry**. The registry is populated by each agent's `*.metadata.ts` entry — e.g. `triglav.metadata.ts` (`src/modules/explore/`), `zmora.metadata.ts` (`src/modules/qa/`), and `fix-auto.metadata.ts` (`src/modules/agent-registry/`, registered explicitly in `index.ts` because `packages/code-review` cannot import this bridge).
+
+**To change Perun's specialist roster or delegation triggers, edit the agent's `*.metadata.ts` entry — never the placeholder regions of `perun.md`.** Those regions are overwritten by `buildPerunPrompt` on every load, so direct edits there are silently lost. The hand-authored prose around the placeholders (workflows, safety rules) is yours to edit; the placeholder-filled tables and trigger blocks are not.
 
 ### `dispatch_parallel` runtime characteristics
 
@@ -205,6 +224,60 @@ When the caller aborts (e.g. user Ctrl-C) before all tasks have started, each wo
 
 In-flight tasks honour the existing abort threading (poller checks signal each iteration, returns `status: "aborted"`). The result array still matches `tasks[]` order — Perun can see exactly which scenarios were dropped versus completed.
 
+### Background dispatch (within-turn overlap)
+
+`dispatch_parallel` is **blocking** — Perun waits for the entire chunk to finish before its next thought. That is the right shape for ordered QA waves (where you cannot start wave N+1 until wave N completes) and for issue-fix dispatches (where you need the fix result before deciding the next step). It is the wrong shape for **read-only exploration that overlaps with Perun's own work**: classifying a user request, drafting a follow-up question, or planning the next dispatch can all proceed in parallel with a `triglav` reconnaissance run.
+
+The three background-dispatch tools (`dispatch_background`, `poll_background`, `wait_background`) provide that overlap. They use OpenCode's `session.promptAsync` endpoint to start a child session as **fire-and-forget** — the HTTP call returns 204 immediately and the server runs the LLM turn autonomously. Perun's own turn is never blocked on the child's progress; completion is observed later by polling the child session (which is what `poll_background` / `wait_background` do under the hood, reusing the same `pollUntilIdle` machinery as `dispatch_parallel`).
+
+#### Tool signatures
+
+| Tool | Args | Returns |
+|---|---|---|
+| `dispatch_background` | `{ agent: string, summary: string, prompt: string, context?: string }` — single task per call. | `{ id: "bg_<8hex>", agent, status: "running" }`. |
+| `poll_background` | `{ ids: string[] }` — task ids returned by `dispatch_background`. | One entry per id: `{ id, agent, status: "running" \| "success" \| "not_found", result?, duration_ms? }`. **Does not remove successful tasks** — call `wait_background` to collect and free the slot. |
+| `wait_background` | `{ ids: string[], timeoutMs?: number }` — blocks until each id is idle. | One entry per id: `{ id, agent, status: "success" \| "error" \| "timeout" \| "aborted" \| "not_found", result, duration_ms, error? }`. **Removes collected tasks**. |
+
+Defaults match `dispatch_parallel`: 1 s poll interval (`DEFAULT_POLL_INTERVAL_MS`), 5 min per-task timeout (`DEFAULT_TASK_TIMEOUT_MS`), 100 KB result cap (`DEFAULT_RESULT_MAX_BYTES`). Result strings pass through the same `neutralizeUntrustedOutput` and `truncateBytes` pipeline as `dispatch_parallel`.
+
+#### Per-session cap
+
+The number of in-flight background tasks **per parent session** is capped at 4 (`BACKGROUND_MAX_CONCURRENT` in `src/modules/coordinator/background.ts`). The cap mirrors the synchronous worker pool but is enforced independently — synchronous `dispatch_parallel` calls and background tasks do not share a budget. `dispatch_background` rejects with an explicit error when the cap is reached:
+
+```text
+dispatch_background: max 4 background tasks running for this session — collect one (wait_background / poll_background) before firing more
+```
+
+The cap exists to bound spawn count (cost-DoS). A confused agent that calls `dispatch_background` in a loop without ever collecting cannot mint unbounded child sessions.
+
+#### Factory-scoped store
+
+The plugin holds one `BackgroundTaskStore` (`src/modules/coordinator/background-store.ts`) — constructed inside `AppVerkCoordinatorPlugin` and shared by all three background tools. It is **in-memory, per process**, indexed by task id and scoped by parent session. The store holds the parent → child mapping only — no results, no proactive completion detection. Status is derived at collect time by polling the child session.
+
+Because the store is factory-scoped (not module-scoped), each plugin instance gets a fresh store. Tests can instantiate the plugin multiple times without cross-test pollution; production runs a single plugin instance whose store lives as long as the process.
+
+#### `session.deleted` cleanup
+
+The coordinator subscribes to OpenCode's `session.deleted` event. When fired, the event handler:
+
+1. Looks up all background tasks whose `parentSessionId` matches the deleted id (parent session deletion → Perun went away) and best-effort aborts each child session via `specialist.abortTask`.
+2. Removes those tasks from the store (`clearParent`).
+3. Also calls `removeByChild(deletedID)` to handle the inverse case — a child background session that died independently of its parent.
+
+Both store calls are no-ops for the "wrong" kind of id, so calling both is safe. This handler is the only place where child sessions are cancelled server-side on parent death; without it, a Ctrl-C'd Perun turn would leak running specialist sessions until the OpenCode server restarted.
+
+#### When to use which
+
+| Scenario | Tool |
+|---|---|
+| Ordered QA waves; need result before next dispatch | `dispatch_parallel` |
+| Issue-fix dispatches (sequential, one issue at a time) | `dispatch_parallel` |
+| `triglav` exploration overlapped with Perun's own classification / planning | `dispatch_background` + `wait_background` |
+| Check whether a background task has finished without blocking | `poll_background` |
+| Collect background results, freeing slots for new tasks | `wait_background` |
+
+Always collect (`wait_background` / `poll_background`) what you started before ending the turn — uncollected background work is wasted compute.
+
 ## Security model — code-enforced vs LLM-requested
 
 The coordinator's security posture has two layers. Code-enforced rules cannot be bypassed by the model; LLM-requested rules live in `perun.md` and depend on the agent following its prompt.
@@ -218,7 +291,7 @@ The coordinator's security posture has two layers. Code-enforced rules cannot be
 | Code-enforced | Worker pool concurrency capped at 4 — bounds wall-clock concurrency regardless of `tasks.length`. | `src/modules/coordinator/dispatch.ts` (`DISPATCH_CONCURRENCY`) |
 | Code-enforced | Per-variant `allowed-tools` boundary — `zmora-fe` and `zmora-be` register with disjoint stack-specific tool allowlists. Routes a wrong-variant dispatch into a runtime "tool not in allowlist" rejection rather than silent cross-stack execution. | `src/modules/qa/allowed-tools.ts` + OpenCode runtime |
 | Code-enforced | Per-agent tool gating via `AgentConfig.tools` — `execute_recipe` is enabled ONLY on `zmora-setup`; `record_input` and `parse_plan` are enabled ONLY on Perun. Every other registered agent (`zmora-fe`, `zmora-be`, `fix-auto`) has those tools disabled at the runtime registry level. | `src/modules/qa/index.ts` (`AgentConfig.tools`) |
-| Code-enforced | `execute_recipe` AST validation — recipe scripts are parsed into an AST and rejected if they contain anything outside the recipe DSL (no arbitrary shell commands, no eval). The recipe then runs in a sandboxed bash child with an allowlisted env subset built by `buildChildEnv` — host `process.env` is NOT inherited. | `src/modules/qa/recipe-parser.ts` + `src/modules/qa/child-env.ts` |
+| Code-enforced | `execute_recipe` AST validation — recipe scripts are parsed into an AST and rejected if they contain anything outside the recipe DSL (no arbitrary shell commands, no eval). The recipe then runs in a sandboxed bash child with an allowlisted env subset built by `buildChildEnv` — host `process.env` is NOT inherited. | `src/modules/qa/recipe-validator.ts` + `src/modules/qa/child-env.ts` |
 | Code-enforced | `record_input` name denylist — user-pasted input names are rejected if they hit the process-control denylist (`PATH`, `LD_PRELOAD`, `NODE_OPTIONS`, `IFS`, `BASH_ENV`, `HOME`, `SSH_AUTH_SOCK`, …) or start with a well-known credential prefix (`AWS_`, `GCP_`, `GITHUB_`, `ANTHROPIC_`, `OPENAI_`, `DATABASE_`, `OP_`, `VAULT_`, `K8S_`, `KUBE`, …). Minted recipe bindings (`QA_BIND_*`) are exempt. | `src/modules/qa/bindings-store.ts` |
 | Code-enforced | `Secret` wrapper around stored binding values — redacts the underlying value from `toString` / `util.inspect` / `JSON.stringify` so a binding cannot leak into a log line, error trace, or specialist response by accident. `execute_recipe` only ever returns enum status payloads to the LLM, never the minted value. | `src/modules/qa/secret.ts` |
 | Code-enforced | `BindingsStore` TTL + cap — entries expire 1 h after last write via a 5-minute sweep, and the store is capped to bound memory + blast radius. The sweep skips pinned entries (`BindingSnapshot` held by an in-flight wave) so the scrubber doesn't lose backing entries mid-scrub. | `src/modules/qa/bindings-store.ts` |
@@ -249,7 +322,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
 - **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
-- **Pre-built specialist set.** `@perun` only knows two logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — and `fix-auto`). Adding more requires updating `perun.md`.
+- **Pre-built specialist set.** `@perun` only knows three logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — `fix-auto`, and `triglav`). Adding more is done by registering a new agent `*.metadata.ts` entry in the metadata registry — `perun.md`'s specialist table and delegation triggers are then re-rendered from that registry at init (see [How the specialist roster reaches `perun.md`](#how-the-specialist-roster-reaches-perunmd-render-pipeline)). You do not hand-edit `perun.md`'s placeholder regions.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
 
@@ -257,9 +330,16 @@ This package is intentionally MVP scope. Known deferrals:
 
 ```
 src/modules/coordinator/
-├── index.ts                # Plugin factory — registers @perun, dispatch_parallel, assign_issue_ids, compute_waves
+├── index.ts                # Plugin factory — registers @perun, dispatch_parallel, assign_issue_ids,
+│                           # compute_waves, dispatch_background, poll_background, wait_background.
+│                           # Owns the factory-scoped BackgroundTaskStore and the session.deleted
+│                           # cleanup branch. Exported PERUN_TOOLS lists every coordinator tool name.
 ├── dispatch.ts             # dispatchParallel(): worker pool, cap enforcement, abort-at-start drain
-├── sdk-specialist.ts       # SDK adapter — createSDKSpecialist, loadAgentRegistry, toPollerMessage
+├── background.ts           # startBackgroundTask() + collectBackground(); BACKGROUND_MAX_CONCURRENT = 4
+├── background-store.ts     # BackgroundTaskStore — in-memory parent→child registry
+│                           # (register/get/listByParent/countRunningByParent/remove/removeByChild/clearParent)
+├── sdk-specialist.ts       # SDK adapter — createSDKSpecialist (incl. startBackground via session.promptAsync),
+│                           # loadAgentRegistry, toPollerMessage
 ├── poller.ts               # pollUntilIdle() + PollerTimeoutError
 ├── assign-issue-ids.ts     # Deterministic zero-padded ID assignment (pure function)
 ├── compute-waves.ts        # computeWaves(): deterministic dependency-graph → wave grouping, cycle detection
@@ -267,16 +347,24 @@ src/modules/coordinator/
 └── truncate-bytes.ts       # Byte-aware truncation for oversize specialist output
 
 src/agents/
-└── perun.md                # @perun system prompt — canonical control flow for the coordinator.
-                            # Delegates wave computation to the `compute_waves` tool
-                            # (`src/modules/coordinator/compute-waves.ts`); still owns scenario
-                            # sanitisation, prefix routing to zmora-fe/zmora-be variants,
-                            # and merging of specialist results. See Limitations.
+└── perun.md                # @perun system-prompt TEMPLATE — hand-authored control flow with
+                            # machine-filled placeholders ({SPECIALISTS_TABLE}, {KEY_TRIGGERS},
+                            # {DELEGATION_TABLE}, {USE_AVOID:<name>}). Owns scenario sanitisation,
+                            # prefix routing to zmora-fe/zmora-be variants, and merging of
+                            # specialist results; delegates wave computation to `compute_waves`
+                            # (`src/modules/coordinator/compute-waves.ts`). The placeholder regions
+                            # are rendered from the metadata registry — do not hand-edit them.
+                            # See "How the specialist roster reaches perun.md".
+
+src/modules/agent-registry/
+├── agent-metadata.ts       # SpecialistInfo type + the metadata registry (getAgentMetadataRegistry)
+├── perun-prompt-builder.ts # buildPerunPrompt(): fills perun.md placeholders from the registry
+└── fix-auto.metadata.ts    # fix-auto's metadata entry (registered src-side; see index.ts)
 
 tests/modules/coordinator/  # Vitest unit + integration tests
 ```
 
-The `@perun` prompt asset is copied into `dist/agents/perun.md` by the root build (`scripts/copy-root-assets.mjs`); the TypeScript modules build into `dist/modules/coordinator/` via `tsup.root.config.ts`.
+Agent metadata entries also live alongside their owning module — e.g. `src/modules/qa/zmora.metadata.ts` and `src/modules/explore/triglav.metadata.ts` — and are registered into the metadata registry at init. The `@perun` prompt template is copied into `dist/agents/perun.md` by the root build (`scripts/copy-root-assets.mjs`) and rendered at runtime; the TypeScript modules build into `dist/modules/coordinator/` via `tsup.root.config.ts`.
 
 ## Related documentation
 

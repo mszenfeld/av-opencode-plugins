@@ -3,6 +3,8 @@ import { buildQATesterAgent } from "./prompt-builder.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
 import { loadModuleAsset } from "../_shared/load-asset.js"
 import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js"
+import { registerAgentMetadata } from "../agent-registry/index.js"
+import { zmoraSpecialistInfo } from "./zmora.metadata.js"
 import { BindingsStore } from "./bindings-store.js"
 import { QaRunState } from "./qa-run-state.js"
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js"
@@ -74,7 +76,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
     resolveParentID,
     // `makeRunBash` owns wall-clock timeout enforcement: AbortController +
     // `spawn`'s `signal` so an over-budget recipe is actually killed
-    // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
+    // (CWE-404). Default timeout (30s) lives in run-bash.ts.
     runBash: makeRunBash(),
     processEnv: process.env,
   })
@@ -84,7 +86,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
   // Bridge plugin-owned state into the coordinator's `dispatch_parallel` via
   // the shared dispatch-extensions module. The coordinator reads this at
   // execute time — see `src/modules/_shared/dispatch-extensions.ts` for the
-  // contract and rationale (ARCH-002: avoids coordinator → qa layer inversion).
+  // contract and rationale (avoids coordinator → qa layer inversion).
   //
   //   - `sessionAgentRegistry`: dispatch records (childSessionID → task.name)
   //     so the `shell.env` hook can resolve agent identity per session.
@@ -93,7 +95,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
   //     scrubber closed over that snapshot. This protects the scrub from
   //     interleaving with `execute_recipe` writes / `clearParent` purges that
   //     would otherwise reveal a newly-minted secret in the moment between
-  //     write and the next scrub (ARCH-004 / CWE-362). `releaseSnapshot` is
+  //     write and the next scrub (CWE-362). `releaseSnapshot` is
   //     invoked by the coordinator in a `finally` after the wave completes,
   //     letting `sweepExpired` and `clearParent` reclaim the entries.
   //
@@ -121,6 +123,10 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }
     },
   })
+
+  // Contribute zmora's metadata to the agent registry so Perun's prompt renders
+  // its specialist row. One logical entry for all three zmora-* variants.
+  registerAgentMetadata(zmoraSpecialistInfo)
 
   // Periodic TTL sweep: purges binding entries older than TTL_MS. Skips pinned
   // entries (active snapshots). Wrapped in try/catch — a background timer must
@@ -160,9 +166,8 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       }
 
       // Inject model AFTER registration so we don't merge it into every literal
-      // above. The model string is restricted to a printable-ASCII allow-list
-      // by `MODEL_REGEX` in pantheon-config/schema.ts, so no control characters
-      // can reach this TUI sink (CWE-117).
+      // above. Model already validated by MODEL_REGEX — see
+      // src/modules/pantheon-config/schema.ts for the CWE-117 rationale.
       const zmoraModel = loadPantheonConfig().agents.zmora?.model
       if (zmoraModel !== undefined) {
         for (const stack of VARIANTS) {
@@ -287,7 +292,7 @@ export const AppVerkQAPlugin: Plugin = async ({ client }) => {
       //    mapping store (childSessionID → agent name) that gates the
       //    `shell.env` hook; a stale entry plus a recycled SDK session ID
       //    would in principle leak bindings into the wrong session, so we
-      //    drop it whether the deleted ID is a parent or a child (ARCH-003).
+      //    drop it whether the deleted ID is a parent or a child.
       //  - `store.clearParent` / `state.clearRun` — no-op when `deletedID`
       //    is a child (they're keyed by parent ID). Cheap to call always.
       //  - `parentIDCache` — drop the entry for the deleted ID itself, then

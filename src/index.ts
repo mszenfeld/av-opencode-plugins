@@ -5,6 +5,7 @@ import { AppVerkCodeReviewPlugin } from "../packages/code-review/dist/index.js"
 import { AppVerkFrontendDeveloperPlugin } from "../packages/frontend-developer/dist/index.js"
 import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/index.js"
 import { AppVerkQAPlugin } from "./modules/qa/index.js"
+import { AppVerkExplorePlugin } from "./modules/explore/index.js"
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js"
 import { AppVerkCoordinatorPlugin } from "./modules/coordinator/index.js"
 import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
@@ -22,6 +23,7 @@ const defaultPluginFactories: Plugin[] = [
   AppVerkFrontendDeveloperPlugin,
   AppVerkSkillRegistryPlugin,
   AppVerkQAPlugin,
+  AppVerkExplorePlugin,
   AppVerkSwiftDeveloperPlugin,
   AppVerkCoordinatorPlugin,
   AppVerkPantheonPlugin,

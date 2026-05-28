@@ -18,20 +18,39 @@ import {
   pantheonConfigEmpty
 } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
+import {
+  buildPerunPrompt,
+  getAgentMetadataRegistry,
+  registerAgentMetadata
+} from "../agent-registry/index.js";
+import { fixAutoSpecialistInfo } from "../agent-registry/fix-auto.metadata.js";
 import { getDispatchExtensions } from "../_shared/dispatch-extensions.js";
+import { BackgroundTaskStore } from "./background-store.js";
+import { collectBackground, startBackgroundTask } from "./background.js";
 function loadAgentPrompt(name) {
   return loadModuleAsset(import.meta.url, `../../agents/${name}.md`);
 }
+const PERUN_TOOLS = [
+  "dispatch_parallel",
+  "assign_issue_ids",
+  "compute_waves",
+  "dispatch_background",
+  "poll_background",
+  "wait_background"
+];
 let cachedPerunPrompt;
 function getPerunPrompt() {
   if (cachedPerunPrompt === void 0) {
-    cachedPerunPrompt = loadAgentPrompt("perun");
+    const template = loadAgentPrompt("perun");
+    cachedPerunPrompt = buildPerunPrompt(template, getAgentMetadataRegistry());
   }
   return cachedPerunPrompt;
 }
 const AppVerkCoordinatorPlugin = async (input) => {
   const { client } = input;
   let toastShown = false;
+  const backgroundStore = new BackgroundTaskStore();
+  registerAgentMetadata(fixAutoSpecialistInfo);
   const dispatchParallelTool = tool({
     description: [
       "Dispatch tasks to specialist agents in parallel. Returns results in the same order as the input tasks. Use this instead of calling Task directly to guarantee parallelism and deterministic ordering.",
@@ -157,6 +176,91 @@ const AppVerkCoordinatorPlugin = async (input) => {
       return JSON.stringify(result, null, 2);
     }
   });
+  const dispatchBackgroundTool = tool({
+    description: [
+      "Start a specialist task in the BACKGROUND and return immediately with a task id (bg_...). The task runs while you do other work in THIS turn; collect it later with wait_background / poll_background.",
+      "",
+      "- Single task per call. Max 4 background tasks running per session \u2014 collect one before firing more.",
+      "- Use for read-only work you can overlap with your own (especially `triglav` exploration). Use blocking `dispatch_parallel` when you need the result immediately or need ordered QA waves.",
+      "- ALWAYS collect (wait_background/poll_background) what you start before ending the turn \u2014 uncollected tasks are wasted.",
+      '- Returns: { id, agent, status: "running" }.'
+    ].join("\n"),
+    args: {
+      agent: tool.schema.string().min(1).max(60).describe('Specialist agent name (e.g. "triglav"). Must be a subagent.'),
+      summary: tool.schema.string().min(1).max(80).describe("One-line label for the TUI (no prompts/PII)."),
+      prompt: tool.schema.string().describe("Prompt for the specialist."),
+      context: tool.schema.string().optional().describe("Optional extra context appended to the prompt.")
+    },
+    async execute(args, context) {
+      context.metadata({ title: `${args.agent} \u2014 ${args.summary}` });
+      if (context.sessionID.length === 0) {
+        throw new Error("dispatch_background: missing context.sessionID");
+      }
+      const specialist = createSDKSpecialist(client, context.sessionID);
+      const agentRegistry = await loadAgentRegistry(client);
+      const result = await startBackgroundTask({
+        store: backgroundStore,
+        specialist,
+        agentRegistry,
+        parentSessionId: context.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+        context: args.context
+      });
+      return JSON.stringify(result, null, 2);
+    }
+  });
+  const pollBackgroundTool = tool({
+    description: [
+      "Check the status of background tasks WITHOUT blocking. Returns a snapshot per id.",
+      '- Result per id: { id, agent, status: "running" | "success" | "not_found", result?, duration_ms? }.',
+      "- Use to decide whether to keep working or to wait_background."
+    ].join("\n"),
+    args: {
+      ids: tool.schema.array(tool.schema.string()).describe("Background task ids (bg_...) to check.")
+    },
+    async execute(args, context) {
+      context.metadata({ title: `poll ${args.ids.length} task(s)` });
+      const specialist = createSDKSpecialist(client, context.sessionID);
+      const ext = getDispatchExtensions();
+      const results = await collectBackground({
+        store: backgroundStore,
+        specialist,
+        ids: args.ids,
+        block: false,
+        scrubber: ext.scrubber,
+        parentSessionId: context.sessionID
+      });
+      return JSON.stringify(results, null, 2);
+    }
+  });
+  const waitBackgroundTool = tool({
+    description: [
+      "BLOCK until the given background tasks are idle (or time out), then return their results. Collected tasks are removed (one-time retrieval), freeing background slots.",
+      '- Result per id: { id, agent, status: "success" | "error" | "timeout" | "aborted" | "not_found", result, duration_ms, error? }.',
+      "- Honors abort: aborting cancels the wait AND kills the waited child sessions."
+    ].join("\n"),
+    args: {
+      ids: tool.schema.array(tool.schema.string()).describe("Background task ids (bg_...) to wait for."),
+      timeoutMs: tool.schema.number().optional().describe("Per-task timeout in ms (default 5 min).")
+    },
+    async execute(args, context) {
+      context.metadata({ title: `wait ${args.ids.length} task(s)` });
+      const specialist = createSDKSpecialist(client, context.sessionID);
+      const ext = getDispatchExtensions();
+      const results = await collectBackground({
+        store: backgroundStore,
+        specialist,
+        ids: args.ids,
+        block: true,
+        timeoutMs: args.timeoutMs,
+        signal: context.abort,
+        scrubber: ext.scrubber,
+        parentSessionId: context.sessionID
+      });
+      return JSON.stringify(results, null, 2);
+    }
+  });
   return {
     config: async (config) => {
       config.agent = config.agent ?? {};
@@ -172,15 +276,33 @@ const AppVerkCoordinatorPlugin = async (input) => {
         config.agent["Perun - Coordinator"].model = perunModel;
       }
     },
-    // IMPORTANT: Tool names "dispatch_parallel", "assign_issue_ids", and "compute_waves" must
-    // exactly match the `allowed-tools` frontmatter in `src/agents/perun.md`. If you rename any
-    // tool, update both places. There is no programmatic linking — keep them in sync manually.
+    // IMPORTANT: Tool names here must exactly match the `allowed-tools` frontmatter in
+    // `src/agents/perun.md`. The exported `PERUN_TOOLS` constant lists them and
+    // `tests/modules/coordinator/perun-tools-sync.test.ts` enforces the match. If you
+    // rename/add a tool, update PERUN_TOOLS + perun.md too — there is no programmatic link.
     tool: {
       dispatch_parallel: dispatchParallelTool,
       assign_issue_ids: assignIssueIdsTool,
-      compute_waves: computeWavesTool
+      compute_waves: computeWavesTool,
+      dispatch_background: dispatchBackgroundTool,
+      poll_background: pollBackgroundTool,
+      wait_background: waitBackgroundTool
     },
     event: async ({ event }) => {
+      if (event.type === "session.deleted") {
+        const deletedID = event.properties?.info?.id;
+        if (typeof deletedID === "string" && deletedID.length > 0) {
+          for (const t of backgroundStore.listByParent(deletedID)) {
+            try {
+              await createSDKSpecialist(client, deletedID).abortTask(t.childSessionId);
+            } catch {
+            }
+          }
+          backgroundStore.clearParent(deletedID);
+          backgroundStore.removeByChild(deletedID);
+        }
+        return;
+      }
       if (event.type !== "session.created") return;
       if (toastShown) return;
       try {
@@ -212,6 +334,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
 };
 export {
   AppVerkCoordinatorPlugin,
+  PERUN_TOOLS,
   createSDKSpecialist,
   deriveReportPath,
   loadAgentRegistry,

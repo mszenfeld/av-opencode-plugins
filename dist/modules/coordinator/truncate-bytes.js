@@ -5,7 +5,9 @@ function truncateBytes(input, maxBytes) {
     return input;
   }
   const sliced = buf.subarray(0, maxBytes);
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced);
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(sliced, {
+    stream: true
+  });
   return decoded + TRUNCATION_MARKER;
 }
 export {

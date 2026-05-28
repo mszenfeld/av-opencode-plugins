@@ -45,7 +45,7 @@ export function makeExecuteRecipeHandler(
 
     // Re-dispatch to zmora-setup means the prior mid-run dialog round (if
     // any) has concluded — the next `record_input` call should count as a
-    // fresh round against the `MAX_DIALOG_ROUNDS` cap (MAINT-002).
+    // fresh round against the `MAX_DIALOG_ROUNDS` cap.
     deps.state.endDialogRound(parentID)
 
     // Resolve inputs from BindingsStore first, then process env.
@@ -72,7 +72,7 @@ export function makeExecuteRecipeHandler(
       return { status: "recipe_failed", reason: "max_attempts", stderr_tail: "" }
     }
 
-    // Run the recipe. `runBash` owns the wall-clock timeout (PERF-001):
+    // Run the recipe. `runBash` owns the wall-clock timeout:
     // it kills the child via AbortController and reports `exitCode: 124`
     // on timeout, so there is no need for a Promise.race guard here that
     // would otherwise leak the underlying bash process past resolution.
@@ -80,7 +80,7 @@ export function makeExecuteRecipeHandler(
 
     // Scrub the full stderr BEFORE truncating: `slice(-200)` could otherwise
     // cut a secret in half and let partial bytes survive the scrubber
-    // (MAINT-004). The O(N) full scan is the correct trade-off.
+    // The O(N) full scan is the correct trade-off.
     const scrubbedStderr = scrubSecrets(result.stderr, parentID, deps.store).slice(-200)
 
     if (result.exitCode === 124) {

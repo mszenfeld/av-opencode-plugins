@@ -18,11 +18,26 @@ import { fileURLToPath } from "node:url"
  * If a read fails it means the build asset-copy step is broken or someone
  * moved the assets — fix the layout, not the resolver.
  *
+ * Assets are build-time-immutable bundle artifacts that never change for the
+ * lifetime of the process, so successful reads are memoized permanently and
+ * keyed by the fully-resolved absolute path. Two callers resolving to the same
+ * file therefore share a single cache entry. Failed reads are NOT cached.
+ *
  * @param callerUrl    Pass `import.meta.url` from the caller.
  * @param relativePath Path to the asset, relative to the caller's directory.
  */
+const assetCache = new Map<string, string>()
+
 export function loadModuleAsset(callerUrl: string, relativePath: string): string {
   const moduleDir = path.dirname(fileURLToPath(callerUrl))
   const filePath = path.resolve(moduleDir, relativePath)
-  return readFileSync(filePath, "utf8")
+
+  const cached = assetCache.get(filePath)
+  if (cached !== undefined) {
+    return cached
+  }
+
+  const contents = readFileSync(filePath, "utf8")
+  assetCache.set(filePath, contents)
+  return contents
 }

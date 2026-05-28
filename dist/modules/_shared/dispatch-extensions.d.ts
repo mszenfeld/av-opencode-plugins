@@ -81,7 +81,7 @@ interface DispatchScrubberSession {
  * start so the scrubber operates on a coherent view of bindings even when
  * `execute_recipe` mints new ones (or `clearParent` runs) concurrently —
  * fixes the race-window between snapshot existence and live-state reads
- * (ARCH-004 / CWE-362).
+ * (CWE-362).
  *
  * MUST NOT throw — wrap and swallow internally. A factory failure must not
  * break unrelated dispatches; if pinning fails, return `undefined` so the

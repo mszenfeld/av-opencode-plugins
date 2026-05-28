@@ -5,6 +5,15 @@ import {
 } from "./poller.js";
 import { neutralizeUntrustedOutput, normalizeVariantSuffix } from "./sanitize.js";
 import { truncateBytes } from "./truncate-bytes.js";
+function validateDispatchable(agentRegistry, name) {
+  const agentInfo = agentRegistry[name];
+  if (agentInfo === void 0) {
+    throw new Error(`Unknown agent: ${name}`);
+  }
+  if (agentInfo.mode !== "subagent") {
+    throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${name}`);
+  }
+}
 const DEFAULT_POLL_INTERVAL_MS = 1e3;
 const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1e3;
 const DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
@@ -31,13 +40,7 @@ async function dispatchParallel(input) {
     );
   }
   for (const task of tasks) {
-    const agentInfo = agentRegistry[task.name];
-    if (agentInfo === void 0) {
-      throw new Error(`Unknown agent: ${task.name}`);
-    }
-    if (agentInfo.mode !== "subagent") {
-      throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${task.name}`);
-    }
+    validateDispatchable(agentRegistry, task.name);
   }
   if (preflight !== void 0 && parentSessionID !== void 0 && parentSessionID.length > 0) {
     try {
@@ -178,5 +181,6 @@ export {
   DEFAULT_TASK_TIMEOUT_MS,
   DISPATCH_CONCURRENCY,
   DISPATCH_MAX_TASKS,
-  dispatchParallel
+  dispatchParallel,
+  validateDispatchable
 };

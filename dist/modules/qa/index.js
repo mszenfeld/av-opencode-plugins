@@ -3,6 +3,8 @@ import { buildQATesterAgent } from "./prompt-builder.js";
 import { loadPantheonConfig } from "../pantheon-config/index.js";
 import { loadModuleAsset } from "../_shared/load-asset.js";
 import { registerDispatchExtensions } from "../_shared/dispatch-extensions.js";
+import { registerAgentMetadata } from "../agent-registry/index.js";
+import { zmoraSpecialistInfo } from "./zmora.metadata.js";
 import { BindingsStore } from "./bindings-store.js";
 import { QaRunState } from "./qa-run-state.js";
 import { SessionAgentRegistry, makeShellEnvHook } from "./shell-env-hook.js";
@@ -57,7 +59,7 @@ const AppVerkQAPlugin = async ({ client }) => {
     resolveParentID,
     // `makeRunBash` owns wall-clock timeout enforcement: AbortController +
     // `spawn`'s `signal` so an over-budget recipe is actually killed
-    // (PERF-001 / CWE-404). Default timeout (30s) lives in run-bash.ts.
+    // (CWE-404). Default timeout (30s) lives in run-bash.ts.
     runBash: makeRunBash(),
     processEnv: process.env
   });
@@ -76,6 +78,7 @@ const AppVerkQAPlugin = async ({ client }) => {
       }
     }
   });
+  registerAgentMetadata(zmoraSpecialistInfo);
   const sweepTimer = setInterval(() => {
     try {
       store.sweepExpired(Date.now(), TTL_MS);

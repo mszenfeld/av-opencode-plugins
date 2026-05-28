@@ -87,6 +87,11 @@ function makeSpecialistRecorder(
         await config.abortTaskHandler(sessionId)
       }
     },
+    async startBackground(agentName: string): Promise<string> {
+      // dispatchParallel never calls startBackground; present only to satisfy
+      // the DispatchSpecialist contract.
+      return agentName
+    },
   }
 
   return { specialist, calls }

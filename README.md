@@ -16,13 +16,14 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 
 | Agent     | Description                                                                                                                 |
 | --------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Perun** | The coordinator. Delegates work to specialists, computes dispatch waves with dependency awareness, and synthesizes results. |
+| **Perun** | The coordinator. Delegates work to specialists (blocking or in the background so it can overlap exploration with its own work), computes dispatch waves with dependency awareness, and synthesizes results. |
 
 ## Subagents
 
-| Agent     | Description                                                                  |
-| --------- | ---------------------------------------------------------------------------- |
-| **Zmora** | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun. |
+| Agent       | Description                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Zmora**   | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun.                                                |
+| **Triglav** | Read-only codebase explorer. Maps structure and finds definitions/references/patterns; dispatched by Perun before planning. See [`docs/exploration.md`](docs/exploration.md). |
 
 ## Installation
 
@@ -54,8 +55,9 @@ Per-agent model selection lives in `pantheon.json`:
 // ~/.config/opencode/pantheon.json
 {
   "agents": {
-    "perun": { "model": "anthropic/claude-opus-4-7" },
-    "zmora": { "model": "anthropic/claude-sonnet-4-6" },
+    "perun":   { "model": "anthropic/claude-opus-4-7" },
+    "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
+    "triglav": { "model": "opencode/claude-haiku-4-5" },
   },
 }
 ```

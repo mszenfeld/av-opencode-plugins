@@ -9,9 +9,27 @@ import { buildChildEnv } from "./child-env.js"
 // running bash child past resolution.
 export const DEFAULT_BASH_TIMEOUT_MS = 30_000
 
+// Per-stream byte ceiling on accumulated child output (CWE-400).
+// `child.stdout`/`stderr` were previously appended with unbounded string
+// concatenation, bounded only by the wall-clock timeout — a recipe spewing
+// high-volume output (`yes`, `base64 /dev/urandom`) could grow process memory
+// for the full timeout window before the downstream `too long > 4096` check
+// in `execute-recipe.ts` ever ran (that check only fires AFTER full
+// accumulation, so it does not protect memory). 1 MiB sits comfortably above
+// the legitimate 4096-byte output ceiling enforced downstream while capping a
+// runaway child at a bounded footprint.
+export const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
+
 export interface RunBashOptions {
   /** Wall-clock cap in ms. Defaults to {@link DEFAULT_BASH_TIMEOUT_MS}. */
   timeoutMs?: number
+  /**
+   * Per-stream byte ceiling on accumulated stdout/stderr. Once either stream
+   * crosses this cap, further bytes are dropped and the child process group is
+   * killed early (via the same AbortController path as the timeout). Defaults
+   * to {@link DEFAULT_MAX_OUTPUT_BYTES}.
+   */
+  maxOutputBytes?: number
   /** Host env passed through `buildChildEnv`'s allowlist. Defaults to `process.env`. */
   hostEnv?: Record<string, string | undefined>
 }
@@ -31,15 +49,24 @@ export interface RunBashOptions {
  *
  * `stderr` is augmented with `\n[killed by timeout]` whenever the abort path
  * fires so downstream scrub/tail logic surfaces a clear cause.
+ *
+ * Output-cap kill (CWE-400): if either stream exceeds
+ * `maxOutputBytes`, the excess bytes are dropped, the child group is killed via
+ * the same abort path, and the result mirrors the timeout branch —
+ * `exitCode: 124` with a distinct `\n[killed: output exceeded N bytes]` marker.
+ * We reuse 124 deliberately: `execute-recipe.ts` already buckets 124 as
+ * `timeout` (a benign "resource ceiling hit" outcome) rather than
+ * `recipe_failed: exit_code=…`, which is the cleanest fit for a runaway recipe.
  */
 export function makeRunBash(
   opts: RunBashOptions = {},
 ): (cmd: string, env: Record<string, string>) => Promise<BashResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS
+  const maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
   const hostEnv = opts.hostEnv ?? process.env
   return async (cmd, env) => {
     // Bash execution via Node child_process. The child env is built by
-    // `buildChildEnv` (COMP-002): only an allowlisted subset of the host
+    // `buildChildEnv`: only an allowlisted subset of the host
     // env (PATH, HOME, locale, …) is passed through, and the composed env
     // (recipe inputs + minted bindings) is layered on top. The full
     // process.env is NOT inherited — this contains the host's API keys,
@@ -54,6 +81,7 @@ export function makeRunBash(
     // group-wide reap. `signal` is still wired as a belt-and-braces guard
     // (e.g. spawn-time aborts).
     let timedOut = false
+    let outputCapped = false
     let killed = false
     const controller = new AbortController()
     const timer = setTimeout(() => {
@@ -73,11 +101,40 @@ export function makeRunBash(
         })
         let stdout = ""
         let stderr = ""
+        // Track accumulated bytes per stream (not string `.length`, which
+        // counts UTF-16 code units). Once either stream would cross
+        // `maxOutputBytes` we append only up to the cap, flag the overflow,
+        // and abort — reusing the controller so the existing detached-group
+        // kill path reaps the runaway child instead of a parallel mechanism.
+        let stdoutBytes = 0
+        let stderrBytes = 0
+        const capStream = (
+          buf: string,
+          accBytes: number,
+          chunk: Buffer,
+        ): { buf: string; bytes: number } => {
+          if (outputCapped) return { buf, bytes: accBytes } // already aborting; drop
+          const remaining = maxOutputBytes - accBytes
+          if (chunk.length <= remaining) {
+            return { buf: buf + chunk.toString(), bytes: accBytes + chunk.length }
+          }
+          // This chunk crosses the ceiling: keep only the bytes that fit,
+          // then trigger the early kill. Slice on the Buffer (byte-accurate)
+          // before decoding so we never retain more than the cap.
+          outputCapped = true
+          const kept = remaining > 0 ? buf + chunk.subarray(0, remaining).toString() : buf
+          controller.abort()
+          return { buf: kept, bytes: maxOutputBytes }
+        }
         child.stdout?.on("data", (d: Buffer) => {
-          stdout += d.toString()
+          const r = capStream(stdout, stdoutBytes, d)
+          stdout = r.buf
+          stdoutBytes = r.bytes
         })
         child.stderr?.on("data", (d: Buffer) => {
-          stderr += d.toString()
+          const r = capStream(stderr, stderrBytes, d)
+          stderr = r.buf
+          stderrBytes = r.bytes
         })
 
         const killGroup = (sig: NodeJS.Signals): void => {
@@ -106,13 +163,18 @@ export function makeRunBash(
         if (controller.signal.aborted) onAbort()
         else controller.signal.addEventListener("abort", onAbort, { once: true })
 
+        // Build the abort marker: the output-cap kill takes precedence over
+        // the generic timeout marker so the cause is unambiguous downstream.
+        const abortMarker = (): string =>
+          outputCapped ? `\n[killed: output exceeded ${maxOutputBytes} bytes]` : "\n[killed by timeout]"
         child.on("close", (code, sig) => {
-          // Treat the timeout flag as the source of truth: if our timer
-          // fired we surface 124 regardless of what Node reports (Node
-          // sometimes reports `null` signal when AbortController kills).
-          const wasKilled = timedOut || sig !== null
+          // Treat the timeout/cap flags as the source of truth: if our timer
+          // fired OR we hit the output ceiling we surface 124 regardless of
+          // what Node reports (Node sometimes reports `null` signal when
+          // AbortController kills).
+          const wasKilled = timedOut || outputCapped || sig !== null
           const exitCode = wasKilled ? 124 : (code ?? -1)
-          const stderrOut = wasKilled ? stderr + "\n[killed by timeout]" : stderr
+          const stderrOut = wasKilled ? stderr + abortMarker() : stderr
           resolve({ exitCode, stdout, stderr: stderrOut })
         })
         child.on("error", (err) => {
@@ -122,8 +184,8 @@ export function makeRunBash(
           // the contract uniform with the `close`-path branch above.
           const isAbort =
             (err as NodeJS.ErrnoException).code === "ABORT_ERR" || err.name === "AbortError"
-          if (isAbort || timedOut) {
-            resolve({ exitCode: 124, stdout, stderr: stderr + "\n[killed by timeout]" })
+          if (isAbort || timedOut || outputCapped) {
+            resolve({ exitCode: 124, stdout, stderr: stderr + abortMarker() })
             return
           }
           resolve({ exitCode: -1, stdout, stderr: stderr + err.message })

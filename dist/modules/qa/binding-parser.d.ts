@@ -1,4 +1,5 @@
 import { BindingType } from './bindings-store.js';
+export { ValidateRecipeResult, validateRecipe } from './recipe-validator.js';
 import './secret.js';
 
 interface ParsedBinding {
@@ -16,13 +17,6 @@ type ParseResult = {
     status: "error";
     reason: string;
 };
-type ValidateRecipeResult = {
-    status: "ok";
-} | {
-    status: "error";
-    reason: string;
-};
-declare function validateRecipe(recipe: string, egress: string): ValidateRecipeResult;
 /**
  * Parses the `## Setup → **Bindings:**` subsection of a QA plan markdown,
  * extracting declarative binding specs. Recipe AST validation (allowed
@@ -41,4 +35,4 @@ declare function validateRecipe(recipe: string, egress: string): ValidateRecipeR
  */
 declare function parseBindings(planText: string): ParseResult;
 
-export { BindingType, type ParseResult, type ParsedBinding, type ValidateRecipeResult, parseBindings, validateRecipe };
+export { BindingType, type ParseResult, type ParsedBinding, parseBindings };
