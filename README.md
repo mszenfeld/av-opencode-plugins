@@ -63,3 +63,25 @@ Per-agent model selection lives in `pantheon.json`:
 ```
 
 The full reference (locations, precedence, schema, FAQ) is in [`docs/configuring-agents.md`](docs/configuring-agents.md).
+
+## Local Development
+
+### Prerequisites
+
+**Required:** Bun ≥ 1.3.13.
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+This project uses Bun exclusively. A `preinstall` guard rejects `npm install` and `yarn install`. See AGENTS.md "Prerequisites" for the rationale.
+
+### Install + validate
+
+```bash
+bun install
+bun run typecheck
+bun run test
+bun run build
+bun run check          # all three at once
+```

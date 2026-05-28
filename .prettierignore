@@ -2,4 +2,4 @@ node_modules
 dist
 .tmp-build
 coverage
-package-lock.json
+bun.lock
