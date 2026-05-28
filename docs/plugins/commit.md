@@ -33,10 +33,10 @@ The commit plugin is an **absorbed module** — its source, tests, and command a
 | `src/modules/commit/message-policy.ts` | Validates commit messages (Conventional Commits, rejects `Co-Authored-By` footers). |
 | `src/commands/commit.md` | The `/commit` prompt template. Copied to `dist/commands/commit.md` by `scripts/copy-root-assets.mjs`. |
 | `dist/modules/commit/*.js` | Build output produced by `tsup --config tsup.root.config.ts`. |
-| `tests/modules/commit/*.ts` | Unit and integration tests, run via the root `npm run test`. |
+| `tests/modules/commit/*.ts` | Unit and integration tests, run via the root `bun run test`. |
 | `src/index.ts` | Root entrypoint; imports `AppVerkCommitPlugin` from `./modules/commit/index.js` and registers it in `defaultPluginFactories`. |
 
-Because there is no per-workspace build script, the commit module builds and tests via the **root** `npm run build:root` / `npm run test`.
+Because there is no per-workspace build script, the commit module builds and tests via the **root** `bun run build:root` / `bun run test`.
 
 ## Usage
 
