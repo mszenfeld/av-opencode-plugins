@@ -1,4 +1,5 @@
 import { registerAgentMetadata } from "../agent-registry/index.js";
+import { loadPantheonConfig } from "../pantheon-config/index.js";
 import { triglavSpecialistInfo } from "./triglav.metadata.js";
 import { buildTriglavPrompt } from "./prompt.js";
 import { isSerenaAvailable } from "./serena-detect.js";
@@ -16,6 +17,10 @@ const AppVerkExplorePlugin = async ({ client }) => {
           return buildTriglavPrompt();
         }
       };
+      const triglavModel = loadPantheonConfig().agents.triglav?.model;
+      if (triglavModel !== void 0) {
+        config.agent["triglav"].model = triglavModel;
+      }
       serenaMissing = !isSerenaAvailable(config);
     },
     event: async ({ event }) => {
