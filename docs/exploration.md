@@ -44,7 +44,7 @@ Detection treats serena as available unless its entry is missing, non-object, or
 
 ## Model selection
 
-Triglav is model-configurable via `pantheon.json` (same mechanism as `perun` and `zmora`). See [`configuring-agents.md`](configuring-agents.md) for the file's location, precedence rules, and full schema. The key:
+Triglav is model-configurable via `pantheon.json` (same mechanism as `perun` and `zmora`). See [`configuring-agents.md`](configuring-agents.md) for the file's location, precedence rules, and full schema, and [`eval/playbook.md`](eval/playbook.md) for the manual procedure to compare candidate models for an agent. The key:
 
 ```jsonc
 { "agents": { "triglav": { "model": "<providerID>/<modelID>" } } }
