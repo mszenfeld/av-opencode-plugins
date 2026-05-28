@@ -1,6 +1,7 @@
+const TRIGLAV_AGENT_KEY = "triglav";
 const TRIGLAV_DESCRIPTION = "Read-only codebase explorer: maps structure, finds definitions/references/patterns via serena LSP (Grep/Glob fallback). Returns a synthesized answer, not edits.";
 const triglavSpecialistInfo = {
-  name: "triglav",
+  name: TRIGLAV_AGENT_KEY,
   mode: "subagent",
   description: TRIGLAV_DESCRIPTION,
   metadata: {
@@ -27,6 +28,7 @@ const triglavSpecialistInfo = {
   }
 };
 export {
+  TRIGLAV_AGENT_KEY,
   TRIGLAV_DESCRIPTION,
   triglavSpecialistInfo
 };
