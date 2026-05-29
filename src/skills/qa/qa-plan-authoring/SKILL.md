@@ -21,8 +21,8 @@ Parse the caller's argument to choose the diff:
 | (empty) | open PR on current branch, else branch diff vs main |
 | `#123` / `PR #123` | `gh pr diff 123` |
 | `feature/xyz` | `git diff <main>...feature/xyz` |
-| `this branch` / `current branch` | `git diff <main>...HEAD` |
-| `last N commits` | `git diff HEAD~N...HEAD` |
+| `this branch` / `current branch` / `ten branch` | `git diff <main>...HEAD` |
+| `last N commits` / `ostatnie N commitów` | `git diff HEAD~N...HEAD` |
 | `staged` | `git diff --staged` |
 
 Default (no argument):
@@ -40,7 +40,7 @@ Also collect the changed file list (`gh pr diff <n> --name-only`, or `git diff -
 
 ## Step 2: Classify each changed file FE vs BE
 
-- **Frontend:** `.tsx/.jsx/.vue/.svelte/.css/.scss/.html`; paths with `components/ pages/ views/ layouts/ styles/ public/ assets/ frontend/ client/ web/`.
+- **Frontend:** `.tsx/.jsx/.vue/.svelte/.css/.scss/.html`; paths with `app/ components/ pages/ views/ layouts/ styles/ public/ assets/ frontend/ client/ web/`.
 - **Backend:** `.py/.php/.go/.java/.rb/.rs`; paths with `api/ controllers/ models/ migrations/ serializers/ services/ repositories/ backend/ server/`; `urls.py routes.py routes.php router.go`.
 - **Ambiguous** (`.ts/.js`): inspect imports/path context.
 
