@@ -22,6 +22,7 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 
 | Agent       | Description                                                                                                                 |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Veles**   | Planning specialist — authors QA/work plans from a diff or request; dispatches read-only helpers and returns the saved plan; does not execute the work. Dispatched by Perun when a QA run is requested but no plan exists. |
 | **Zmora**   | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun.                                                |
 | **Triglav** | Read-only codebase explorer. Maps structure and finds definitions/references/patterns; dispatched by Perun before planning. See [`docs/exploration.md`](docs/exploration.md). |
 
