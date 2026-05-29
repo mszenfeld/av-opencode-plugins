@@ -260,7 +260,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "- Returns: { id, agent, status: \"running\" }.",
       ].join("\n"),
     args: {
-      agent: tool.schema.string().min(1).max(60).describe("Specialist agent name (e.g. \"triglav\"). Must be a subagent."),
+      agent: tool.schema.string().min(1).max(60).describe("Specialist agent name (e.g. \"triglav\"). Must be a subagent, or an allowlisted mode:all agent (currently only \"veles\") when the caller is a primary agent."),
       summary: tool.schema.string().min(1).max(80).describe("One-line label for the TUI (no prompts/PII)."),
       prompt: tool.schema.string().describe("Prompt for the specialist."),
       context: tool.schema.string().optional().describe("Optional extra context appended to the prompt."),

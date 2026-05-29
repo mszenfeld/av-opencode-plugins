@@ -54,7 +54,7 @@ export interface AgentInfo {
  * while still blocking Veles→Veles, *→Perun, and any other `primary`/`all`
  * target. Keep this set MINIMAL — every entry widens the anti-recursion surface.
  */
-export const DISPATCHABLE_ALL_AGENTS = new Set<string>(["veles"])
+export const DISPATCHABLE_ALL_AGENTS: ReadonlySet<string> = new Set<string>(["veles"])
 
 /**
  * Anti-recursion guard. Dispatchable targets:
