@@ -272,10 +272,12 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID)
       const agentRegistry = await loadAgentRegistry(client)
+      const callerMode = agentRegistry[context.agent]?.mode
       const result = await startBackgroundTask({
         store: backgroundStore,
         specialist,
         agentRegistry,
+        callerMode,
         parentSessionId: context.sessionID,
         agent: args.agent,
         prompt: args.prompt,
