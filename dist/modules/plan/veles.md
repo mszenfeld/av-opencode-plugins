@@ -53,7 +53,7 @@ End your turn with a single JSON object as your final message — nothing after 
 }
 ```
 
-- `status`: `"ok"` when a plan was written; `"error"` if you could not (e.g. no diff/changes — then `plan_path` empty and `fe_count`/`be_count` 0).
+- `status`: `"ok"` when a plan was written; `"error"` if you could not (e.g. no diff/changes — then `plan_path` empty and `fe_count`/`be_count` 0); `"timeout"` if your exploration exceeded time limits (also `plan_path` empty, counts 0). The coordinator branches on all three.
 - `setup_prereqs`: the items from the plan's `## Setup` (empty array if none).
 - `topic`: the slug used in the filename.
 

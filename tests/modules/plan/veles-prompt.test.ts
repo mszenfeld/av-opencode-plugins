@@ -17,6 +17,7 @@ describe("buildVelesPrompt", () => {
     expect(prompt).toContain("triglav")
     expect(prompt).toContain('"plan_path"')
     expect(prompt).toContain('"status"')
+    expect(prompt).toContain('"timeout"')
     expect(prompt).toContain('"fe_count"')
     expect(prompt).toContain('"be_count"')
     expect(prompt).toContain('"setup_prereqs"')
