@@ -1,6 +1,6 @@
 {
   "name": "@appverk/opencode-code-review",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -8,8 +8,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts && node scripts/copy-assets.mjs",
-    "test": "npm run build && vitest run --config vitest.config.ts",
+    "build": "tsup src/index.ts --format esm --dts && bun scripts/copy-assets.mjs",
+    "test": "bun run build && vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

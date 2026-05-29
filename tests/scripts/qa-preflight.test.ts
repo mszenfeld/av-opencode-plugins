@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 
 // NOTE: The script path below is resolved against the shell CWD. This test
 // assumes vitest is invoked from the project root (its default CWD), which is
-// how `npm run test` and CI both run it. If you run vitest from a non-root
+// how `bun run test` and CI both run it. If you run vitest from a non-root
 // directory the spawn() call will fail with ENOENT — the test is not portable
 // to arbitrary CWDs by design. See AGENTS.md → "Working directory assumption
 // for repo-relative script paths".

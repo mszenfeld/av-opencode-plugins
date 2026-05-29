@@ -21,9 +21,20 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `src/modules/pantheon-config/` | Harness-resident **library** (no plugin export) — reads `pantheon.json` (user-global + per-project walk-up, closest-wins merge) and exposes `loadPantheonConfig()` / `getLoadErrors()` / `pantheonConfigEmpty()`. Consumed by `coordinator/` and `qa/` in their `config` hooks. Tests: `tests/modules/pantheon-config/`. Built into `dist/modules/pantheon-config/`. |
 | `src/modules/_shared/` | Cross-module helpers: `loadModuleAsset` (sibling markdown loading under tsup's `bundle: false` layout), `SessionAgentRegistry` (childSessionID → agentName), `register/getDispatchExtensions` (QA publishes scrubberFactory + registry that coordinator reads at dispatch time). Consumed by `coordinator/` and `qa/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
-| `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
 **Important:** `dist/` is usually ignored, but the **root `dist/`** and **`packages/*/dist/`** are committed and published (see `.gitignore`). Do not delete those `dist/` trees.
+
+## Prerequisites
+
+**Required:** Bun >= 1.3.13. Install:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+This project uses Bun exclusively for installation and script execution. Do NOT use `npm`, `yarn`, or other package managers — a `preinstall` guard in root `package.json` (`scripts/check-package-manager.mjs`) rejects non-bun runners. The guard is a UX hint, not a security control (`npm_config_user_agent` is spoofable); real enforcement is via the `packageManager` field and these docs.
+
+`.bun-version` pins the toolchain version for version managers (mise/asdf/proto auto-switch to 1.3.13 when entering the repo).
 
 ## Pantheon harness configuration
 
@@ -33,12 +44,12 @@ Per-agent model selection lives in `pantheon.json`. See [`docs/configuring-agent
 
 ```bash
 # Full validation (run this before pushing)
-npm run check          # typecheck + test + build
+bun run check          # typecheck + test + build
 
 # Individual steps
-npm run typecheck      # tsc --noEmit at root + each workspace
-npm run test           # vitest at root + each workspace
-npm run build          # tsup ESM + DTS for all packages
+bun run typecheck      # tsc --noEmit at root + each workspace
+bun run test           # vitest at root + each workspace
+bun run build          # tsup ESM + DTS for all packages
 ```
 
 ### Per-package commands
@@ -46,23 +57,31 @@ npm run build          # tsup ESM + DTS for all packages
 Each workspace package has its own `typecheck`, `test`, and `build` scripts. Tests import from `dist/` (not `src/`), so **build is required before test**:
 
 ```bash
-npm run build --workspace @appverk/opencode-python-developer
-npm run test  --workspace @appverk/opencode-python-developer
+bun --filter @appverk/opencode-python-developer build
+bun --filter @appverk/opencode-python-developer test
 ```
 
-Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **root** `npm run build:root` / `npm run test` — they no longer have a per-workspace script.
+**Note:** bun's `--filter` takes the script name directly (e.g., `bun --filter X build`). The form `bun --filter X run build` returns `No packages matched the filter` because bun parses `run` as the script target. The alternate form `bun run --filter X build` (run BEFORE filter) is also documented-valid; we use the canonical `bun --filter X SCRIPT` form throughout this project.
+
+Note: absorbed modules (e.g. `src/modules/commit/`) build and test via the **root** `bun run build:root` / `bun run test` — they no longer have a per-workspace script.
+
+### skill-utils build dependency (intentional)
+
+Root `typecheck`, `test`, and `build` all invoke `bun run build:skill-utils` early in their chains. This is because other workspace packages typecheck and import against `packages/skill-utils/dist/*.d.ts` — so skill-utils must be built first, BEFORE other workspaces can typecheck.
+
+The `build:skill-utils` script is exposed as a named root script (not inlined) so this side-effect is intentional and discoverable, not hidden chain magic. When adding a new workspace that imports from skill-utils, no script changes are needed — the dependency is already encoded.
 
 ## Build & Packaging Details
 
 - **Module system:** ESM only (`"type": "module"`, NodeNext resolution).
 - **Package builds:** `tsup src/index.ts --format esm --dts`.
 - **Post-build asset copying:** Each package runs a Node script to copy markdown templates/skills into `dist/` (e.g., `dist/commands/commit.md`, `dist/skills/*.md`).
-- **Root entrypoint:** `src/index.ts` is the typed source. The root build (`npm run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
+- **Root entrypoint:** `src/index.ts` is the typed source. The root build (`bun run build:root`) compiles it (and everything under `src/`) to `dist/` via `tsup --bundle=false`. OpenCode loads `./dist/index.js` (the `main` field in root `package.json`). There is no longer a hand-edited `src/index.js`.
 - **Published files:** The root `dist/` tree (compiled `.js`/`.d.ts` + copied `.md` assets — this is where every absorbed module under `src/modules/` lands) plus the remaining `packages/*/dist/` directories for each workspace plugin — see root `package.json` `files` for the canonical list.
 
 ### Tracked dist paths in CI
 
-`scripts/verify-dist-sync.mjs` is the **source of truth** for which `dist/` trees are checked for drift after `npm run build`. The `trackedDistPaths` array in that script must stay in sync with:
+`scripts/verify-dist-sync.mjs` is the **source of truth** for which `dist/` trees are checked for drift after `bun run build`. The `trackedDistPaths` array in that script must stay in sync with:
 
 - The `files` array in the root `package.json` (everything published must be verified).
 - The `.gitignore` carve-outs for each `packages/<name>/dist/` (everything verified must be committed).
@@ -86,14 +105,14 @@ OpenCode must be started from the project root. The preflight script path `./scr
 
 ## Testing Conventions
 
-- **Root tests:** `tests/root-plugin.test.ts` validates plugin merging and packaging via `npm pack --dry-run`.
+- **Root tests:** `tests/root-plugin.test.ts` validates plugin merging and packaging via `bun pm pack`.
 - **Package tests:** Located in `packages/*/tests/**/*.test.ts`.
 - **Integration tests:** `tests/modules/commit/controlled-commit.integration.test.ts` exercises real git operations.
 - All workspace vitest configs use `include: ["tests/**/*.test.ts"]`.
 
 ## Root Entrypoint Registration
 
-Every new plugin must be imported and registered in `src/index.ts`. The build (`npm run build:root`) produces `dist/index.js` from it; nothing is hand-edited under `dist/`.
+Every new plugin must be imported and registered in `src/index.ts`. The build (`bun run build:root`) produces `dist/index.js` from it; nothing is hand-edited under `dist/`.
 
 ### Workspace plugin import
 
@@ -170,7 +189,7 @@ For user-facing harness concerns (e.g. configuration, agent reference, workflow 
 2. Add the workspace name to root `package.json` `workspaces` (already `packages/*`).
 3. **Import and register the new plugin factory in `src/index.ts`.** See [Root Entrypoint Registration](#root-entrypoint-registration) above.
 4. Add the new `packages/<name>/dist/` path to root `package.json` `files`.
-5. Update root `npm run build` / `npm run test` / `npm run typecheck` scripts to include the new workspace.
+5. Update root `bun run build` / `bun run test` / `bun run typecheck` scripts to include the new workspace.
 6. Add a smoke/packaging test in `tests/` or `packages/<name>/tests/`.
 7. **Update `README.md` and contributor docs** following the [Documentation Checklist](#documentation-checklist). New user-facing harness surfaces get a topic doc under `docs/` (e.g. `docs/configuring-agents.md`); do **not** add new files under `docs/plugins/` (that tree is legacy).
 8. **Update this `AGENTS.md`** — add a row to the monorepo-layout table; update published files count.
@@ -189,7 +208,7 @@ For small absorbed modules (no separate workspace), follow this pattern instead:
 
 > **Design constraints carried over from the original src/ absorption program:**
 > - **`bundle: false`** in `tsup.root.config.ts` — each module is compiled standalone so relative imports between modules keep working at runtime.
-> - **Build-order matters:** the root build (`npm run build:root`) emits `dist/` from `src/` first; workspace package builds run afterwards. Modules that read assets from `dist/` (via `import.meta.url` resolution) rely on this ordering.
+> - **Build-order matters:** the root build (`bun run build:root`) emits `dist/` from `src/` first; workspace package builds run afterwards. Modules that read assets from `dist/` (via `import.meta.url` resolution) rely on this ordering.
 > - **The config filename is `tsup.root.config.ts`** (not the default `tsup.config.ts`) — this is intentional so workspace `tsup.config.ts` files are not picked up by the root build.
 
 1. Create `src/modules/<name>/` with `index.ts` and supporting `.ts` modules.
@@ -197,7 +216,7 @@ For small absorbed modules (no separate workspace), follow this pattern instead:
 3. Place tests under `tests/modules/<name>/`. Import sources via `from "../../../src/modules/<name>/<file>.js"`.
 4. Import and register the plugin factory in `src/index.ts` (see [Root Entrypoint Registration](#root-entrypoint-registration)).
 5. **If the module registers an agent Perun should route to**, call `registerAgentMetadata()` (from `src/modules/agent-registry/`) with the agent's `SpecialistInfo` in the module's factory body — otherwise the agent is invocable but invisible to Perun's routing (it never renders into Perun's prompt). **Ordering matters:** every agent must register *before* the coordinator builds Perun's prompt. `getPerunPrompt()` snapshots the registry on its first call and caches the result, so any agent-registering module must appear *before* `AppVerkCoordinatorPlugin` in the `defaultPluginFactories` array in `src/index.ts`. The coordinator is registered last precisely to satisfy this; place a new agent-registering module ahead of it (e.g. as `src/modules/explore/` does with `triglav`).
-6. Build and test via root `npm run build:root` and `npm run check` — no per-package scripts.
+6. Build and test via root `bun run build:root` and `bun run check` — no per-package scripts.
 7. Update `tests/root-plugin.test.ts` packed-file assertions to include the new `dist/modules/<name>/*` and `dist/commands/<file>.md` paths.
 8. Update `README.md` and this `AGENTS.md` per the [Documentation Checklist](#documentation-checklist).
 
@@ -207,7 +226,7 @@ When installing from git, OpenCode (via Bun) caches the repository and **does no
 
 1. **Bump the version** in **all** `package.json` files (root + every workspace) when adding new commands, agents, or built assets.
 2. **Create a git tag** matching the version (e.g. `v0.3.0`) after the bump commit.
-3. **Update installation examples** in `README.md`, `AGENTS.md`, and `.opencode/opencode.json` to reference the new tag instead of a branch name like `#master`.
+3. **Update installation examples** in `README.md` and `AGENTS.md` to reference the new tag instead of a branch name like `#master`.
 
 Example config:
 ```json
@@ -267,6 +286,6 @@ Conventions:
 ## Common Pitfalls
 
 - Do not run `git commit` or `git push` via the bash tool in this repo — the commit plugin blocks direct commits and pushes at runtime (`tool.execute.before` hook). Use `/commit` instead. This bash gate (`classifyBashCommand` in `src/modules/commit/bash-policy.ts`) is **defense-in-depth / a workflow rail, not a security boundary** — it keeps the `/commit` workflow consistent but is bypassable by shapes the literal `git` token-match misses (`/usr/bin/git …`, `bash -c "git …"`, `hub commit`, `command git …`, alias indirection, `$(echo git) commit`, plumbing subcommands like `commit-tree` / `fast-import` / `update-ref`). Per project doctrine ([`docs/plugins/coordinator.md`](docs/plugins/coordinator.md): *"Treat code-enforced rules as the security boundary. The LLM-requested rules are defense in depth — they raise the cost of a successful prompt-injection escalation but are not the last line of defense."*), real shell-execution boundaries live outside this plugin. See [`docs/plugins/commit.md`](docs/plugins/commit.md#classifybashcommand-is-defense-in-depth-not-a-security-boundary) for the full bypass list.
-- After changing anything under `src/`, run `npm run build:root` to regenerate `dist/` — published consumers and OpenCode load from `dist/`, not `src/`.
-- Removing a workspace `packages/<name>/dist/` will break the root entrypoint and packaging tests. (The root `dist/` is also committed — do not delete it manually; let `npm run build:root` regenerate it.)
-- **Forgetting to add a `.gitignore` exception and commit `packages/<name>/dist/`** will cause `Cannot find module` errors for consumers installing from git, because npm does not run the build step on git dependencies.
+- After changing anything under `src/`, run `bun run build:root` to regenerate `dist/` — published consumers and OpenCode load from `dist/`, not `src/`.
+- Removing a workspace `packages/<name>/dist/` will break the root entrypoint and packaging tests. (The root `dist/` is also committed — do not delete it manually; let `bun run build:root` regenerate it.)
+- **Forgetting to add a `.gitignore` exception and commit `packages/<name>/dist/`** will cause `Cannot find module` errors for consumers installing from git, because Bun (like npm) does not run the build step on git dependencies.
