@@ -140,6 +140,13 @@ export interface DispatchParallelInput {
    */
   parentSessionID?: string
   /**
+   * Mode of the agent that invoked the dispatch tool (resolved from
+   * `agentRegistry[context.agent]`). Passed to `validateDispatchable` so an
+   * allowlisted `all` target (Veles) is dispatchable only from a `primary`
+   * caller (Perun). Omitted ⇒ allowlisted-`all` dispatch is rejected.
+   */
+  callerMode?: AgentInfo["mode"]
+  /**
    * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
    * specialist session is spawned. The QA plugin uses this to lazily parse the
    * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
@@ -185,6 +192,7 @@ export async function dispatchParallel(
     scrubberFactory,
     parentSessionID,
     preflight,
+    callerMode,
   } = input
 
   if (tasks.length > DISPATCH_MAX_TASKS) {
@@ -195,7 +203,7 @@ export async function dispatchParallel(
 
   // Anti-recursion: validate every task BEFORE any session spawns.
   for (const task of tasks) {
-    validateDispatchable(agentRegistry, task.name)
+    validateDispatchable(agentRegistry, task.name, callerMode)
   }
 
   // Preflight runs ONCE per dispatch, after validation but BEFORE any session

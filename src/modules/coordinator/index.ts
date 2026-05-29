@@ -149,6 +149,9 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID)
       const agentRegistry = await loadAgentRegistry(client)
+      // Caller mode gates the allowlisted-`all` relaxation (Perun→Veles).
+      // `context.agent` is the calling agent's name; look up its mode.
+      const callerMode = agentRegistry[context.agent]?.mode
       // Source plugin-supplied extensions (QA bindings registry / scrubber /
       // preflight) from the shared module — keeps the coordinator free of
       // direct imports from feature modules (avoids layer inversion).
@@ -158,6 +161,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         tasks: args.tasks,
         agentRegistry,
         specialist,
+        callerMode,
         // Thread the harness abort signal end-to-end: poller checks it at each
         // iteration and during the inter-poll sleep, and child sessions are
         // cancelled server-side when it fires.
