@@ -14,7 +14,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts && node ./scripts/copy-skills.mjs",
+    "build": "tsup src/index.ts --format esm --dts && bun ./scripts/copy-skills.mjs",
     "test": "bun run build && vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

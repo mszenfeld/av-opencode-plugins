@@ -25,6 +25,12 @@ if (m) {
     console.error("See README.md Prerequisites for details.")
     process.exit(1)
   }
+} else {
+  // Non-semver bun user-agent (e.g. `bun/dev`, canary/source builds): we can't
+  // parse a version, so we can't prove >= MIN_BUN_STR. Warn rather than fail —
+  // this guard is best-effort (see header), and blocking canary builds would be
+  // more disruptive than the unlikely case of an outdated source build.
+  console.warn(`Could not parse a bun version from "${ua}"; cannot verify >= ${MIN_BUN_STR}. Proceeding.`)
 }
 
 // Lexicographic [major, minor, patch] comparison: version >= min.

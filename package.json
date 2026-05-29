@@ -27,7 +27,7 @@
   },
   "scripts": {
     "preinstall": "bun scripts/check-package-manager.mjs",
-    "build:root": "tsup --config tsup.root.config.ts && node scripts/copy-root-assets.mjs",
+    "build:root": "tsup --config tsup.root.config.ts && bun scripts/copy-root-assets.mjs",
     "build:skill-utils": "bun --filter @appverk/opencode-skill-utils build",
     "build": "bun run build:root && bun run build:skill-utils && bun --filter @appverk/opencode-python-developer build && bun --filter @appverk/opencode-code-review build && bun --filter @appverk/opencode-frontend-developer build && bun --filter @appverk/opencode-skill-registry build && bun --filter @appverk/opencode-swift-developer build",
     "test": "bun run build:root && bun run build:skill-utils && vitest run --config vitest.config.ts && bun --filter @appverk/opencode-python-developer test && bun --filter @appverk/opencode-code-review test && bun --filter @appverk/opencode-frontend-developer test && bun --filter @appverk/opencode-skill-registry test && bun --filter @appverk/opencode-swift-developer test",
@@ -36,7 +36,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify-dist": "node scripts/verify-dist-sync.mjs"
+    "verify-dist": "bun scripts/verify-dist-sync.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
