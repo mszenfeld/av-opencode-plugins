@@ -3,7 +3,7 @@ import { registerAgentMetadata } from "../agent-registry/index.js"
 import { loadPantheonConfig } from "../pantheon-config/index.js"
 import { VELES_AGENT_KEY, velesSpecialistInfo } from "./veles.metadata.js"
 import { buildVelesPrompt } from "./prompt.js"
-import { isSerenaAvailable } from "../explore/serena-detect.js"
+import { isSerenaAvailable } from "../_shared/serena-detect.js"
 
 export const AppVerkPlanPlugin: Plugin = async ({ client }) => {
   registerAgentMetadata(velesSpecialistInfo)
