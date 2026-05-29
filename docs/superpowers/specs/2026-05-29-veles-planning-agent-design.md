@@ -1,8 +1,10 @@
 # Veles — Pantheon Planning Specialist (Design)
 
 **Date:** 2026-05-29
-**Status:** Approved — ready for implementation plan
+**Status:** Approved — revised after multi-agent verification (2026-05-29); ready for implementation plan
 **Author:** Marian Szenfeld (with Claude)
+
+> **Verification note (2026-05-29):** This spec was reviewed against the real codebase by four independent reviewers + sequential analysis. Foundation confirmed sound (`mode:"all"` is a valid SDK union member; Triglav mirror, `pantheon-config` open-endedness, metadata auto-render, skill auto-discovery, nested `Perun→Veles→Triglav` dispatch, and the `/create-qa-plan` extraction all verified). The §3 guard mechanism, the background-dispatch path, the `isToolSubset` framing, the no-plan branch location, the consent-gate dialog state, the plugin-tool opt-in mechanism, the git tokens, and the Veles output contract were **corrected** below per the review findings.
 
 ## Context
 
@@ -24,6 +26,8 @@ We want to close that gap by introducing a dedicated **planning agent** that Per
 | Prometheus (planner, primary, dispatches helpers) | **Veles** (this design) |
 | explore (subagent) | **Triglav** (exists) |
 | oracle / momus / metis (subagents) | future Veles helpers (out of scope now) |
+
+> **Deliberate divergence from OMO:** in OMO, Prometheus is a `mode: primary` planner that the user invokes — Sisyphus does **not** auto-dispatch it. Pantheon's design has **Perun dispatch Veles** (the auto QA-plan path), which is the one place Veles does NOT mirror Prometheus. This is enabled by the caller-aware guard relaxation (§3) and is an intentional choice, not faithful mirroring. Everything else (planner identity, helper-dispatch graph, `.md`-only output) follows OMO.
 
 ### Decisions made during brainstorming
 
@@ -69,18 +73,23 @@ src/modules/plan/
 - `name: "veles"`, `mode: "all"`, `description` (planner that authors plans for the coordinator; does not execute work).
 - `metadata`: `category: "specialist"`, `cost: "EXPENSIVE"` (reads diff + context and generates — not a cheap read like Triglav), `keyTrigger` (e.g. *"`/run-qa` invoked with no plan present → dispatch `veles` to author one before attempting QA"*), `useWhen` / `avoidWhen`, `triggers` (domain: "Planning", trigger: "Author a QA test plan / work plan from a diff or request").
 
-**`allowed-tools.ts` — `VELES_TOOLS`:**
+**Two distinct tool-gating mechanisms — do not conflate them** (verified against `explore/index.ts` + `qa/index.ts:160-164`):
+
+1. **Built-in tools** → the markdown `allowed-tools:` frontmatter, emitted into the prompt by `prompt.ts` (as `TRIGLAV_TOOLS` is for Triglav). This is what `allowed-tools.ts` / `VELES_TOOLS` carries.
+2. **Plugin tools** (`dispatch_parallel`, `dispatch_background`, `poll_background`, `wait_background`) → the SDK `AgentConfig.tools?: { [key]: boolean }` map on the `config.agent["veles"]` literal (exactly how QA opts `zmora-setup` into `execute_recipe`). These are registered process-wide by `AppVerkCoordinatorPlugin`; **no new tool factory is needed** — only the `tools:{…:true}` opt-in. Listing them in `VELES_TOOLS`/frontmatter is a **no-op** for plugin tools, so keep them OUT of `VELES_TOOLS`.
+
+**`allowed-tools.ts` — `VELES_TOOLS`** (built-in tools only):
 - serena read-tools (semantic context: endpoints/models/components) — reuse the set from `explore/allowed-tools.ts`;
 - `Read`, `Glob`, `Grep`;
-- `Bash(gh:*)`, `Bash(git --no-pager log:*)`, `Bash(git --no-pager diff:*)`, `Bash(git --no-pager blame:*)`, `Bash(command:*)`, `Bash(date:*)`, `Bash(mkdir:*)` (the read/inspect + plan-dir subset needed by `qa-plan-authoring`);
-- `Write` (plan markdown only — constrained by prompt);
-- `skill`, `question`;
-- `dispatch_parallel`, `dispatch_background`, `poll_background`, `wait_background` (to orchestrate Triglav now, Oracle/Momus later).
+- `Bash(gh:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(git blame:*)`, `Bash(git symbolic-ref:*)`, `Bash(sed:*)`, `Bash(command:*)`, `Bash(date:*)`, `Bash(mkdir:*)` — the read/inspect + plan-dir subset the `qa-plan-authoring` skill body actually invokes. **Plain `git diff` (not `git --no-pager diff`)** to match the tokens the current `/create-qa-plan` runs; the Bash allow-list is gated by exact-token match (no wildcard subsumption), so the skill body and these tokens must agree literally. `git symbolic-ref` + `sed` cover the `MAIN_BRANCH` resolver;
+- `Write` (plan markdown only — constrained by prompt).
+- `skill`, `question`.
 
 **`index.ts` — `AppVerkPlanPlugin`** (mirrors `AppVerkExplorePlugin`):
 - `registerAgentMetadata(velesSpecialistInfo)`;
-- `config.agent["veles"] = { description, mode: "all", get prompt() { return buildVelesPrompt() }, tools: { dispatch_parallel: true, ... } }`;
+- `config.agent["veles"] = { description, mode: "all", get prompt() { return buildVelesPrompt() }, tools: { dispatch_parallel: true, dispatch_background: true, poll_background: true, wait_background: true } }` — the `tools` map is the ONLY place the dispatch plugin-tools are enabled;
 - inject `loadPantheonConfig().agents.veles?.model` after registration (validated by `MODEL_REGEX`);
+- `buildVelesPrompt()` memoizes via a module-scope `let cached` (like `explore/prompt.ts`); the emitted frontmatter `mode` must be sourced from Veles's own metadata (`"all"`) so prompt and `config.agent` literal agree;
 - reuse `isSerenaAvailable` + one-time degraded-mode warning toast on `session.created`.
 
 Register `AppVerkPlanPlugin` in `src/index.ts` `defaultPluginFactories`. Veles then auto-renders in Perun's `SPECIALISTS_TABLE` / `DELEGATION_TABLE` / `KEY_TRIGGERS` via the existing placeholder machinery.
@@ -98,9 +107,20 @@ Introduce an allowlist `DISPATCHABLE_ALL_AGENTS = new Set(["veles"])` and make `
 
 Net effect: **Perun→Veles ✓, Veles→Triglav ✓, Veles→Veles ✗, *→Perun ✗.**
 
-- **Caller identity** is resolved at dispatch time from the session that invoked the dispatch tool, via the existing `sessionAgentRegistry` / `resolveParentID` plumbing in the coordinator. The coordinator's `dispatch_parallel` tool handler passes the caller's resolved agent mode (or a `callerIsPrimary` boolean) into `validateDispatchable`.
-- **Belt-and-suspenders:** an optional dispatch-depth cap (reject beyond depth 2: Perun→Veles→helper) guards against any unforeseen nesting cycle. Depth is derivable from the session ancestry chain.
-- The change is additive and preserves the existing security narrative; the comment block above `validateDispatchable` is updated to document the allowlist + caller-aware rule as the single source of truth.
+**Caller identity — corrected mechanism (the original "via `sessionAgentRegistry`/`resolveParentID`" was wrong).** `sessionAgentRegistry` maps `childSessionID→task.name` and is written ONLY for sessions spawned *as dispatch tasks* (`dispatch.ts:372`); **Perun's root session is never in it**, and `resolveParentID` is a local helper in `qa/index.ts`, not shared plumbing. Use one of the two signals that actually exist:
+
+- **Preferred — caller mode by name:** the dispatch tool's `execute(args, ctx)` receives `ctx.agent` (`ToolContext.agent`, the caller's agent name). Look it up in the already-loaded agent registry (`loadAgentRegistry`, `coordinator/index.ts:151`) to get its `mode`. **Naming pitfall:** Perun is registered under the display name `"Perun - Coordinator"` (`coordinator/index.ts` / `perun.md:2`), **not** `"perun"` — any caller-name comparison must use the registered key, not a guessed slug. `DISPATCHABLE_ALL_AGENTS = {"veles"}` is safe because Veles's registered key is literally `veles`.
+- **Fallback — is-root test:** a caller whose session has no `parentID` (`client.session.get(ctx.sessionID).parentID === undefined`) is the root primary (Perun); dispatched children always carry `parentID` (`sdk-specialist.ts:29,71`). This sidesteps the naming pitfall entirely and is sufficient for the rule "only a primary may dispatch an allowlisted `all`."
+
+**Signature change (net-new, not existing plumbing):** `validateDispatchable(agentRegistry, name)` gains a third argument `callerMode` (or `callerIsPrimary`). The caller is resolved in each dispatch tool's `execute` handler and threaded down. **Both call sites must be updated:**
+1. `dispatch.ts:173` (the `dispatch_parallel` path, in `dispatchParallel`);
+2. `background.ts:39` (the `dispatch_background` path, in `startBackgroundTask`) — and its `execute` handler (`coordinator/index.ts:264-282`) must resolve the caller too. **The original spec omitted the background path entirely.**
+
+**Belt-and-suspenders:** an optional dispatch-depth cap (reject beyond depth 2: Perun→Veles→helper) guards against an unforeseen nesting cycle. Depth is derived by walking the session ancestry via repeated `client.session.get(parentID)` (the same call the is-root test uses) — **not** via the agent registry.
+
+**Cost-DoS note:** `DISPATCH_MAX_TASKS = 4` and `BACKGROUND_MAX_CONCURRENT = 4` are **per-call / per-parent**, not global. Nesting multiplies the worst-case concurrent child count (Perun→Veles→Triglav can fan 4×4); the depth-2 cap bounds this. §3 acknowledges the bound is per-parent.
+
+**Strings to update for the relaxation (model/user-visible):** (a) the comment block above `validateDispatchable` (`dispatch.ts:50-53`); (b) the `dispatch_parallel` tool description that tells the model "`mode: all` agent … rejected" (`coordinator/index.ts:87`). Both currently assert the old invariant.
 
 ### 4. Shared skill `src/skills/qa/qa-plan-authoring/SKILL.md`
 
@@ -114,15 +134,22 @@ Extract the **authoring core** from `/create-qa-plan.md` (today's steps 1–7):
 6. generate FE / BE scenarios (concrete element/endpoint names, ≥2 edge cases each);
 7. save to `docs/testing/plans/YYYY-MM-DD-<topic>-test-plan.md`.
 
-The skill **loads `test-plan-format`** for the output structure. Its `allowed-tools` frontmatter is the **common denominator** (`Bash(gh:*)`, `Bash(git …:*)`, `Bash(command:*)`, `Bash(date:*)`, `Bash(mkdir:*)`, `Read`, `Write`, `Glob`, `Grep`) — deliberately **no serena**, so `isToolSubset` passes when the skill is loaded by both the `/create-qa-plan` command (no serena) and Veles. The "serena-first context gathering, Grep/Glob fallback" preference lives in **Veles's prompt**, not in the skill.
+The skill **loads `test-plan-format`** for the output structure (the env-var regex `^[A-Z_][A-Z0-9_]*$`, DSN-scheme requirement, and ≤50 cap live in `test-plan-format`, so they survive the extraction).
 
-What stays *out* of the skill: the "what to do after generation" step, which differs per caller — the command says *review + `/run-qa`*; Veles returns a structured summary to Perun.
+**`allowed-tools` frontmatter — single-line, comma-separated** (the parser `parseSkillFrontmatter` splits on commas line-by-line; a multi-line YAML list would silently truncate to the first line). Use the **common denominator** that both the `/create-qa-plan` command and Veles actually possess, with **literal git tokens matching what the skill body runs**:
+`Bash(gh:*), Bash(git diff:*), Bash(git log:*), Bash(git symbolic-ref:*), Bash(sed:*), Bash(command:*), Bash(date:*), Bash(mkdir:*), Read, Write, Glob, Grep` — deliberately **no serena** and **no `todowrite`** (todowrite stays command-side, see §5). The "serena-first context gathering, Grep/Glob fallback" preference lives in **Veles's prompt**, not in the skill.
 
-The skill is auto-discovered by `buildSkillCatalog` (directory scan) — no manual registration.
+> **`isToolSubset` is NOT a runtime guard.** Verification found `isToolSubset` and the parsed `allowedTools` field are **dead code** in the production path — never called/read by `load-skill.ts` / `prompt-injector.ts`. A skill's `allowed-tools` is actually enforced by the **native `skill()` runtime** (fed by `config.skills.paths`), which gates the skill body's tool calls (incl. exact-token Bash matching) against the **live agent's** tools. So the common-denominator set is a **sound authoring discipline** — the skill body must only use tools both callers truly have — but it is NOT enforced by `isToolSubset` at load time. Do not state otherwise. (A dedicated static test MAY call `isToolSubset` directly on the parsed frontmatter; see §9.)
+
+**Git-token caveat:** the current `/create-qa-plan` runs plain `git diff …` (not `git --no-pager …`) and resolves the main branch via `git symbolic-ref refs/remotes/origin/HEAD | sed …`. The skill body MUST emit exactly those token forms (or rewrite the resolver via `git rev-parse`/`gh`), because the native runtime matches Bash tokens literally with no wildcard subsumption.
+
+What stays *out* of the skill: the "what to do after generation" step, which differs per caller — the command says *review + `/run-qa`*; Veles returns a structured summary to Perun. `todowrite` progress tasks also stay command-side (not in the skill's tool set).
+
+The skill is auto-discovered by `buildSkillCatalog` (directory scan) and by the native `skill()` loader's `config.skills.paths` — no manual registration in either.
 
 ### 5. Refactor `/create-qa-plan.md` → thin command
 
-The command stays the manual entry point with **unchanged user-facing behavior** (ends with "review the plan, then `/run-qa`"), but its workflow body is replaced by `skill(name: "qa-plan-authoring")`. The command retains only: frontmatter / `allowed-tools`, `$ARGUMENTS` parsing, and the closing "propose `/run-qa`" step. Single source of truth = the skill.
+The command stays the manual entry point with **unchanged user-facing behavior** (ends with "review the plan, then `/run-qa`"), but its workflow body is replaced by `skill(name: "qa-plan-authoring")`. The command retains only: frontmatter / `allowed-tools`, `$ARGUMENTS` parsing, the `todowrite` progress tasks (which stay command-side — `todowrite` is in the command's `allowed-tools` but deliberately not in the skill's tool set), and the closing "propose `/run-qa`" step. Single source of truth = the skill.
 
 ### 6. Veles prompt (`veles.md`)
 
@@ -132,38 +159,61 @@ The command stays the manual entry point with **unchanged user-facing behavior**
   - **QA test plan** (the one wired mode): load `qa-plan-authoring`, follow it to produce + save the plan, then return the structured summary.
   - Reserved: implementation plan, refactor plan, etc. — listed as future modes.
 - **Interview mode** (`question`): for ambiguous/custom requests; **skipped** when the input is a clear diff/scope (the QA path).
-- **Output contract** (machine-parseable block Perun reads): `plan_path`, `fe_count`, `be_count`, `setup_prereqs` (the `## Setup` items), `topic`.
+- **Output contract — a JSON object** (Perun's result parser prefers JSON — `perun.md:187`, Tool Usage Rules): `{ "status": "ok" | "error" | "timeout", "plan_path": string, "fe_count": number, "be_count": number, "setup_prereqs": string[], "topic": string }`. The `status` field is required because Perun's no-plan branch (§7) branches on `error`/`timeout`. This result is parsed by the **new Step-1 consent logic**, NOT by Perun's Step-6 finding parser — it must never be threaded through `assign_issue_ids`.
 - **Constraints:** no source-code edits; `Write` only to plan files under `docs/`; nested dispatch only to read-only helpers; never dispatch self or Perun.
 
-### 7. Perun integration (`perun.md`, Workflow 1, Step 1)
+### 7. Perun integration — two files, corrected
 
-When invoked with no plan path **and** no plan found in `docs/testing/plans/`, instead of aborting:
+**Where the no-plan branch actually lives (corrected).** The original spec assumed `perun.md` Step 1 aborts on no-plan. It does **not** — `perun.md:47` scans `docs/testing/plans/` and auto-picks the newest `.md`. The hard abort *"No test plans found … Run `/create-qa-plan` first"* is in the entry command `run-qa.md:30-32`, and `run-qa.md` **deliberately excludes** `dispatch_parallel`/`task` and forbids dispatching (`run-qa.md` "What You MUST NOT Do"). So:
 
-1. `dispatch_parallel({ agent: "veles", summary: "generate QA plan: <scope>", tasks: [{ name: "veles", prompt: "Generate a QA test plan for <diff source>. <scope hint>" }] })`.
-2. Parse Veles's structured summary (`plan_path`, counts, `setup_prereqs`).
-3. **Consent gate:** display the summary + "Run QA on this plan? (yes / abort)" and wait for the user's next turn. On `yes` → continue Step 2 with `plan_path` (read → sanitize → preflight → dispatch). On `abort` → stop; the plan remains saved for manual review.
+**7a. `run-qa.md` (entry command) — change the empty-plan branch.** Instead of hard-aborting with "Run `/create-qa-plan` first", hand off to Perun with a no-plan signal carrying any scope the user gave, e.g. `@perun no QA plan found — author one for <scope/$ARGUMENTS> then run it`. Remove the contradictory "run `/create-qa-plan` first" guidance from `run-qa.md:32` (the user-supplied bad-path branch at `run-qa.md:34-36` stays). `run-qa.md` still does NOT dispatch — it only hands off.
+
+**7b. `perun.md` Workflow 1, Step 1 — add no-plan detection after the `ls` scan.** When the scan returns nothing (or Perun receives the no-plan handoff):
+
+1. `dispatch_parallel({ agent: "veles", summary: "<≤80 chars, e.g. 'author QA plan: <short topic>'>", tasks: [{ name: "veles", prompt: "Generate a QA test plan for <diff source>. <scope hint>" }] })`. The `summary` is hard-capped at 80 chars by the tool — truncate `<scope>`. `agent:"veles"` (5 chars) is within the 60-char cap; single task ⇒ no `×N`.
+2. Parse Veles's **JSON** result (§6): `status`, `plan_path`, counts, `setup_prereqs`.
+3. **Planning-consent gate** (see new dialog state below).
+
+**New dialog state: "Planning-consent gate"** (parallel to the NEED_INFO dialog; required because existing resume semantics, `perun.md:370-402`, model only preflight + NEED_INFO and assume "Perun stores no files — the status snapshot is canonical"). This gate has **no wave/NEED_INFO snapshot**; its canonical cross-turn state is the **`plan_path` Veles returned**, which Perun carries verbatim in its own turn text. Add a third **verbatim** prompt template (Perun's prompts are verbatim-by-contract, `perun.md:283`):
+
+```
+🧭 No QA plan existed — Veles authored one:
+
+  Plan: <plan_path>
+  Scenarios: <fe_count> FE, <be_count> BE
+  Setup prerequisites: <setup_prereqs joined, or "none">
+
+Run QA on this plan now? Reply 'yes' to run, 'abort' to stop
+(the plan is saved either way — you can review/edit it first).
+```
+
+Resume entry for this gate: on `yes` (and yes-equivalents per the existing intent map) → enter Workflow 1 at **Step 2** using `plan_path` (read → sanitize → preflight → dispatch). On `abort` → stop; plan stays saved. Ambiguous reply → re-ask once. This is **intra-Workflow-1** and does **not** emit a Composability proposal (those fire only after a completed run, `perun.md:466-479`); the normal post-run "Chcesz, żebym naprawił…" proposal still fires after the QA run completes.
 
 **Edge cases:**
-- Veles reports no changes / zero scenarios → Perun informs the user, does not run.
-- Veles returns `status: error` / `timeout` → Perun surfaces it verbatim, does not run.
-- The diff source for the auto path follows the same default as `/create-qa-plan` (open PR on current branch → branch diff fallback), plus any scope hint the user gave.
+- Veles `status: ok` but `fe_count + be_count == 0` (no changes / no scenarios) → Perun informs the user, does not run, does not show the consent gate.
+- Veles `status: error | timeout` → Perun surfaces it verbatim, does not run.
+- Diff source for the auto path follows the same default as `/create-qa-plan` (open PR on current branch → branch diff fallback), plus any scope hint forwarded from `run-qa.md`.
 
-Perun's `allowed-tools` already include `dispatch_parallel`, so no frontmatter change beyond the Veles row appearing automatically. The consent gate reuses the existing resume intent-recognition (yes/abort) conventions.
+Perun's `allowed-tools` already include `dispatch_parallel` (`perun.md:5`), so no Perun frontmatter change beyond the Veles row auto-appearing in its prompt tables.
 
 ### 8. Plumbing / config
 
 - `pantheon.json` → `agents.veles.model` works without schema change (the `agents` map is open-ended; unknown agent keys are accepted, `model` is the only known field, validated by `MODEL_REGEX`).
-- Build: `scripts/copy-root-assets.mjs` already copies `src/skills` and `src/agents` (so `veles.md` + the new skill ship); `scripts/verify-dist-sync.mjs` covers `dist/skills` and `dist/agents`.
+- Build: `scripts/copy-root-assets.mjs` copies `["commands","agents","skills"]` **and** walks `src/modules/<name>/**/*.md`. So the new skill (`src/skills/qa/qa-plan-authoring/SKILL.md`) ships via the `skills` root, and **`veles.md` ships via the `src/modules/<name>` walk** — note Veles's prompt lives at `src/modules/plan/veles.md` (per §2), NOT under `src/agents/`. No per-skill/per-agent manifest or `package.json` `files[]` change is needed.
+- **`dist` must be rebuilt and committed.** `scripts/verify-dist-sync.mjs` fails CI if `dist` is stale, so the implementer MUST run the build and commit the regenerated `dist/skills/qa/qa-plan-authoring/` + `dist/modules/plan/` artifacts. (No test asserts an exact skill/agent file list, and the packed-tarball top-level set test is unaffected — only `dist` contents change.)
 - Add `AppVerkPlanPlugin` to `src/index.ts` `defaultPluginFactories`.
 
 ### 9. Testing
 
-- **Metadata:** `veles.metadata` registration + idempotence; Veles appears in the sorted registry and renders in Perun's prompt (extend `perun-prompt-builder` tests).
-- **Prompt + config:** `buildVelesPrompt()` returns the prompt; config injection sets `mode: "all"`, the tool set, and the model from `pantheon.json` (mirror Triglav tests).
-- **Guard (caller-aware):** `validateDispatchable` — Perun→Veles ✓, Veles→Veles ✗, *→Perun ✗, Veles→Triglav ✓, non-allowlisted `all` target ✗; optional depth-cap test.
-- **Skill:** discovered by `buildSkillCatalog`; no duplicate name; `allowed-tools` is a subset of both the command's and Veles's tool sets (`isToolSubset`).
-- **Command:** `/create-qa-plan` still yields a valid plan after the thin refactor (skill body unchanged in substance).
-- **Perun flow:** "no plan → dispatch Veles → consent gate → run" path (analogous to `perun-qa-flow.test.ts`), including the edge cases.
+- **Metadata:** `veles.metadata` registration + idempotence; Veles appears in the sorted registry and renders in Perun's prompt. **Add a renderer test for an `all`-mode specialist row** specifically — no current specialist is `all`, so `buildSpecialistsTable` has never exercised that value.
+- **Prompt + config:** `buildVelesPrompt()` returns the prompt with `mode: all` in frontmatter; config injection sets `mode: "all"`, the `tools:{dispatch_*:true}` opt-in map, the built-in `allowed-tools`, and the model from `pantheon.json` (mirror Triglav tests).
+- **Guard (caller-aware), parallel path:** `validateDispatchable` with the new `callerMode` arg — Perun(primary)→Veles ✓, Veles(non-primary)→Veles ✗, *→Perun ✗, Veles→Triglav(subagent) ✓, non-allowlisted `all` target ✗; optional depth-cap test.
+- **Guard (caller-aware), background path:** the SAME matrix against `startBackgroundTask`/`background.ts:39` (extend `tests/modules/coordinator/background.test.ts`) — the background call site is a separate code path and MUST be covered.
+- **Caller resolution:** unit-test that the dispatch `execute` handler resolves caller mode from `ctx.agent`→registry (and/or the `parentID===undefined` is-root path), including the `"Perun - Coordinator"` (not `"perun"`) naming case.
+- **Skill discovery:** discovered by `buildSkillCatalog`; no duplicate name; frontmatter is a single comma-separated `allowed-tools` line that parses.
+- **Skill tool subset (static, NOT load-time):** a static assertion test that calls `isToolSubset(skillTools, commandTools)` and `isToolSubset(skillTools, velesTools)` directly on the parsed frontmatter sets. Note in the test that this is an authoring-discipline check, not a runtime guard (`isToolSubset` is not wired into any load path). Matching is exact-token, so the asserted sets must be token-identical.
+- **Command:** `/create-qa-plan` still yields a valid plan after the thin refactor (skill body unchanged in substance); the skill body's Bash tokens match the granted `allowed-tools` (plain `git diff`, `git symbolic-ref`/`sed`).
+- **Perun flow:** "no plan → dispatch Veles → consent gate → run" path (analogous to `perun-qa-flow.test.ts`), including: zero-scenario edge (no gate), `error`/`timeout` edge (surface, no run), and `abort` (plan saved, stop). Cover the `run-qa.md` empty-plan handoff no longer emitting "run `/create-qa-plan` first".
 
 ### 10. Out of scope (YAGNI)
 
