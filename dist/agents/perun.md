@@ -44,7 +44,21 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
 
 **Steps:**
 
-1. **Read the test plan.** Use `Read` to load the file. If no path is given, scan `docs/testing/plans/` via `Bash(ls:*)` and pick the most recent `.md` file.
+1. **Read the test plan, or author one if none exists.** Use `Read` to load the file. If no path is given, scan `docs/testing/plans/` via `Bash(ls:*)` and pick the most recent `.md` file.
+
+   **No-plan branch.** If the scan finds no `.md` plan (or you were handed off from `/run-qa` with "no QA plan found"):
+
+   a. Dispatch the Veles planner to author one:
+   ```
+   dispatch_parallel({
+     agent: "veles",
+     summary: "author QA plan: <short topic, ≤80 chars total>",
+     tasks: [{ name: "veles", prompt: "Generate a QA test plan for <diff source / scope forwarded from the user>. Default diff source: open PR on current branch, else branch diff vs main." }]
+   })
+   ```
+   b. Parse Veles's result as JSON: `{ status, plan_path, fe_count, be_count, setup_prereqs, topic }`. This is the planner's summary — do NOT run it through `assign_issue_ids` or the Step-6 finding parser.
+   c. If `status` is `"error"`/`"timeout"`, or `fe_count + be_count === 0`, tell the user no runnable plan could be authored and STOP (do not show the consent gate).
+   d. Otherwise enter the **Planning-consent gate** (see the dedicated section below). On approval, continue this workflow at **Step 2** using `plan_path`.
 
 2. **Parse sections.**
    - Extract the frontmatter (`source`, `branch`, `base-url`, `detected-tools`).
@@ -400,6 +414,30 @@ After a mid-run prompt, treat the user's next reply as part of the same QA run c
 8. If the resume dispatch itself returns more `NEED_INFO` → loop back to step 1. No turn limit.
 
 **Plan modification between turns is undefined behavior.** If the plan file's mtime has changed since the previous turn, emit a soft warning toast `Pantheon: plan file modified mid-run — results may be inconsistent` and proceed. Do not attempt to reconcile additions/deletions; recommend the user re-run `/run-qa` from scratch if they intend a fresh run.
+
+### Planning-consent gate
+
+Used only by Workflow 1 Step 1's no plan branch, after Veles authors a plan. This is a distinct cross-turn dialog state. Unlike NEED_INFO/preflight resume, there is NO wave snapshot — the canonical state carried across the pause is the `plan_path` Veles returned, which you MUST include in your turn text so the next turn can act on it.
+
+Emit this template verbatim, filling the slots:
+
+```
+🧭 No QA plan existed — Veles authored one:
+
+  Plan: <plan_path>
+  Scenarios: <fe_count> FE, <be_count> BE
+  Setup prerequisites: <setup_prereqs joined by ", ", or "none">
+
+Run QA on this plan now? Reply 'yes' to run, 'abort' to stop
+(the plan is saved either way — you can review/edit it first).
+```
+
+On the next turn:
+- Reply is `yes` (or yes-equivalent per the resume intent map) → start Workflow 1 at **Step 2** using `plan_path` (Read → sanitize → preflight → dispatch).
+- Reply is `abort` (or abort-equivalent) → stop; the plan stays saved.
+- Ambiguous reply → ask once: "Run QA on `<plan_path>`? Reply 'yes' or 'abort'."
+
+This gate is INTRA-Workflow-1 and does NOT emit a Composability proposal. The normal post-run fix proposal still fires after the QA run completes.
 
 ---
 

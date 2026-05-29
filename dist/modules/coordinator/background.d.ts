@@ -14,6 +14,8 @@ interface StartBackgroundInput {
     agent: string;
     prompt: string;
     context?: string;
+    /** Caller's mode — see dispatch.ts DispatchParallelInput.callerMode. */
+    callerMode?: AgentInfo["mode"];
 }
 interface StartBackgroundResult {
     id: string;

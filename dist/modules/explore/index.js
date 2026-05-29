@@ -2,7 +2,7 @@ import { registerAgentMetadata } from "../agent-registry/index.js";
 import { loadPantheonConfig } from "../pantheon-config/index.js";
 import { TRIGLAV_AGENT_KEY, triglavSpecialistInfo } from "./triglav.metadata.js";
 import { buildTriglavPrompt } from "./prompt.js";
-import { isSerenaAvailable } from "./serena-detect.js";
+import { isSerenaAvailable } from "../_shared/serena-detect.js";
 const AppVerkExplorePlugin = async ({ client }) => {
   registerAgentMetadata(triglavSpecialistInfo);
   let serenaMissing = false;

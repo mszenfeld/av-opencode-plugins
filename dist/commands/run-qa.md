@@ -27,9 +27,13 @@ You execute QA test plans by handing the plan to **@perun**, the Pantheon coordi
 ls -t docs/testing/plans/*.md 2>/dev/null | head -1
 ```
 
-If no plans found, inform the user and stop:
+If no plans found, do NOT stop — hand the no-plan case to `@perun`, forwarding any scope the user passed in `$ARGUMENTS`:
 
-> No test plans found in `docs/testing/plans/`. Run `/create-qa-plan` first.
+```
+@perun no QA plan found — author one for "<$ARGUMENTS or 'current changes'>" then run it
+```
+
+Perun will dispatch the Veles planner, show a consent gate, and run the generated plan on approval. (Do NOT dispatch or author the plan yourself — your `allowed-tools` deliberately omit dispatch.)
 
 If the user-supplied path does not exist, surface the error and stop:
 
