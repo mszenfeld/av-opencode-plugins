@@ -21,13 +21,12 @@ This is an **OpenCode plugin monorepo** that bundles multiple workspace plugins 
 | `src/modules/pantheon-config/` | Harness-resident **library** (no plugin export) — reads `pantheon.json` (user-global + per-project walk-up, closest-wins merge) and exposes `loadPantheonConfig()` / `getLoadErrors()` / `pantheonConfigEmpty()`. Consumed by `coordinator/` and `qa/` in their `config` hooks. Tests: `tests/modules/pantheon-config/`. Built into `dist/modules/pantheon-config/`. |
 | `src/modules/_shared/` | Cross-module helpers: `loadModuleAsset` (sibling markdown loading under tsup's `bundle: false` layout), `SessionAgentRegistry` (childSessionID → agentName), `register/getDispatchExtensions` (QA publishes scrubberFactory + registry that coordinator reads at dispatch time). Consumed by `coordinator/` and `qa/`. |
 | `src/hooks/session-notification/` | **Harness-resident plugin** (not a workspace package) — Pantheon session-notification hook that triggers macOS desktop notifications on OpenCode session events. Source `.ts` and built `.js`/`.d.ts` are colocated and shipped together as part of the root `src/` tree. |
-| `.opencode/` | Local OpenCode config for this repo (separate `package.json`). |
 
 **Important:** `dist/` is usually ignored, but the **root `dist/`** and **`packages/*/dist/`** are committed and published (see `.gitignore`). Do not delete those `dist/` trees.
 
 ## Prerequisites
 
-**Required:** Bun ≥ 1.3.13. Install:
+**Required:** Bun >= 1.3.13. Install:
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
@@ -227,7 +226,7 @@ When installing from git, OpenCode (via Bun) caches the repository and **does no
 
 1. **Bump the version** in **all** `package.json` files (root + every workspace) when adding new commands, agents, or built assets.
 2. **Create a git tag** matching the version (e.g. `v0.3.0`) after the bump commit.
-3. **Update installation examples** in `README.md`, `AGENTS.md`, and `.opencode/opencode.json` to reference the new tag instead of a branch name like `#master`.
+3. **Update installation examples** in `README.md` and `AGENTS.md` to reference the new tag instead of a branch name like `#master`.
 
 Example config:
 ```json

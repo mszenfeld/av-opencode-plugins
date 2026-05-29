@@ -3,7 +3,7 @@
  * Verifies that committed dist/ artifacts are in sync with src/.
  * Run this after `bun run build` in CI to prevent drift.
  */
-import { execFileSync, execSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import process from "node:process"
 
 // Root `dist/` covers `dist/modules/*` (commit, qa, coordinator,
@@ -23,7 +23,7 @@ const trackedDistPaths = [
 // Run build first
 console.log("Running bun run build...")
 try {
-  execSync("bun run build", { stdio: "inherit" })
+  execFileSync("bun", ["run", "build"], { stdio: "inherit" })
 } catch (err) {
   console.error("Build failed (exit", err.status ?? err.signal ?? "unknown", "). Fix build errors before checking dist sync.")
   process.exit(1)
@@ -40,7 +40,7 @@ try {
   )
   changedFiles = output.trim()
 } catch (err) {
-  console.error("Failed to run git status:", err.message)
+  console.error("Failed to run git status:", String(err?.message ?? err))
   console.error("Ensure this is a git repository.")
   process.exit(1)
 }

@@ -549,3 +549,11 @@ Możliwy ale niewskazany. Jeśli np. preinstall guard sprawia problem ale reszta
 - Commit + push
 
 Vs. pełny rollback — partial wymaga ręcznej intervencji na każdej zewnętrznej maszynie (consumerzy nadal mają `packageManager: "bun@1.3.13"` i `.bun-version`, więc będą próbowali bun).
+
+---
+
+## Addendum (post-implementation)
+
+> Notka korygująca dodana po wdrożeniu. Nie zmienia oryginalnych kroków powyżej — jedynie odnotowuje rozjazd między spec a faktyczną implementacją, aby nieaktualne stwierdzenia nie były mylone z obowiązującym kontraktem.
+
+- **`package.json` `files[]` — zmieniony (sprostowanie):** Mapa zmian per plik (sekcja powyżej) deklarowała, że `files` jest **BEZ ZMIAN**. W rzeczywistości `files[]` zyskało wpis `"scripts"` (commit `b4581e4`), aby guard preinstall (`scripts/check-package-manager.mjs`) działał w scenariuszu extract-then-install (rozpakowanie tarballa, a następnie `bun install`). Bez publikowania `scripts/` guard nie istniałby po stronie konsumenta.

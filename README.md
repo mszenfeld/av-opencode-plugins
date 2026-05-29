@@ -68,7 +68,7 @@ The full reference (locations, precedence, schema, FAQ) is in [`docs/configuring
 
 ### Prerequisites
 
-**Required:** Bun ≥ 1.3.13.
+**Required:** Bun >= 1.3.13.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash

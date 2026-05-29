@@ -1646,3 +1646,12 @@ After merge to mszenfeld/master:
 1. **Release tag:** Create `v0.4.0` tag pointing at merge commit; update README "Installation" example from `#v0.3.0` to `#v0.4.0`.
 2. **Bun runtime API audit follow-up (spec section "Bun runtime API audit"):** Consider PoC PR `feature/bun-spawn-run-bash` for A1 — but only after writing a benchmark spec (n samples, warm-up, threshold). Without benchmark spec, do not open the PoC.
 3. **Documentation maintenance:** If iteration 1's spec (`docs/superpowers/specs/2026-05-28-bun-migration-design.md`) and plan (`docs/superpowers/plans/2026-05-28-bun-migration-plan.md`) remain in repo, consider marking them clearly as `[ARCHIVED — superseded by 2026-05-28-bun-migration-mszenfeld-design.md, iteration 1 worked against AppVerk base, never merged]`.
+
+---
+
+## Addendum (post-implementation)
+
+> Notka korygująca dodana po wdrożeniu. Nie zmienia oryginalnych kroków ani milestone'ów powyżej — jedynie odnotowuje rozjazd między planem a faktyczną implementacją.
+
+- **Liczba commitów — przekroczyła planowane 5 (sprostowanie):** Mapa milestone'ów deklarowała **"Total: 5 commits"** (jeden na milestone). Faktyczna liczba commitów na branchu przekroczyła 5 z powodu post-implementacyjnych poprawek code review (m.in. `b4581e4`, `79b8902`, `d6a5628`). Pierwotny podział na milestone'y pozostaje aktualny jako logiczna struktura pracy.
+- **`package.json` `files[]` — zmieniony:** Wbrew deklaracji w spec ("files[] BEZ ZMIAN"), `files[]` zyskało wpis `"scripts"` (commit `b4581e4`), aby guard preinstall działał w scenariuszu extract-then-install. Szczegóły w sekcji "Addendum (post-implementation)" pliku spec (`2026-05-28-bun-migration-mszenfeld-design.md`).

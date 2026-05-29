@@ -158,16 +158,22 @@ describe("AppVerkPlugins", () => {
 
     const tmpDir = mkdtempSync(path.join(tmpdir(), "bun-pack-"))
     try {
-      execFileSync("bun", ["pm", "pack", "--destination", tmpDir], {
-        cwd: rootDirectory,
-      })
+      // Resolve the tarball name deterministically from bun's own output rather
+      // than scanning the temp dir for the first *.tgz. `--quiet` prints the
+      // created tarball path on stdout (with a leading newline), so trim + basename.
+      const packOutput = execFileSync(
+        "bun",
+        ["pm", "pack", "--quiet", "--destination", tmpDir],
+        { cwd: rootDirectory, encoding: "utf8" },
+      ).trim()
+      const tarballPath = path.join(tmpDir, path.basename(packOutput))
 
-      const tarball = readdirSync(tmpDir).find((entry) => entry.endsWith(".tgz"))
-      if (!tarball) {
-        throw new Error(`No .tgz file found in ${tmpDir}`)
-      }
-
-      const packedFiles = execFileSync("tar", ["-tzf", path.join(tmpDir, tarball)], {
+      // Assumption (deliberate): this test requires a system `tar` on PATH to
+      // list the tarball contents. macOS/Linux CI ship `tar`; minimal containers
+      // or bare Windows may lack it (or provide a bsdtar variant). This is a
+      // conscious environmental assumption — in-process tarball parsing is out
+      // of scope for this LOW-severity robustness item.
+      const packedFiles = execFileSync("tar", ["-tzf", tarballPath], {
         encoding: "utf8",
       })
         .trim()
@@ -175,8 +181,20 @@ describe("AppVerkPlugins", () => {
         .map((entry) => entry.replace(/^package\//, ""))
         .filter((entry) => entry.length > 0)
 
-      // Derive expected files from package.json `files` (ulepszenie #9):
-      // any new path added to `files` is auto-asserted without test maintenance
+      // Top-level contract assertion: catches both over-inclusion (a stray file
+      // such as a .map, source, or secret silently riding along) and a whole
+      // path dropping out of `files[]` (which the subset check below cannot see,
+      // since removing a path shrinks both the expected and packed sets in
+      // lockstep). package.json and README.md are always packed by bun
+      // regardless of `files[]`. Verified empirically via `bun pm pack` +
+      // `tar -tzf` against this repo.
+      const topLevel = new Set(packedFiles.map((entry) => entry.split("/")[0]))
+      expect(topLevel).toEqual(
+        new Set(["package.json", "README.md", "dist", "scripts", "packages"]),
+      )
+
+      // Fine-grained check: derive expected files from package.json `files` so
+      // any new path added to `files` is auto-asserted without test maintenance.
       const expectedFiles = deriveExpectedFilesFromPackageJson(packageJson, rootDirectory)
       expect(packedFiles).toEqual(expect.arrayContaining(expectedFiles))
     } finally {

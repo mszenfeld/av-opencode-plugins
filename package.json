@@ -26,7 +26,7 @@
     "uuid": ">=14.0.0"
   },
   "scripts": {
-    "preinstall": "node scripts/check-package-manager.mjs",
+    "preinstall": "bun scripts/check-package-manager.mjs",
     "build:root": "tsup --config tsup.root.config.ts && node scripts/copy-root-assets.mjs",
     "build:skill-utils": "bun --filter @appverk/opencode-skill-utils build",
     "build": "bun run build:root && bun run build:skill-utils && bun --filter @appverk/opencode-python-developer build && bun --filter @appverk/opencode-code-review build && bun --filter @appverk/opencode-frontend-developer build && bun --filter @appverk/opencode-skill-registry build && bun --filter @appverk/opencode-swift-developer build",
