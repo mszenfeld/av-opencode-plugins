@@ -387,10 +387,13 @@ After `outcome === "done"`, parse the contract from `finalText` (the text of the
 last assistant message), read the file at `plan_path` relative to `TARGET`, store
 its content in the report, then delete it. Do NOT re-declare the Step-3
 `cleanup()` — add the plan-delete line to the one you already have, so a crash or
-`Ctrl-C` also removes a leftover:
+`Ctrl-C` also removes a leftover. A plan is written **even when the final JSON
+gate fails**, so the cleanup also sweeps `docs/testing/plans/` directly — not only
+the parsed `plan_path` (a real smoke-run finding: a gate-failing run still left a
+plan behind):
 
 ```javascript
-import { rmSync } from "node:fs"
+import { rmSync, readdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
 // Module-scope; set after each iteration, cleared once the plan is deleted.
@@ -420,6 +423,14 @@ if (contract?.plan_path) {
     rmSync(lastPlanPath, { force: true })
     lastPlanPath = undefined
   }
+}
+
+// Fallback (do NOT skip): a plan is written even when the JSON is malformed, so
+// `plan_path` may be unknown. Sweep the plans dir so a gate-failing run never
+// leaves a file behind. Capture any survivors into the report first if wanted.
+const plansDir = join(TARGET, "docs/testing/plans")
+if (existsSync(plansDir)) {
+  for (const f of readdirSync(plansDir)) rmSync(join(plansDir, f), { force: true })
 }
 ```
 
