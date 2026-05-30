@@ -5,9 +5,9 @@ import {
 } from "../../../src/modules/plan/veles.metadata.js"
 
 describe("velesSpecialistInfo", () => {
-  it("is keyed 'veles' and is mode all", () => {
-    expect(VELES_AGENT_KEY).toBe("veles")
-    expect(velesSpecialistInfo.name).toBe("veles")
+  it("is keyed 'Veles - Planner' (display/dispatch name) and is mode all", () => {
+    expect(VELES_AGENT_KEY).toBe("Veles - Planner")
+    expect(velesSpecialistInfo.name).toBe("Veles - Planner")
     expect(velesSpecialistInfo.mode).toBe("all")
   })
   it("is a specialist with EXPENSIVE cost and a planning trigger", () => {

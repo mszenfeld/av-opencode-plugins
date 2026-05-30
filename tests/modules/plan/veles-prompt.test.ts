@@ -6,7 +6,7 @@ describe("buildVelesPrompt", () => {
   const prompt = buildVelesPrompt()
 
   it("assembles frontmatter with name, mode all, and the exact allow-list", () => {
-    expect(prompt).toContain("name: veles")
+    expect(prompt).toContain("name: Veles - Planner")
     expect(prompt).toContain("mode: all")
     expect(prompt).toContain(`allowed-tools: ${VELES_TOOLS.join(", ")}`)
   })

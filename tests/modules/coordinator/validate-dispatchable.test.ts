@@ -4,12 +4,13 @@ import {
   DISPATCHABLE_ALL_AGENTS,
   type AgentInfo,
 } from "../../../src/modules/coordinator/dispatch.js"
+import { VELES_AGENT_KEY } from "../../../src/modules/plan/veles.metadata.js"
 
 const registry: Record<string, AgentInfo> = {
   zmora: { mode: "subagent" },
   perun: { mode: "primary" },
   omni: { mode: "all" },
-  veles: { mode: "all" },
+  "Veles - Planner": { mode: "all" },
 }
 
 describe("validateDispatchable", () => {
@@ -31,23 +32,24 @@ describe("validateDispatchable", () => {
       /Cannot dispatch all agent: omni/,
     )
   })
-  it("allows an allowlisted all-agent (veles) when the caller is primary", () => {
-    expect(() => validateDispatchable(registry, "veles", "primary")).not.toThrow()
+  it("allows an allowlisted all-agent (Veles - Planner) when the caller is primary", () => {
+    expect(() => validateDispatchable(registry, "Veles - Planner", "primary")).not.toThrow()
   })
-  it("rejects an allowlisted all-agent (veles) when the caller is not primary", () => {
-    expect(() => validateDispatchable(registry, "veles", "all")).toThrow(
-      /Cannot dispatch all agent: veles/,
+  it("rejects an allowlisted all-agent (Veles - Planner) when the caller is not primary", () => {
+    expect(() => validateDispatchable(registry, "Veles - Planner", "all")).toThrow(
+      /Cannot dispatch all agent: Veles - Planner/,
     )
-    expect(() => validateDispatchable(registry, "veles", "subagent")).toThrow(
-      /Cannot dispatch all agent: veles/,
-    )
-  })
-  it("rejects an allowlisted all-agent (veles) when caller mode is unknown", () => {
-    expect(() => validateDispatchable(registry, "veles")).toThrow(
-      /Cannot dispatch all agent: veles/,
+    expect(() => validateDispatchable(registry, "Veles - Planner", "subagent")).toThrow(
+      /Cannot dispatch all agent: Veles - Planner/,
     )
   })
-  it("exposes the allowlist", () => {
-    expect(DISPATCHABLE_ALL_AGENTS.has("veles")).toBe(true)
+  it("rejects an allowlisted all-agent (Veles - Planner) when caller mode is unknown", () => {
+    expect(() => validateDispatchable(registry, "Veles - Planner")).toThrow(
+      /Cannot dispatch all agent: Veles - Planner/,
+    )
+  })
+  it("exposes the allowlist, kept in sync with VELES_AGENT_KEY", () => {
+    expect(DISPATCHABLE_ALL_AGENTS.has(VELES_AGENT_KEY)).toBe(true)
+    expect(VELES_AGENT_KEY).toBe("Veles - Planner")
   })
 })

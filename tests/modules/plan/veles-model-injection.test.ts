@@ -75,7 +75,7 @@ describe("AppVerkPlanPlugin veles model injection", () => {
   // strings even though the schema (MODEL_REGEX in
   // src/modules/pantheon-config/schema.ts) already filters them. Covers
   // CWE-117/CWE-1188 — an ANSI/BiDi/control-byte payload must never reach
-  // `config.agent["veles"].model` and downstream TUI sinks.
+  // `config.agent[VELES_AGENT_KEY].model` and downstream TUI sinks.
   it("leaves model unset when pantheon.json provides an invalid model", async () => {
     writeUserGlobal(`{ "agents": { "veles": { "model": "bad model\\u001b[31m" } } }`)
     const plugin = await AppVerkPlanPlugin(fakeInput())

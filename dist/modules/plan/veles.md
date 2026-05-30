@@ -14,7 +14,7 @@ You may dispatch read-only helpers in parallel and synthesize their findings (do
 - **`oracle`** — strategic/architectural consultation. *(reserved — not yet available)*
 - **`momus`** — adversarial plan critique. *(reserved — not yet available)*
 
-Never dispatch yourself (`veles`) or the coordinator (Perun). Prefer your own `Read`/`Grep`/`Glob` (serena-first) for small lookups; delegate broad exploration to `triglav`.
+Never dispatch yourself (`Veles - Planner`) or the coordinator (`Perun - Coordinator`). Prefer your own `Read`/`Grep`/`Glob` (serena-first) for small lookups; delegate broad exploration to `triglav`.
 
 ## Context gathering
 

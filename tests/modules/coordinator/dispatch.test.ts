@@ -734,27 +734,30 @@ describe("dispatchParallel", () => {
   })
 
   it("dispatches an allowlisted all-agent only when callerMode is primary", async () => {
-    const agentRegistry = { veles: { mode: "all" as const }, triglav: { mode: "subagent" as const } }
+    const agentRegistry = {
+      "Veles - Planner": { mode: "all" as const },
+      triglav: { mode: "subagent" as const },
+    }
     const { specialist } = makeSpecialistRecorder({
       fetchMessagesHandler: async () => [finishedMessage("plan done")],
     })
-    // primary caller → veles dispatch succeeds
+    // primary caller → Veles - Planner dispatch succeeds
     const ok = await dispatchParallel({
-      tasks: [{ name: "veles", prompt: "plan" }],
+      tasks: [{ name: "Veles - Planner", prompt: "plan" }],
       agentRegistry,
       specialist,
       callerMode: "primary",
     })
     expect(ok[0]!.status).toBe("success")
-    // non-primary caller → veles task fails validation (thrown before spawn)
+    // non-primary caller → Veles - Planner task fails validation (thrown before spawn)
     await expect(
       dispatchParallel({
-        tasks: [{ name: "veles", prompt: "plan" }],
+        tasks: [{ name: "Veles - Planner", prompt: "plan" }],
         agentRegistry,
         specialist,
         callerMode: "all",
       }),
-    ).rejects.toThrow(/Cannot dispatch all agent: veles/)
+    ).rejects.toThrow(/Cannot dispatch all agent: Veles - Planner/)
   })
 
   describe("sessionAgentRegistry + scrubber integration", () => {

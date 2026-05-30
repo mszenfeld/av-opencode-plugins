@@ -5,7 +5,7 @@ import {
 } from "../../../src/modules/agent-registry/index.js"
 
 const veles: SpecialistInfo = {
-  name: "veles",
+  name: "Veles - Planner",
   mode: "all",
   description: "planner",
   metadata: { category: "specialist", cost: "EXPENSIVE", triggers: [] },
@@ -14,6 +14,6 @@ const veles: SpecialistInfo = {
 describe("buildSpecialistsTable with an all-mode specialist", () => {
   it("renders the mode value verbatim in the row", () => {
     const table = buildSpecialistsTable([veles])
-    expect(table).toContain("| `veles` | all | planner |")
+    expect(table).toContain("| `Veles - Planner` | all | planner |")
   })
 })

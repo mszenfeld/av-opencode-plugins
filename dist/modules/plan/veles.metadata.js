@@ -1,4 +1,4 @@
-const VELES_AGENT_KEY = "veles";
+const VELES_AGENT_KEY = "Veles - Planner";
 const VELES_DESCRIPTION = "Planning specialist: authors QA test plans (and other work plans) from a diff or request. Dispatches read-only helpers (triglav) and returns a plan it saved \u2014 it does not execute the planned work.";
 const velesSpecialistInfo = {
   name: VELES_AGENT_KEY,

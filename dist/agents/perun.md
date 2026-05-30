@@ -51,9 +51,9 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
    a. Dispatch the Veles planner to author one:
    ```
    dispatch_parallel({
-     agent: "veles",
+     agent: "Veles - Planner",
      summary: "author QA plan: <short topic, ≤80 chars total>",
-     tasks: [{ name: "veles", prompt: "Generate a QA test plan for <diff source / scope forwarded from the user>. Default diff source: open PR on current branch, else branch diff vs main." }]
+     tasks: [{ name: "Veles - Planner", prompt: "Generate a QA test plan for <diff source / scope forwarded from the user>. Default diff source: open PR on current branch, else branch diff vs main." }]
    })
    ```
    b. Parse Veles's result as JSON: `{ status, plan_path, fe_count, be_count, setup_prereqs, topic }`. This is the planner's summary — do NOT run it through `assign_issue_ids` or the Step-6 finding parser.

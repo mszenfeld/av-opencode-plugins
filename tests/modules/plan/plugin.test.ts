@@ -15,7 +15,7 @@ describe("AppVerkPlanPlugin", () => {
 
   it("registers veles metadata in the factory body", async () => {
     await AppVerkPlanPlugin(fakeInput())
-    expect(getAgentMetadataRegistry().map((a) => a.name)).toContain("veles")
+    expect(getAgentMetadataRegistry().map((a) => a.name)).toContain("Veles - Planner")
   })
 
   it("registers the veles agent as mode all with the allow-list in its prompt", async () => {
@@ -24,7 +24,7 @@ describe("AppVerkPlanPlugin", () => {
       agent?: Record<string, { mode?: string; prompt?: string; tools?: Record<string, boolean> }>
     } = {}
     await hooks.config?.(config as never)
-    const agent = config.agent?.["veles"]
+    const agent = config.agent?.["Veles - Planner"]
     expect(agent?.mode).toBe("all")
     expect(agent?.prompt).toContain(`allowed-tools: ${VELES_TOOLS.join(", ")}`)
   })
@@ -33,7 +33,7 @@ describe("AppVerkPlanPlugin", () => {
     const hooks = await AppVerkPlanPlugin(fakeInput())
     const config: { agent?: Record<string, { tools?: Record<string, boolean> }> } = {}
     await hooks.config?.(config as never)
-    const tools = config.agent?.["veles"]?.tools
+    const tools = config.agent?.["Veles - Planner"]?.tools
     expect(tools?.dispatch_parallel).toBe(true)
     expect(tools?.dispatch_background).toBe(true)
     expect(tools?.poll_background).toBe(true)

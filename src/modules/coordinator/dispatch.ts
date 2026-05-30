@@ -54,7 +54,10 @@ export interface AgentInfo {
  * while still blocking Veles→Veles, *→Perun, and any other `primary`/`all`
  * target. Keep this set MINIMAL — every entry widens the anti-recursion surface.
  */
-export const DISPATCHABLE_ALL_AGENTS: ReadonlySet<string> = new Set<string>(["veles"])
+// Value must match `VELES_AGENT_KEY` in `plan/veles.metadata.ts` (the agent's
+// registered name). Kept as a literal here to avoid a coordinator→plan import;
+// `validate-dispatchable.test.ts` pins the two together against drift.
+export const DISPATCHABLE_ALL_AGENTS: ReadonlySet<string> = new Set<string>(["Veles - Planner"])
 
 /**
  * Anti-recursion guard. Dispatchable targets:

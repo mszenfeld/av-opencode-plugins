@@ -10,7 +10,7 @@ const md = readFileSync(
 describe("perun.md Veles no-plan flow", () => {
   it("dispatches veles when no plan is found", () => {
     expect(md).toMatch(/no plan/i)
-    expect(md).toContain('agent: "veles"')
+    expect(md).toContain('agent: "Veles - Planner"')
   })
   it("defines the Planning-consent gate dialog state with a verbatim template", () => {
     expect(md).toContain("Planning-consent gate")

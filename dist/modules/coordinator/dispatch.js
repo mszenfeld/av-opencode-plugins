@@ -5,7 +5,7 @@ import {
 } from "./poller.js";
 import { neutralizeUntrustedOutput, normalizeVariantSuffix } from "./sanitize.js";
 import { truncateBytes } from "./truncate-bytes.js";
-const DISPATCHABLE_ALL_AGENTS = /* @__PURE__ */ new Set(["veles"]);
+const DISPATCHABLE_ALL_AGENTS = /* @__PURE__ */ new Set(["Veles - Planner"]);
 function validateDispatchable(agentRegistry, name, callerMode) {
   const agentInfo = agentRegistry[name];
   if (agentInfo === void 0) {
