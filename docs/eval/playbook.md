@@ -366,11 +366,11 @@ above mostly applies, with these amendments. (Scenario: `scenarios/veles/`.)
 - **Interview → timeout caveat.** A `question` call in headless mode never gets
   an answer; record `timeout (interview)` as a model failure mode, not an
   environment anomaly.
-- **Anchor run is MANDATORY for Veles** (not "recommended"). Veles has more
-  environmental surface than read-only Triglav (file writes, capture/delete,
-  possible sub-agent dispatch), so the Step-5 anchor (`opencode/claude-haiku-4-5`)
-  is the contemporaneous control that separates a weak model from a cold serena
-  cache / throttled provider / environmental interview-hang.
+- **Anchor run stays optional (Step 5 default).** Veles writes files and may
+  dispatch triglav, but the shipped Layer-1 scenario is self-contained (no triglav
+  in the loop), so the Step-5 anchor is *recommended, not required* — run it only
+  when results look environmentally suspicious (e.g. every candidate degenerates),
+  exactly as for the other agents.
 - **Layer 2 (private external target).** Run against a **disposable worktree /
   throwaway clone** of the private repo; run cleanup and `git status` against
   *that* target; treat the report, `/tmp` log, `/tmp` script, session store, and

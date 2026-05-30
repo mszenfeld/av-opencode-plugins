@@ -63,7 +63,18 @@ Per-agent model selection lives in `pantheon.json`:
 }
 ```
 
-The full reference (locations, precedence, schema, FAQ) is in [`docs/configuring-agents.md`](docs/configuring-agents.md).
+### Recommended models
+
+A sensible starting point per agent. Veles' pick comes from the model evaluation (`docs/eval/`); the rest are matched to each role's job. The provider is up to you — the same model is offered by several (`opencode`, `openrouter`, `anthropic`, …), each with its own ID.
+
+| Agent | Recommended model | Why |
+| --- | --- | --- |
+| **Perun** (coordinator) | Claude Opus 4.8 | Plans dispatch waves, delegates, and synthesizes results — the most reasoning-heavy role, so the strongest model. |
+| **Veles** (planner) | Deepseek V4 Pro | Top pick in the eval — full coverage + correct grounding on both a synthetic diff and a real repo. `EXPENSIVE`, so a capable model matters. |
+| **Zmora** (QA tester) | GPT-5.4 | Drives FE/BE scenarios with heavy, structured tool use; reliable at executing scripted steps. |
+| **Triglav** (explorer) | Deepseek V4 Flash | Dispatched many-in-parallel and in the background — favors a fast, cheap model. |
+
+Set each in `pantheon.json` as `<providerID>/<modelID>` for the provider you choose (run `opencode models` to find the exact ID — it varies per provider). The full reference (locations, precedence, schema, FAQ) is in [`docs/configuring-agents.md`](docs/configuring-agents.md).
 
 ## Local Development
 
