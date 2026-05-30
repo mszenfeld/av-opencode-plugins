@@ -74,5 +74,10 @@ headers stay the same; the semantics differ:
   drive the browser / hit the API?).
 - **Perun** (orchestration) — Query is a multi-step request; `## Expected
   coverage` names the expected dispatch waves and synthesis points.
+- **Veles** (planning) — Query is a diff (Layer 1) or a real scope (Layer 2);
+  `## Expected coverage` lists the plan sections + scenario topics the plan must
+  contain; `## Quality signals` are gate-then-rank (the JSON contract is the
+  GATE, plan quality the primary ranking signal). See
+  [`../veles/README.md`](../veles/README.md).
 
 The section shape is stable; per-agent quality signals differ.
