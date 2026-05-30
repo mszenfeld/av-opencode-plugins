@@ -25,3 +25,11 @@ coverage/
 # docs/eval/playbook.md treats them as one of two safe locations.
 docs/eval/scenarios/**/local-*.md
 docs/eval/scenarios/**/private/
+# Veles eval scenarios are private-by-default: only the shipped public files
+# under veles/ are trackable. Any other file (a real-repo Layer-2 scenario)
+# is ignored even if it lacks the load-bearing `local-` prefix, so a private
+# repo's path/scope can never be committed by accident.
+docs/eval/scenarios/veles/*
+!docs/eval/scenarios/veles/qa-plan-from-diff.md
+!docs/eval/scenarios/veles/TEMPLATE.md
+!docs/eval/scenarios/veles/README.md
