@@ -2,6 +2,7 @@
 import path2 from "path";
 import { fileURLToPath } from "url";
 import { tool } from "@opencode-ai/plugin";
+import { COORDINATOR_AGENT_NAME, getSessionAgent } from "@appverk/opencode-skill-utils";
 
 // src/skill-catalog.ts
 import { existsSync, readFileSync, readdirSync } from "fs";
@@ -149,7 +150,7 @@ var skillDirectories = [
   path2.resolve(moduleDirectory, "../../../dist/skills/qa"),
   path2.resolve(moduleDirectory, "../../swift-developer/dist/skills")
 ];
-var AppVerkSkillRegistryPlugin = async () => {
+var AppVerkSkillRegistryPlugin = async ({ client }) => {
   const catalog = buildSkillCatalog(skillDirectories);
   const loadSkill = createSkillLoader(catalog);
   const activationRules = generateActivationRules(catalog);
@@ -178,7 +179,9 @@ var AppVerkSkillRegistryPlugin = async () => {
         }
       })
     },
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (input, output) => {
+      if (!input.sessionID) return;
+      if (await getSessionAgent(input.sessionID, client) === COORDINATOR_AGENT_NAME) return;
       output.system.push(activationRules);
     }
   };

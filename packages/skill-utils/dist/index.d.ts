@@ -1,4 +1,4 @@
-import { Plugin } from '@opencode-ai/plugin';
+import { PluginInput, Plugin } from '@opencode-ai/plugin';
 
 /**
  * Canonical Category → Prefix mapping for the code-review and QA plugin ecosystem.
@@ -18,6 +18,41 @@ declare const CATEGORY_PREFIX_MAPPING: Readonly<Record<string, string>>;
 declare const VALID_PREFIXES: string[];
 /** Valid categories derived from the canonical mapping. */
 declare const VALID_CATEGORIES: string[];
+
+type Client = PluginInput["client"];
+/**
+ * The agent identifier the coordinator (Perun) session runs under.
+ * Pinned in Task 1b to the observed `UserMessage.info.agent` value and kept in
+ * sync with the `config.agent[...]` key in src/modules/coordinator/index.ts via
+ * the sync test in Task 7.
+ */
+declare const COORDINATOR_AGENT_NAME = "Perun - Coordinator";
+/** Parent session id, or undefined for a parentless (top/primary) session. Never throws. */
+declare function getSessionParentID(sessionID: string, client: Client): Promise<string | undefined>;
+/** The agent a session runs under, from its first user message. Undefined if unknown. Never throws. */
+declare function getSessionAgent(sessionID: string, client: Client): Promise<string | undefined>;
+/** True only when the session is positively identified as the coordinator. */
+declare function isCoordinatorSession(sessionID: string, client: Client): Promise<boolean>;
+
+/** Parse `Bash(<prog>:*)` programs out of an agent's `allowed-tools` frontmatter line. */
+declare function parseAllowedBashPrograms(frontmatter: string): string[];
+interface BashClassification {
+    allowed: boolean;
+    program: string | null;
+}
+/** Decide whether a coordinator bash command is permitted (allowlist + no compounds). */
+declare function classifyCoordinatorBash(command: string, allowedPrograms: string[]): BashClassification;
+interface ViolationInfo {
+    tool: string;
+    command?: string;
+    skill?: string;
+    reason: string;
+}
+/**
+ * Build the rejection error. The message embeds a machine-readable marker + JSON
+ * (so it surfaces in `info.error`, which the eval reads) and a human/LLM redirect (G).
+ */
+declare function buildViolationError(info: ViolationInfo): Error;
 
 interface CreateSkillPluginOptions {
     namespace: string;
@@ -39,4 +74,4 @@ declare function createSkillLoader(options: CreateSkillLoaderOptions): (name: st
 
 declare function createSkillPlugin(options: CreateSkillPluginOptions): Plugin;
 
-export { CATEGORY_PREFIX_MAPPING, type CreateSkillLoaderOptions, type CreateSkillPluginOptions, VALID_CATEGORIES, VALID_PREFIXES, createSkillLoader, createSkillPlugin };
+export { type BashClassification, CATEGORY_PREFIX_MAPPING, COORDINATOR_AGENT_NAME, type CreateSkillLoaderOptions, type CreateSkillPluginOptions, VALID_CATEGORIES, VALID_PREFIXES, type ViolationInfo, buildViolationError, classifyCoordinatorBash, createSkillLoader, createSkillPlugin, getSessionAgent, getSessionParentID, isCoordinatorSession, parseAllowedBashPrograms };
