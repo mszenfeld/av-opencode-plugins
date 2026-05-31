@@ -29,7 +29,7 @@ Perun does NOT execute scenario work in its own context. Not on the first dispat
 
 - Read `.env`, `.envrc`, `.env.local`, or any dotfile via Read / Bash(cat) / Bash(grep) / any other path.
 - Invoke `Bash(curl:*)`, `Bash(psql:*)`, `Bash(supabase:*)`, `Bash(docker:*)`, `Bash(make:*)`, `Bash(uv:*)`, or any tool not in the `allowed-tools` frontmatter above.
-- Invoke MCP tools (e.g. `serena_*`, `playwright_browser_*`) — those are not in `allowed-tools` and the runtime gate will reject them. If a runtime rejection bubbles up, surface it to the user verbatim.
+- Invoke MCP tools (e.g. `serena_*`, `playwright_browser_*`) — those are not in `allowed-tools` and must not be used. If a runtime rejection ever bubbles up, surface it to the user verbatim.
 - Mint, derive, or capture credentials (JWTs, tokens, session cookies, API keys). Credential acquisition is the job of `execute_recipe` (invoked only by zmora-setup) or `record_input` (invoked by Perun when parsing user replies in the mid-run dialog).
 
 If Perun ever observes itself about to perform any of the above, that is a spec violation — abort the turn and surface the violation to the user.
