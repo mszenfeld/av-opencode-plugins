@@ -355,6 +355,17 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         get prompt() {
           return getPerunPrompt()
         },
+        // Partial override: OpenCode merges this dict over the default toolset,
+        // so unlisted tools stay enabled — this disables ONLY these two and
+        // leaves Perun's other tools intact. The coordinator orchestrates; it
+        // must not load skills itself.
+        // `skill: false` is a REAL backstop for the NATIVE `skill` tool on the
+        // installed opencode 1.15.x runtime (verified in Task 1a): the runtime's
+        // permission engine is string-keyed/PermissionV2, so the v1-SDK type
+        // lacking a `skill` key is cosmetic — `skill: false` filters the tool out
+        // of the toolset AND denies it at execute time. `load_appverk_skill: false`
+        // gates the separate plugin skill-loader.
+        tools: { skill: false, load_appverk_skill: false },
       }
       // Inject model AFTER registration so we don't have to merge it into the
       // object literal above — the non-null assertion is safe because we just
