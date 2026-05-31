@@ -19,6 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@appverk/opencode-skill-utils": "*",
     "@opencode-ai/plugin": "^1.14.19"
   }
 }
