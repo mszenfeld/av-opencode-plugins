@@ -218,9 +218,13 @@ describe("AppVerkPlugins", () => {
     const { AppVerkPlugins } = await loadRootModule()
     const plugin = await AppVerkPlugins({} as never)
 
+    // A resolvable, non-coordinator session: the transform fails closed on a
+    // missing sessionID (coordinator-suppression guard), so supply one. With the
+    // bare client used here getSessionAgent resolves to undefined (not the
+    // coordinator), so the activation rules are injected.
     const output = { system: [] as string[] }
     await plugin["experimental.chat.system.transform"]?.(
-      { model: {} as never } as never,
+      { sessionID: "ses_specialist", model: {} as never } as never,
       output as never,
     )
 
