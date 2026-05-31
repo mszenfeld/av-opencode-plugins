@@ -75,6 +75,26 @@ What it **does** deliver: a code-enforced git/bash + skill rail for the coordina
 agent-keyed substrate for the future intent gate, and the **eval signal** (F) that
 would have auto-flagged the Kimi behaviour.
 
+### Implementation notes (post-build, after the final review)
+
+- **What "E" actually shipped.** The *substrate* is reusable and agent-agnostic: the
+  resolver (`getSessionAgent`/`getSessionParentID`/`isCoordinatorSession`) and the bash
+  primitives (`parseAllowedBashPrograms`/`classifyCoordinatorBash`) take any agent name
+  / any allowlist and are unit-tested with arbitrary agents. The *policy* is currently
+  coordinator-specific (one `COORDINATOR_AGENT_NAME`, one allowlist) — a per-agent
+  *policy map* is intentionally **not** built yet (YAGNI; it arrives with the deferred
+  intent gate, which sits on this substrate). So "agent-keyed" describes the substrate,
+  not a multi-agent policy table.
+- **Lever-2 uses path A (precise agent-name), not the plan's path-B default.** The plan
+  hedged toward a `parentID`-based fallback (suppress all parentless sessions). The
+  implementation deliberately uses precise `getSessionAgent === COORDINATOR_AGENT_NAME`
+  instead, because path B would over-suppress a developer agent run as a *primary*
+  session (e.g. python-/frontend-developer), stripping its legitimate skill-activation
+  rules. Path A's only weak spot — the coordinator's very first turn, where
+  `getSessionAgent` may be unresolvable and rules get injected anyway — is harmless,
+  because lever-1 (Perun's `tools: { skill:false, load_appverk_skill:false }`) already
+  makes those rules unactionable.
+
 ---
 
 ## Scope
