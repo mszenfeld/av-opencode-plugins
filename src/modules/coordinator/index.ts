@@ -84,7 +84,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "- A 4-worker pool runs every task in this call in parallel. `tasks.length ≤ 4` is enforced, so concurrency equals the call size. Result order is preserved.",
         "- Each task has a 5-minute hard timeout; on expiry the task is returned with status \"timeout\" and the partial result is discarded.",
         "- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker \"[…truncated…]\" — synthesize what is present, do not retry.",
-        "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent or a `mode: primary` agent are rejected. A `mode: all` agent is rejected UNLESS it is on the dispatch allowlist (currently only `veles`) AND the caller is a primary agent; this lets the coordinator dispatch the planner while blocking self/nested recursion. Rejections throw and dispatch nothing.",
+        "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent or a `mode: primary` agent are rejected. A `mode: all` agent is rejected UNLESS it is on the dispatch allowlist (currently only the planner, registered as `\"Veles - Planner\"`) AND the caller is a primary agent; this lets the coordinator dispatch the planner while blocking self/nested recursion. Rejections throw and dispatch nothing.",
         "- Specialist output is treated as untrusted data: ANSI/control characters are stripped and HTML-like substrings are escaped before the result is returned.",
         "- Honors `ToolContext.abort`: when the parent session aborts, in-flight tasks terminate within ~one poll-interval with status \"aborted\" and the child session is cancelled server-side (best-effort).",
         "- Result shape: each entry has `{ name, status: \"success\" | \"error\" | \"timeout\" | \"aborted\", result, duration_ms, error? }`, in the same order as the input `tasks` array.",
@@ -260,7 +260,7 @@ export const AppVerkCoordinatorPlugin: Plugin = async (input) => {
         "- Returns: { id, agent, status: \"running\" }.",
       ].join("\n"),
     args: {
-      agent: tool.schema.string().min(1).max(60).describe("Specialist agent name (e.g. \"triglav\"). Must be a subagent, or an allowlisted mode:all agent (currently only \"veles\") when the caller is a primary agent."),
+      agent: tool.schema.string().min(1).max(60).describe("Specialist agent name (e.g. \"triglav\"). Must be a subagent, or an allowlisted mode:all agent (currently only \"Veles - Planner\") when the caller is a primary agent."),
       summary: tool.schema.string().min(1).max(80).describe("One-line label for the TUI (no prompts/PII)."),
       prompt: tool.schema.string().describe("Prompt for the specialist."),
       context: tool.schema.string().optional().describe("Optional extra context appended to the prompt."),
