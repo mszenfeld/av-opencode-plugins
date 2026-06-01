@@ -20,12 +20,21 @@ describe("AppVerkSkillRegistryPlugin", () => {
     expect(plugin.config).toBeDefined()
   })
 
-  it("system transform hook appends activation rules", async () => {
-    const plugin = await AppVerkSkillRegistryPlugin({} as never)
+  it("system transform hook appends activation rules for a non-coordinator session", async () => {
+    // A resolvable, non-coordinator session keeps its activation rules. The fake
+    // client returns a dispatched specialist's first user message.
+    const client = {
+      session: {
+        messages: async () => ({
+          data: [{ info: { role: "user", agent: "zmora-be" }, parts: [] }],
+        }),
+      },
+    }
+    const plugin = await AppVerkSkillRegistryPlugin({ client } as never)
     const output = { system: [] as string[] }
 
     await plugin["experimental.chat.system.transform"]?.(
-      { model: {} as never } as never,
+      { sessionID: "s1", model: {} as never } as never,
       output as never,
     )
 

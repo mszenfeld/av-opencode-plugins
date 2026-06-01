@@ -6,223 +6,47 @@ description: Analyze code changes (PR, branch, commits) and generate a detailed 
 
 # QA Test Plan Generator
 
-You are a QA specialist. Your job is to analyze code changes and generate a comprehensive test plan.
+Analyze code changes and generate a comprehensive QA test plan.
 
-## Arguments
-
-**Input:** `$ARGUMENTS`
-
-Parse the argument to determine the source of changes:
-
-| Argument | Interpretation |
-|----------|---------------|
-| (empty) | Default: check for open PR on current branch, fallback to branch diff |
-| `#123` or `PR #123` | Diff from PR #123 |
-| `feature/xyz` | Diff of branch `feature/xyz` vs main |
-| `ten branch` / `this branch` / `current branch` | Diff of current branch vs main |
-| `last N commits` / `ostatnie N commitów` | Diff of last N commits |
-| `staged` / `staged changes` | Staged changes only |
-
----
+**Input:** `$ARGUMENTS` (PR number, branch, `last N commits`, `staged`, or empty for the default: open PR on current branch → branch diff vs main).
 
 ## Workflow
 
-### Step 1: Create Progress Tasks
+### Step 1: Create progress tasks
 
-Create the following tasks immediately using `todowrite`:
+Create these tasks with `todowrite`:
 
 | # | subject | activeForm |
 |---|---------|-----------|
-| 1 | Resolve diff source | Resolving diff source... |
-| 2 | Analyze changes | Analyzing changes... |
-| 3 | Gather context | Gathering context... |
-| 4 | Detect available tools | Detecting available tools... |
-| 5 | Generate test plan | Generating test plan... |
-| 6 | Save test plan | Saving test plan... |
+| 1 | Author test plan | Authoring test plan... |
+| 2 | Save & propose next step | Saving test plan... |
 
-### Step 2: Resolve Diff Source
+Mark task 1 `in_progress`.
 
-**Task Update:** Mark task 1 as `in_progress` using `todowrite`.
+### Step 2: Author the plan
 
-**Default behavior (no argument):**
-
-1. Check if current branch has an open PR:
-```bash
-gh pr view --json number,title,headRefName,baseRefName 2>/dev/null
-```
-
-2. If PR exists, get its diff:
-```bash
-gh pr diff <number>
-```
-
-3. If no PR, get branch diff:
-```bash
-MAIN_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
-git diff $MAIN_BRANCH...HEAD
-```
-
-**With argument:**
-
-- PR number: `gh pr diff <number>`
-- Branch name: `git diff $MAIN_BRANCH...<branch>`
-- Last N commits: `git diff HEAD~N...HEAD`
-- Staged changes: `git diff --staged`
-
-Also get the list of changed files:
-```bash
-# For PR
-gh pr diff <number> --name-only
-
-# For branch
-git diff --name-only $MAIN_BRANCH...HEAD
-
-# For last N commits
-git diff --name-only HEAD~N...HEAD
-
-# For staged
-git diff --name-only --staged
-```
-
-**Task Update:** Mark task 1 as `completed`, task 2 as `in_progress` using `todowrite`.
-
-### Step 3: Analyze Changes
-
-Classify each changed file as FE or BE:
-
-**Frontend indicators:**
-- File extensions: `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.html`
-- Paths containing: `components/`, `pages/`, `views/`, `layouts/`, `styles/`, `public/`, `assets/`, `frontend/`, `client/`, `web/`, `app/` (in FE context)
-
-**Backend indicators:**
-- File extensions: `.py`, `.php`, `.go`, `.java`, `.rb`, `.rs`
-- Paths containing: `api/`, `views/`, `controllers/`, `models/`, `migrations/`, `serializers/`, `services/`, `repositories/`, `backend/`, `server/`
-- Configuration: `urls.py`, `routes.py`, `routes.php`, `router.go`
-
-**Ambiguous files** (could be either): `.ts`, `.js` — look at import patterns and path context.
-
-For each changed file, identify:
-- What component/endpoint/model was changed
-- What kind of change (new feature, modification, deletion, refactoring)
-- What behavior should be tested
-
-**Task Update:** Mark task 2 as `completed`, task 3 as `in_progress` using `todowrite`.
-
-### Step 4: Gather Context
-
-Read related files to understand the full picture:
-
-1. **For changed endpoints:** read the router/URL config, serializer/schema, model
-2. **For changed components:** read parent components, shared state (stores), API calls
-3. **For changed models/migrations:** read related endpoints that use this model
-4. **Look for documentation:**
-   - `docs/` directory — any relevant docs
-   - OpenAPI/Swagger spec: look for `openapi.json`, `openapi.yaml`, `swagger.json`, `swagger.yaml` in root or `docs/`
-   - README files in affected directories
-5. **Check existing tests** — understand what's already tested and what's missing
-
-**Task Update:** Mark task 3 as `completed`, task 4 as `in_progress` using `todowrite`.
-
-### Step 5: Detect Available Tools
-
-Check which testing tools are available in the environment using bash:
-
-```bash
-command -v curl >/dev/null 2>&1 && echo "curl: available" || echo "curl: unavailable"
-command -v http >/dev/null 2>&1 && echo "httpie: available" || echo "httpie: unavailable"
-command -v psql >/dev/null 2>&1 && echo "psql: available" || echo "psql: unavailable"
-command -v sqlite3 >/dev/null 2>&1 && echo "sqlite3: available" || echo "sqlite3: unavailable"
-command -v mysql >/dev/null 2>&1 && echo "mysql: available" || echo "mysql: unavailable"
-command -v playwright >/dev/null 2>&1 && echo "Playwright CLI: available" || echo "Playwright CLI: unavailable"
-```
-
-**Task Update:** Mark task 4 as `completed`, task 5 as `in_progress` using `todowrite`.
-
-### Step 6: Generate Test Plan
-
-Load the test-plan-format skill:
+Load and follow the authoring skill, passing `$ARGUMENTS` as the diff-source argument:
 
 ```
-skill(name: "test-plan-format")
+skill(name: "qa-plan-authoring")
 ```
 
-Using the skill's format, generate the test plan:
+The skill resolves the diff source, classifies FE/BE, gathers context, detects tools, generates the `## Setup` section and FE/BE scenarios (loading `test-plan-format` for the structure), and saves the plan to `docs/testing/plans/YYYY-MM-DD-<topic>-test-plan.md`.
 
-1. Fill in the **Source** section with the resolved diff source
-2. Write the **Changes Summary** based on the analysis
-3. Fill in **Detected Tools** based on tool detection results
-4. Generate the **`## Setup` section** declaring prerequisites the QA run will need. Place this section AFTER frontmatter and BEFORE `## FE Test Scenarios` / `## BE Test Scenarios` so it parses in a single pass.
+Mark task 1 `completed`, task 2 `in_progress`.
 
-   Infer prerequisites from the diff:
-   - **New `process.env.X` / `os.environ["X"]` / `getenv("X")` / `ENV["X"]` usage** in PR → add `X` to `**Required environment variables:**`.
-   - **New service URL in code** (matches `https?://localhost:\d+`, `redis://`, `postgres://`, `mongodb://` etc.) → add to `**Required services:**`.
-   - **New DB connection string usage** → add to `**Required databases:**` with explicit scheme (`postgresql://...`, `mysql://...`, `redis://...`, `sqlite:///...`). Schemeless forms are rejected by preflight.
+### Step 3: Propose next step
 
-   Format:
-
-   ```markdown
-   ## Setup
-
-   **Required environment variables:**
-   - `TEST_USER_EMAIL` — login email for test account
-   - `TEST_USER_PASSWORD` — login password
-
-   **Required services:**
-   - App at `http://localhost:3000`
-
-   **Required databases:**
-   - `postgresql://localhost:5432/myapp_test`
-   ```
-
-   Rules:
-   - Env var names must match `^[A-Z_][A-Z0-9_]*$` (uppercase + underscore + digits).
-   - One backtick group per item: env-var NAME, service URL, or DB DSN.
-   - Free text after the backtick group (e.g. ` — login email for test account`) is for the human; preflight ignores it.
-   - Soft cap: ≤50 items total. If your inference yields more, group / drop infrequently-used ones.
-   - If no env vars / services / DBs are needed (e.g. a fully static-content scenario), omit the `## Setup` section entirely — preflight will skip with a warning toast, and the run proceeds as today.
-
-   Mark all generated items as best-effort inferences — the user is expected to review and edit before running QA. If you can't tell whether something is needed, include it; the user can delete it.
-
-5. Generate **FE Test Scenarios** (if FE changes detected):
-   - One scenario per changed component/page/feature
-   - Include concrete steps using actual UI element names from the code
-   - Include at least 2 edge cases per scenario
-6. Generate **BE Test Scenarios** (if BE changes detected):
-   - One scenario per changed endpoint
-   - Include actual API paths, methods, and payload structures from the code
-   - Include DB checks with actual table/column names
-   - Include at least 2 edge cases per scenario (error handling, auth, validation)
-
-**Task Update:** Mark task 5 as `completed`, task 6 as `in_progress` using `todowrite`.
-
-### Step 7: Save Test Plan
-
-```bash
-mkdir -p docs/testing/plans
-```
-
-Generate the topic slug from the changes (e.g., `user-authentication`, `order-management`, `dashboard-redesign`).
-
-Get today's date:
-```bash
-date +%Y-%m-%d
-```
-
-Save the plan using the Write tool to:
-`docs/testing/plans/YYYY-MM-DD-<topic>-test-plan.md`
-
-**Task Update:** Mark task 6 as `completed` using `todowrite`.
-
-### Step 8: Propose Next Step
-
-After saving the plan, display:
+After the skill saves the plan, display:
 
 > **Test plan saved to `docs/testing/plans/<filename>`.**
 >
-> Review the plan and when ready, run the tests with:
+> Review the plan, then run the tests with:
 >
 > `/run-qa`
 >
 > or specify the plan path:
 >
 > `/run-qa docs/testing/plans/<filename>`
+
+Mark task 2 `completed`.

@@ -93,6 +93,10 @@ export function createSkillLoader(options: CreateSkillLoaderOptions): (name: str
 
 export { CATEGORY_PREFIX_MAPPING, VALID_PREFIXES, VALID_CATEGORIES } from "./category-prefix-mapping.js"
 
+export * from "./session-identity.js"
+
+export * from "./coordinator-bash-policy.js"
+
 export function createSkillPlugin(options: CreateSkillPluginOptions): Plugin {
   const {
     namespace,

@@ -15,6 +15,60 @@ var CATEGORY_PREFIX_MAPPING = {
 var VALID_PREFIXES = Object.values(CATEGORY_PREFIX_MAPPING);
 var VALID_CATEGORIES = Object.keys(CATEGORY_PREFIX_MAPPING);
 
+// src/session-identity.ts
+var COORDINATOR_AGENT_NAME = "Perun - Coordinator";
+async function getSessionAgent(sessionID, client) {
+  try {
+    const res = await client.session.messages({ path: { id: sessionID } });
+    const msgs = res.data ?? [];
+    const firstUser = msgs.find((m) => m.info?.role === "user")?.info;
+    return firstUser?.agent;
+  } catch {
+    return void 0;
+  }
+}
+var sessionAgentCache = /* @__PURE__ */ new Map();
+async function getSessionAgentCached(sessionID, client) {
+  const cached = sessionAgentCache.get(sessionID);
+  if (cached !== void 0) return cached;
+  const agent = await getSessionAgent(sessionID, client);
+  if (agent !== void 0) sessionAgentCache.set(sessionID, agent);
+  return agent;
+}
+async function isCoordinatorSession(sessionID, client) {
+  return await getSessionAgentCached(sessionID, client) === COORDINATOR_AGENT_NAME;
+}
+
+// src/coordinator-bash-policy.ts
+function parseAllowedBashPrograms(frontmatter) {
+  const out = [];
+  const re = /Bash\(([^:)]+):\*\)/g;
+  let m;
+  while ((m = re.exec(frontmatter)) !== null) {
+    const prog = m[1];
+    if (prog !== void 0) out.push(prog.trim());
+  }
+  return out;
+}
+var COMPOUND = /(\|\||&&|;|\||&|[\r\n]|`|\$\(|<|>|(?<![\w./-])(?:bash|sh|eval)\b)/;
+function isCompoundCommand(command) {
+  return COMPOUND.test(command.trim());
+}
+function classifyCoordinatorBash(command, allowedPrograms) {
+  const trimmed = command.trim();
+  if (isCompoundCommand(trimmed)) return { allowed: false, program: null };
+  const program = trimmed.split(/\s+/)[0] ?? "";
+  return { allowed: allowedPrograms.includes(program), program };
+}
+function buildViolationError(info) {
+  const payload = JSON.stringify({ marker: "COORDINATOR_POLICY_VIOLATION", ...info });
+  const subject = info.command ? isCompoundCommand(info.command) ? "a compound command" : `\`${info.command.split(/\s+/)[0]}\`` : info.skill ? `skill \`${info.skill}\`` : "that";
+  return new Error(
+    `${payload}
+The coordinator may not run ${subject}. Dispatch Veles (planning) or Triglav (exploration) to inspect the repository instead.`
+  );
+}
+
 // src/index.ts
 function loadFile(packaged, source) {
   try {
@@ -145,8 +199,16 @@ function createSkillPlugin(options) {
 }
 export {
   CATEGORY_PREFIX_MAPPING,
+  COORDINATOR_AGENT_NAME,
   VALID_CATEGORIES,
   VALID_PREFIXES,
+  buildViolationError,
+  classifyCoordinatorBash,
   createSkillLoader,
-  createSkillPlugin
+  createSkillPlugin,
+  getSessionAgent,
+  getSessionAgentCached,
+  isCompoundCommand,
+  isCoordinatorSession,
+  parseAllowedBashPrograms
 };

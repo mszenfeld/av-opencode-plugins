@@ -1,7 +1,7 @@
 # Pantheon Model Evaluation Playbook
 
 Manual procedure for evaluating which model best fits a given Pantheon agent
-(`triglav`, `zmora`, `perun`). No CI, no automation, no framework — Claude Code
+(`triglav`, `zmora`, `perun`, `veles`). No CI, no automation, no framework — Claude Code
 runs this interactively when asked. The artefact you are reading IS the tool.
 
 This playbook was crystallised from the session that benchmarked Triglav's
@@ -334,6 +334,106 @@ location and precedence rules.
 - **Never commit a report that references a private codebase.** The default
   report path is `/tmp/`, so this is the obvious default.
 
+## Evaluating side-effecting agents (Veles)
+
+Veles is not read-only: it **writes a QA plan** to `docs/testing/plans/`, may
+**dispatch triglav**, and ends with a 6-field JSON contract
+`{ status, plan_path, fe_count, be_count, setup_prereqs, topic }`. The procedure
+above mostly applies, with these amendments. (Scenario: `scenarios/veles/`.)
+
+- **Step 4 carve-out (scoring).** Veles has no `<results>` block — its structural
+  skeleton is the JSON contract (6 keys, valid JSON, nothing after it) plus the
+  plan's frontmatter/section/edge-case format. The JSON contract is a **gate**
+  (failure → `degenerate`), NOT the ranking axis; rank by **plan quality** (MUST
+  edge-case coverage + FE/BE classification), not by coverage-substring count.
+  The depth floor is structural (≥1 FE + ≥1 BE scenario, ≥2 edge cases each), not
+  the Triglav ~2000-char figure.
+- **Step 7 carve-out (cleanup).** Step 7's blanket "any change is unexpected"
+  does NOT apply to Veles: the plan under `docs/testing/plans/` is *expected*
+  output — capture-then-delete it. Only a **source** edit is a finding. Scope the
+  `.serena/cache/` whitelist to repos that actually gitignore it; for a Layer-2
+  private target, surface `.serena/` writes rather than auto-whitelisting.
+- **Capture the JSON.** Parse the final assistant message as the 6-field JSON.
+- **Capture-then-delete the plan, on a guaranteed path.** Read `plan_path`
+  relative to `TARGET`, store its content in the report, then delete the file in
+  a `finally`/trap **and** from the SIGINT/SIGTERM `cleanup()` handler so a crash
+  cannot leave a leftover. Capture+delete after *each* iteration; run candidates
+  **strictly serially** against a target (the plan dir is shared mutable state).
+  End the run with a `git status` gate: if anything under `docs/testing/plans/`
+  remains, stop and require manual deletion before any commit.
+- **Session cleanup by `sessionID`.** Delete the spawned session(s) by the
+  captured ID (Steps 3/6 capture it), not by fragile title-prefix match; verify.
+- **Interview → timeout caveat.** A `question` call in headless mode never gets
+  an answer; record `timeout (interview)` as a model failure mode, not an
+  environment anomaly.
+- **Anchor run stays optional (Step 5 default).** Veles writes files and may
+  dispatch triglav, but the shipped Layer-1 scenario is self-contained (no triglav
+  in the loop), so the Step-5 anchor is *recommended, not required* — run it only
+  when results look environmentally suspicious (e.g. every candidate degenerates),
+  exactly as for the other agents.
+- **Layer 2 (private external target).** Run against a **disposable worktree /
+  throwaway clone** of the private repo; run cleanup and `git status` against
+  *that* target; treat the report, `/tmp` log, `/tmp` script, session store, and
+  serena cache as sensitive; **never commit the report**; record a
+  non-identifying target label in the report header instead of the absolute path;
+  note triglav is both a scoring confound and a leakage channel.
+- **Verdict vocabulary** — reuse the existing set (`recommend` / `acceptable` /
+  `degenerate` / `unreliable` / `not-tested`); for Veles, `degenerate` covers a
+  broken JSON gate, 0 scenarios on either side, <2 edge cases per scenario, or
+  interview-hang.
+
+Minimal Node-script extension: capture the plan and guarantee its deletion.
+After `outcome === "done"`, parse the contract from `finalText` (the text of the
+last assistant message), read the file at `plan_path` relative to `TARGET`, store
+its content in the report, then delete it. Do NOT re-declare the Step-3
+`cleanup()` — add the plan-delete line to the one you already have, so a crash or
+`Ctrl-C` also removes a leftover. A plan is written **even when the final JSON
+gate fails**, so the cleanup also sweeps `docs/testing/plans/` directly — not only
+the parsed `plan_path` (a real smoke-run finding: a gate-failing run still left a
+plan behind):
+
+```javascript
+import { rmSync, readdirSync, existsSync } from "node:fs"
+import { join } from "node:path"
+
+// Module-scope; set after each iteration, cleared once the plan is deleted.
+let lastPlanPath
+
+// Add the FIRST line to the EXISTING Step-3 cleanup() (do not redeclare it):
+//   const cleanup = () => {
+//     try { if (lastPlanPath) rmSync(lastPlanPath, { force: true }) } catch {}  // <-- add
+//     try { process.kill(SERVER_PID) } catch {}
+//     process.exit(130)
+//   }
+
+// After outcome === "done": parse the 6-field contract from the final assistant
+// text. A parse failure is itself a `degenerate` verdict — record it and move on;
+// never let it abort the run with the plan still on disk.
+let contract
+try {
+  contract = JSON.parse(finalText.slice(finalText.lastIndexOf("{")))
+} catch {
+  contract = null // degenerate: broken JSON gate
+}
+if (contract?.plan_path) {
+  lastPlanPath = join(TARGET, contract.plan_path)
+  try {
+    // read lastPlanPath and store its content in the report here
+  } finally {
+    rmSync(lastPlanPath, { force: true })
+    lastPlanPath = undefined
+  }
+}
+
+// Fallback (do NOT skip): a plan is written even when the JSON is malformed, so
+// `plan_path` may be unknown. Sweep the plans dir so a gate-failing run never
+// leaves a file behind. Capture any survivors into the report first if wanted.
+const plansDir = join(TARGET, "docs/testing/plans")
+if (existsSync(plansDir)) {
+  for (const f of readdirSync(plansDir)) rmSync(join(plansDir, f), { force: true })
+}
+```
+
 ## Lessons learned
 
 These ten lessons came from the session in which we picked Triglav's model
@@ -380,7 +480,10 @@ procedure looks the way it does.
 ## Adapting a scenario for your own codebase
 
 See the canonical guide at
-[`scenarios/triglav/README.md`](scenarios/triglav/README.md). In summary:
+[`scenarios/triglav/README.md`](scenarios/triglav/README.md). For Veles (a
+side-effecting planning agent), see
+[`scenarios/veles/README.md`](scenarios/veles/README.md) for the Layer-2
+private-repo recipe and the side-effect/privacy handling above. In summary:
 
 1. Copy a shipped scenario as a template into a directory outside this repo
    (e.g. `~/.config/pantheon/eval/my-scenario.md`) or under a gitignored

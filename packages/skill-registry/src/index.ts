@@ -2,6 +2,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
+import { isCoordinatorSession } from "@appverk/opencode-skill-utils"
 import { buildSkillCatalog } from "./skill-catalog.js"
 import { createSkillLoader } from "./load-skill.js"
 import { generateActivationRules } from "./prompt-injector.js"
@@ -16,7 +17,7 @@ const skillDirectories = [
   path.resolve(moduleDirectory, "../../swift-developer/dist/skills"),
 ]
 
-export const AppVerkSkillRegistryPlugin: Plugin = async () => {
+export const AppVerkSkillRegistryPlugin: Plugin = async ({ client }) => {
   const catalog = buildSkillCatalog(skillDirectories)
   const loadSkill = createSkillLoader(catalog)
   const activationRules = generateActivationRules(catalog)
@@ -50,7 +51,19 @@ export const AppVerkSkillRegistryPlugin: Plugin = async () => {
         },
       }),
     },
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (input, output) => {
+      // Suppress the skill-activation injection for the coordinator (Perun): these are
+      // executor coding-standards, irrelevant to orchestration and a documented pressure
+      // pulling the coordinator toward self-execution.
+      // Fail-CLOSED on a missing sessionID (the Agent.generate scaffolding path needs no rules).
+      if (!input.sessionID) return
+      // Precise positive identification: only the coordinator is suppressed — every other
+      // agent (dispatched specialists, developer-as-primary) keeps its rules. On the
+      // coordinator's very first turn the identity may be unresolvable (messages not yet
+      // queryable); in that window the rules are injected but harmless, because Perun's
+      // skill-loading tools are already disabled (Task 5 coordinator config). The unresolved
+      // turn-1 miss is not cached, so the identity still resolves on later turns.
+      if (await isCoordinatorSession(input.sessionID, client)) return
       output.system.push(activationRules)
     },
   }

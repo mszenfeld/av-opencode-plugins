@@ -69,6 +69,26 @@ describe("startBackgroundTask", () => {
   })
 })
 
+describe("startBackgroundTask callerMode gating", () => {
+  it("starts an allowlisted all-agent in background only when callerMode is primary", async () => {
+    const store = new BackgroundTaskStore()
+    const specialist = fakeSpecialist()
+    const agentRegistry = { "Veles - Planner": { mode: "all" as const } }
+    await expect(
+      startBackgroundTask({
+        store, specialist, agentRegistry,
+        parentSessionId: "s1", agent: "Veles - Planner", prompt: "plan", callerMode: "primary",
+      }),
+    ).resolves.toMatchObject({ agent: "Veles - Planner", status: "running" })
+    await expect(
+      startBackgroundTask({
+        store, specialist, agentRegistry,
+        parentSessionId: "s1", agent: "Veles - Planner", prompt: "plan", callerMode: "all",
+      }),
+    ).rejects.toThrow(/Cannot dispatch all agent: Veles - Planner/)
+  })
+})
+
 describe("collectBackground", () => {
   async function seed(store: BackgroundTaskStore, spec: DispatchSpecialist) {
     return startBackgroundTask({ store, specialist: spec, agentRegistry: registry, parentSessionId: "p1", agent: "triglav", prompt: "x" })

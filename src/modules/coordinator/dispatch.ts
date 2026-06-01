@@ -47,22 +47,50 @@ export interface AgentInfo {
 }
 
 /**
- * Anti-recursion guard: only strict `subagent`-mode agents are dispatchable.
- * Both `primary` and `all` are rejected (an `all` agent can run as a primary,
- * so dispatching it from a primary would re-open the anti-recursion hole).
- * Shared by `dispatchParallel` and the background dispatch path.
+ * Names of `mode: "all"` agents that MAY be dispatched — but ONLY by a
+ * primary-mode caller. This is the single narrow relaxation of the otherwise
+ * subagent-only rule: it lets the primary coordinator (Perun) dispatch the
+ * planning agent (Veles, a `mode: "all"` agent that is also user-switchable)
+ * while still blocking Veles→Veles, *→Perun, and any other `primary`/`all`
+ * target. Keep this set MINIMAL — every entry widens the anti-recursion surface.
+ */
+// Value must match `VELES_AGENT_KEY` in `plan/veles.metadata.ts` (the agent's
+// registered name). Kept as a literal here to avoid a coordinator→plan import;
+// `validate-dispatchable.test.ts` pins the two together against drift.
+export const DISPATCHABLE_ALL_AGENTS: ReadonlySet<string> = new Set<string>(["Veles - Planner"])
+
+/**
+ * Anti-recursion guard. Dispatchable targets:
+ *   - any strict `subagent` (from any caller), OR
+ *   - an allowlisted `all` agent (DISPATCHABLE_ALL_AGENTS) when the CALLER is
+ *     `primary`.
+ * Everything else throws: a `primary` target, a non-allowlisted `all` target,
+ * or an allowlisted `all` target dispatched by a non-primary caller (this last
+ * case blocks Veles→Veles self/nested recursion). `callerMode` is resolved by
+ * the dispatch tool from `agentRegistry[context.agent].mode`; when omitted
+ * (legacy callers / unit tests) the allowlisted-`all` path is closed, so the
+ * default stays safe. Shared by `dispatchParallel` and the background path.
  */
 export function validateDispatchable(
   agentRegistry: Record<string, AgentInfo>,
   name: string,
+  callerMode?: AgentInfo["mode"],
 ): void {
   const agentInfo = agentRegistry[name]
   if (agentInfo === undefined) {
     throw new Error(`Unknown agent: ${name}`)
   }
-  if (agentInfo.mode !== "subagent") {
-    throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${name}`)
+  if (agentInfo.mode === "subagent") {
+    return
   }
+  if (
+    agentInfo.mode === "all" &&
+    DISPATCHABLE_ALL_AGENTS.has(name) &&
+    callerMode === "primary"
+  ) {
+    return
+  }
+  throw new Error(`Cannot dispatch ${agentInfo.mode} agent: ${name}`)
 }
 
 export interface DispatchParallelInput {
@@ -115,6 +143,13 @@ export interface DispatchParallelInput {
    */
   parentSessionID?: string
   /**
+   * Mode of the agent that invoked the dispatch tool (resolved from
+   * `agentRegistry[context.agent]`). Passed to `validateDispatchable` so an
+   * allowlisted `all` target (Veles) is dispatchable only from a `primary`
+   * caller (Perun). Omitted ⇒ allowlisted-`all` dispatch is rejected.
+   */
+  callerMode?: AgentInfo["mode"]
+  /**
    * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
    * specialist session is spawned. The QA plugin uses this to lazily parse the
    * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
@@ -160,6 +195,7 @@ export async function dispatchParallel(
     scrubberFactory,
     parentSessionID,
     preflight,
+    callerMode,
   } = input
 
   if (tasks.length > DISPATCH_MAX_TASKS) {
@@ -170,7 +206,7 @@ export async function dispatchParallel(
 
   // Anti-recursion: validate every task BEFORE any session spawns.
   for (const task of tasks) {
-    validateDispatchable(agentRegistry, task.name)
+    validateDispatchable(agentRegistry, task.name, callerMode)
   }
 
   // Preflight runs ONCE per dispatch, after validation but BEFORE any session

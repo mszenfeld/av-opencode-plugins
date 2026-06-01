@@ -60,7 +60,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       "- A 4-worker pool runs every task in this call in parallel. `tasks.length \u2264 4` is enforced, so concurrency equals the call size. Result order is preserved.",
       '- Each task has a 5-minute hard timeout; on expiry the task is returned with status "timeout" and the partial result is discarded.',
       '- Each successful result is truncated at 100KB (UTF-8 bytes). Truncated results end with the marker "[\u2026truncated\u2026]" \u2014 synthesize what is present, do not retry.',
-      "- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent, a `mode: primary` agent, or a `mode: all` agent are rejected with a thrown error and no work is dispatched.",
+      '- Anti-recursion pre-flight: every task is validated against the live agent registry BEFORE any session is created. Tasks targeting an unknown agent or a `mode: primary` agent are rejected. A `mode: all` agent is rejected UNLESS it is on the dispatch allowlist (currently only the planner, registered as `"Veles - Planner"`) AND the caller is a primary agent; this lets the coordinator dispatch the planner while blocking self/nested recursion. Rejections throw and dispatch nothing.',
       "- Specialist output is treated as untrusted data: ANSI/control characters are stripped and HTML-like substrings are escaped before the result is returned.",
       '- Honors `ToolContext.abort`: when the parent session aborts, in-flight tasks terminate within ~one poll-interval with status "aborted" and the child session is cancelled server-side (best-effort).',
       '- Result shape: each entry has `{ name, status: "success" | "error" | "timeout" | "aborted", result, duration_ms, error? }`, in the same order as the input `tasks` array.'
@@ -99,11 +99,13 @@ const AppVerkCoordinatorPlugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID);
       const agentRegistry = await loadAgentRegistry(client);
+      const callerMode = agentRegistry[context.agent]?.mode;
       const ext = getDispatchExtensions();
       const results = await dispatchParallel({
         tasks: args.tasks,
         agentRegistry,
         specialist,
+        callerMode,
         // Thread the harness abort signal end-to-end: poller checks it at each
         // iteration and during the inter-poll sleep, and child sessions are
         // cancelled server-side when it fires.
@@ -186,7 +188,7 @@ const AppVerkCoordinatorPlugin = async (input) => {
       '- Returns: { id, agent, status: "running" }.'
     ].join("\n"),
     args: {
-      agent: tool.schema.string().min(1).max(60).describe('Specialist agent name (e.g. "triglav"). Must be a subagent.'),
+      agent: tool.schema.string().min(1).max(60).describe('Specialist agent name (e.g. "triglav"). Must be a subagent, or an allowlisted mode:all agent (currently only "Veles - Planner") when the caller is a primary agent.'),
       summary: tool.schema.string().min(1).max(80).describe("One-line label for the TUI (no prompts/PII)."),
       prompt: tool.schema.string().describe("Prompt for the specialist."),
       context: tool.schema.string().optional().describe("Optional extra context appended to the prompt.")
@@ -198,10 +200,12 @@ const AppVerkCoordinatorPlugin = async (input) => {
       }
       const specialist = createSDKSpecialist(client, context.sessionID);
       const agentRegistry = await loadAgentRegistry(client);
+      const callerMode = agentRegistry[context.agent]?.mode;
       const result = await startBackgroundTask({
         store: backgroundStore,
         specialist,
         agentRegistry,
+        callerMode,
         parentSessionId: context.sessionID,
         agent: args.agent,
         prompt: args.prompt,
@@ -269,7 +273,18 @@ const AppVerkCoordinatorPlugin = async (input) => {
         mode: "primary",
         get prompt() {
           return getPerunPrompt();
-        }
+        },
+        // Partial override: OpenCode merges this dict over the default toolset,
+        // so unlisted tools stay enabled — this disables ONLY these two and
+        // leaves Perun's other tools intact. The coordinator orchestrates; it
+        // must not load skills itself.
+        // `skill: false` is a REAL backstop for the NATIVE `skill` tool on the
+        // installed opencode 1.15.x runtime (verified in Task 1a): the runtime's
+        // permission engine is string-keyed/PermissionV2, so the v1-SDK type
+        // lacking a `skill` key is cosmetic — `skill: false` filters the tool out
+        // of the toolset AND denies it at execute time. `load_appverk_skill: false`
+        // gates the separate plugin skill-loader.
+        tools: { skill: false, load_appverk_skill: false }
       };
       const perunModel = loadPantheonConfig().agents.perun?.model;
       if (perunModel !== void 0) {

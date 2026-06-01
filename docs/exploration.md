@@ -6,15 +6,15 @@
 
 The **real** read-only guarantee is OpenCode's **deny-by-default allow-list**: Triglav can only call tools that appear in its allow-list (`src/modules/explore/allowed-tools.ts`). Write, edit, and delegation tools (`Write`, `Edit`, `serena-write`, `dispatch_parallel`) are **not** listed, so they are simply uncallable.
 
-The allow-listed read-only Bash verbs — `Bash(grep:*)`, `Bash(cat:./*)`, `Bash(head:./*)`, `Bash(tail:./*)`, `Bash(rg:*)`, `Bash(git log:*)`, `Bash(git blame:*)` — are a **best-effort rail, not a containment sandbox.** The `:*` patterns accept arbitrary args, so a determined or injected prompt could reach real escape vectors (e.g. `git log` pager / `GIT_EXTERNAL_DIFF` / `--output`, `rg --pre`, shell redirection). This is knowingly accepted for omo-parity.
+The allow-listed read-only Bash verbs — `Bash(grep:./*)`, `Bash(cat:./*)`, `Bash(head:./*)`, `Bash(tail:./*)`, `Bash(rg:./*)`, `Bash(git --no-pager log:*)`, `Bash(git --no-pager blame:*)` — are a **best-effort rail, not a containment sandbox.** `grep`/`rg`/`cat`/`head`/`tail` are scoped to `./*` and `git` is forced through `--no-pager` (neutralizing the pager / `GIT_EXTERNAL_DIFF` spawn vector), but the `git`/`--no-pager` patterns still accept arbitrary args, so a determined or injected prompt could reach real escape vectors (e.g. `--output`, `rg --pre`, shell redirection). This is knowingly accepted for omo-parity.
 
 > Per project doctrine (AGENTS.md): **Bash token-matching is defense-in-depth, not a security boundary.** Do not rely on Triglav's Bash rail to contain an adversarial prompt — the tool exclusion in the allow-list is the boundary; the Bash filtering only raises the cost of escalation.
 
-This mirrors the in-code note at `src/modules/explore/allowed-tools.ts:1-9`.
+This mirrors the in-code note at `src/modules/explore/allowed-tools.ts:1-15`.
 
 ## serena-first, with Grep/Glob fallback
 
-Triglav reaches for serena's semantic LSP tools first (`serena_find_symbol`, `serena_find_referencing_symbols`, `serena_get_symbols_overview`, `serena_search_for_pattern`, …) and uses `Grep`/`Glob`/`Read` as peer fallbacks. **Exploration works fully without serena** — when serena is absent, Triglav simply searches with Grep/Glob instead of semantic LSP, just less semantically. There is no broken state: the worst case of a missing or malformed serena config is "no semantic search," never a broken agent (`src/modules/explore/serena-detect.ts`).
+Triglav reaches for serena's semantic LSP tools first (`serena_find_symbol`, `serena_find_referencing_symbols`, `serena_get_symbols_overview`, `serena_search_for_pattern`, …) and uses `Grep`/`Glob`/`Read` as peer fallbacks. **Exploration works fully without serena** — when serena is absent, Triglav simply searches with Grep/Glob instead of semantic LSP, just less semantically. There is no broken state: the worst case of a missing or malformed serena config is "no semantic search," never a broken agent (`src/modules/_shared/serena-detect.ts`, now shared by both `triglav` and `Veles - Planner`).
 
 ### The degraded-mode warning toast
 

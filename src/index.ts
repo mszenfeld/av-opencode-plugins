@@ -6,8 +6,10 @@ import { AppVerkFrontendDeveloperPlugin } from "../packages/frontend-developer/d
 import { AppVerkSkillRegistryPlugin } from "../packages/skill-registry/dist/index.js"
 import { AppVerkQAPlugin } from "./modules/qa/index.js"
 import { AppVerkExplorePlugin } from "./modules/explore/index.js"
+import { AppVerkPlanPlugin } from "./modules/plan/index.js"
 import { AppVerkSwiftDeveloperPlugin } from "../packages/swift-developer/dist/index.js"
 import { AppVerkCoordinatorPlugin } from "./modules/coordinator/index.js"
+import { AppVerkCoordinatorPolicyPlugin } from "./modules/coordinator-policy/index.js"
 import { AppVerkPantheonPlugin } from "./hooks/session-notification/plugin.js"
 type PluginHooks = Awaited<ReturnType<Plugin>>
 type HookKey = Exclude<keyof PluginHooks, "config" | "tool">
@@ -24,8 +26,10 @@ const defaultPluginFactories: Plugin[] = [
   AppVerkSkillRegistryPlugin,
   AppVerkQAPlugin,
   AppVerkExplorePlugin,
+  AppVerkPlanPlugin,
   AppVerkSwiftDeveloperPlugin,
   AppVerkCoordinatorPlugin,
+  AppVerkCoordinatorPolicyPlugin,
   AppVerkPantheonPlugin,
 ]
 

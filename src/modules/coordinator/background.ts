@@ -23,6 +23,8 @@ export interface StartBackgroundInput {
   agent: string
   prompt: string
   context?: string
+  /** Caller's mode — see dispatch.ts DispatchParallelInput.callerMode. */
+  callerMode?: AgentInfo["mode"]
 }
 
 export interface StartBackgroundResult {
@@ -34,9 +36,9 @@ export interface StartBackgroundResult {
 export async function startBackgroundTask(
   input: StartBackgroundInput,
 ): Promise<StartBackgroundResult> {
-  const { store, specialist, agentRegistry, parentSessionId, agent, prompt, context } = input
+  const { store, specialist, agentRegistry, parentSessionId, agent, prompt, context, callerMode } = input
 
-  validateDispatchable(agentRegistry, agent)
+  validateDispatchable(agentRegistry, agent, callerMode)
 
   if (store.countRunningByParent(parentSessionId) >= BACKGROUND_MAX_CONCURRENT) {
     throw new Error(

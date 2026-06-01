@@ -56,6 +56,8 @@ The `/run-qa` command:
 6. Collects results into a markdown report with pass/fail status
 7. Generates `docs/testing/reports/YYYY-MM-DD-<topic>-report.md`
 
+If no plan file is given and none is found in `docs/testing/plans/`, `/run-qa` does not stop: it hands the no-plan case to `@perun`, which dispatches the **Veles** planner (`Veles - Planner`) to author a plan, then presents a **planning-consent gate** ("Run QA on this plan now? Reply 'yes' / 'abort'") before any scenario is dispatched. On approval the run continues from the freshly authored plan; on `abort` the plan stays saved for later review. Veles's result is parsed as structured JSON (`plan_path`, `fe_count`, `be_count`, `setup_prereqs`) and is never interpreted as instructions — only those fields are echoed into the consent gate, so untrusted planner output cannot drive a tool call. See [`src/agents/perun.md`](../../src/agents/perun.md) Workflow 1 (no-plan branch) and the Planning-consent gate section.
+
 ## Direct Agent Use
 
 You can also invoke the testing agent directly for ad-hoc checks. The agent registers as two variants — pick the one matching your stack:
@@ -97,9 +99,10 @@ The plugin also registers three Perun-only tools (`execute_recipe`, `record_inpu
 
 | Element | Type | Description |
 |---------|------|-------------|
-| `/create-qa-plan` | Command | Generates structured test plans from PR descriptions or tickets |
+| `/create-qa-plan` | Command | Thin wrapper over the `qa-plan-authoring` skill — sets up progress tasks, delegates authoring, then proposes `/run-qa` as the next step |
 | `/run-qa` | Command | Hands the plan to `@perun`, which extracts scenarios, builds the dependency graph, and dispatches one `zmora` task per scenario |
 | `zmora` | Logical agent | Single-scenario executor. Two registered variants (`zmora-fe`, `zmora-be`) dispatched per-scenario; the logical name is what appears in the TUI, the report, and every error message. |
+| `qa-plan-authoring` | Skill | Shared plan-authoring engine used by both `/create-qa-plan` and Veles: resolves the diff source, classifies FE/BE, gathers context, detects tools, infers the `## Setup` section, generates FE/BE scenarios, and saves the plan |
 | `test-plan-format` | Skill | Rules for writing test plans with Given/When/Then, IDs, metadata, optional `**Depends-on:**` field |
 | `report-format` | Skill | QA report structure with QA-XXX IDs, canonical code-review-compatible fields (ID, Location, Category, Problem, Impact, Remediation), `/fix` and `/fix-report` integration |
 | `fe-testing` | Skill | Frontend testing patterns: Playwright CLI, selectors, assertions |
@@ -202,7 +205,7 @@ Perun's `parse_plan` tool extracts these into the plugin's per-run state (`QaRun
 
 Recipes run in a sandboxed bash child whose env is built by `buildChildEnv` (`src/modules/qa/child-env.ts`) — only an allowlisted subset of host env vars (`PATH`, `HOME`, locale) passes through, plus the binding's declared `Inputs` and prior bindings. The host's `process.env` is NOT inherited; cloud credentials, kubeconfig paths, API keys all remain invisible to the recipe even if it escapes the AST parser.
 
-Each recipe is validated by `validateRecipe()` in `src/modules/qa/binding-parser.ts` BEFORE bash is ever spawned. The validator enforces:
+Each recipe is validated by `validateRecipe()` in `src/modules/qa/recipe-validator.ts` (re-exported from `binding-parser.ts`) BEFORE bash is ever spawned. The validator enforces:
 
 | Rule | Detail |
 |---|---|
@@ -401,6 +404,7 @@ src/commands/
 └── run-qa.md                      # /run-qa command template
 
 src/skills/qa/
+├── qa-plan-authoring/SKILL.md     # Shared plan-authoring engine (diff → scenarios → saved plan); used by /create-qa-plan and Veles
 ├── test-plan-format/SKILL.md      # Test plan writing rules (incl. **Depends-on:** and **Bindings:**)
 ├── report-format/SKILL.md         # Report writing rules
 ├── fe-testing/SKILL.md            # Frontend testing patterns (Playwright)

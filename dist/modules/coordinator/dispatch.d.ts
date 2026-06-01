@@ -36,12 +36,27 @@ interface AgentInfo {
     mode: "primary" | "subagent" | "all";
 }
 /**
- * Anti-recursion guard: only strict `subagent`-mode agents are dispatchable.
- * Both `primary` and `all` are rejected (an `all` agent can run as a primary,
- * so dispatching it from a primary would re-open the anti-recursion hole).
- * Shared by `dispatchParallel` and the background dispatch path.
+ * Names of `mode: "all"` agents that MAY be dispatched — but ONLY by a
+ * primary-mode caller. This is the single narrow relaxation of the otherwise
+ * subagent-only rule: it lets the primary coordinator (Perun) dispatch the
+ * planning agent (Veles, a `mode: "all"` agent that is also user-switchable)
+ * while still blocking Veles→Veles, *→Perun, and any other `primary`/`all`
+ * target. Keep this set MINIMAL — every entry widens the anti-recursion surface.
  */
-declare function validateDispatchable(agentRegistry: Record<string, AgentInfo>, name: string): void;
+declare const DISPATCHABLE_ALL_AGENTS: ReadonlySet<string>;
+/**
+ * Anti-recursion guard. Dispatchable targets:
+ *   - any strict `subagent` (from any caller), OR
+ *   - an allowlisted `all` agent (DISPATCHABLE_ALL_AGENTS) when the CALLER is
+ *     `primary`.
+ * Everything else throws: a `primary` target, a non-allowlisted `all` target,
+ * or an allowlisted `all` target dispatched by a non-primary caller (this last
+ * case blocks Veles→Veles self/nested recursion). `callerMode` is resolved by
+ * the dispatch tool from `agentRegistry[context.agent].mode`; when omitted
+ * (legacy callers / unit tests) the allowlisted-`all` path is closed, so the
+ * default stays safe. Shared by `dispatchParallel` and the background path.
+ */
+declare function validateDispatchable(agentRegistry: Record<string, AgentInfo>, name: string, callerMode?: AgentInfo["mode"]): void;
 interface DispatchParallelInput {
     tasks: DispatchTask[];
     agentRegistry: Record<string, AgentInfo>;
@@ -93,6 +108,13 @@ interface DispatchParallelInput {
      */
     parentSessionID?: string;
     /**
+     * Mode of the agent that invoked the dispatch tool (resolved from
+     * `agentRegistry[context.agent]`). Passed to `validateDispatchable` so an
+     * allowlisted `all` target (Veles) is dispatchable only from a `primary`
+     * caller (Perun). Omitted ⇒ allowlisted-`all` dispatch is rejected.
+     */
+    callerMode?: AgentInfo["mode"];
+    /**
      * Optional preflight hook fired ONCE per `dispatchParallel` call, before any
      * specialist session is spawned. The QA plugin uses this to lazily parse the
      * parent plan's `**Bindings:**` section into `QaRunState` so subsequent
@@ -112,4 +134,4 @@ declare const DISPATCH_MAX_TASKS = 4;
 declare const DISPATCH_CONCURRENCY = 4;
 declare function dispatchParallel(input: DispatchParallelInput): Promise<DispatchResult[]>;
 
-export { type AgentInfo, DEFAULT_POLL_INTERVAL_MS, DEFAULT_RESULT_MAX_BYTES, DEFAULT_TASK_TIMEOUT_MS, DISPATCH_CONCURRENCY, DISPATCH_MAX_TASKS, type DispatchParallelInput, type DispatchResult, type DispatchSpecialist, type DispatchTask, dispatchParallel, validateDispatchable };
+export { type AgentInfo, DEFAULT_POLL_INTERVAL_MS, DEFAULT_RESULT_MAX_BYTES, DEFAULT_TASK_TIMEOUT_MS, DISPATCHABLE_ALL_AGENTS, DISPATCH_CONCURRENCY, DISPATCH_MAX_TASKS, type DispatchParallelInput, type DispatchResult, type DispatchSpecialist, type DispatchTask, dispatchParallel, validateDispatchable };

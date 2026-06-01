@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   isSerenaAvailable,
   type ConfigLike,
-} from "../../../src/modules/explore/serena-detect.js"
+} from "../../../src/modules/_shared/serena-detect.js"
 
 describe("isSerenaAvailable", () => {
   it("returns true when an mcp.serena entry is present", () => {

@@ -10,8 +10,8 @@ import { neutralizeUntrustedOutput, normalizeVariantSuffix } from "./sanitize.js
 import { truncateBytes } from "./truncate-bytes.js";
 const BACKGROUND_MAX_CONCURRENT = 4;
 async function startBackgroundTask(input) {
-  const { store, specialist, agentRegistry, parentSessionId, agent, prompt, context } = input;
-  validateDispatchable(agentRegistry, agent);
+  const { store, specialist, agentRegistry, parentSessionId, agent, prompt, context, callerMode } = input;
+  validateDispatchable(agentRegistry, agent, callerMode);
   if (store.countRunningByParent(parentSessionId) >= BACKGROUND_MAX_CONCURRENT) {
     throw new Error(
       `dispatch_background: max ${BACKGROUND_MAX_CONCURRENT} background tasks running for this session \u2014 collect one (wait_background / poll_background) before firing more`

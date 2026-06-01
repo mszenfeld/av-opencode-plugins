@@ -1,6 +1,6 @@
 # Configuring Pantheon Agents
 
-Pantheon agents Perun, Zmora, and Triglav can be assigned specific models via a `pantheon.json` configuration file. This document is the canonical reference for that file.
+Pantheon agents Perun, Zmora, Triglav, and Veles can be assigned specific models via a `pantheon.json` configuration file. This document is the canonical reference for that file.
 
 ## TL;DR
 
@@ -11,12 +11,13 @@ Create `~/.config/opencode/pantheon.json`:
   "agents": {
     "perun":   { "model": "anthropic/claude-opus-4-7" },
     "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
-    "triglav": { "model": "opencode/claude-haiku-4-5" }
+    "triglav": { "model": "opencode/claude-haiku-4-5" },
+    "veles":   { "model": "anthropic/claude-opus-4-7" }
   }
 }
 ```
 
-Restart OpenCode. Perun will run on Opus, Zmora on Sonnet, Triglav on Haiku (subscription-routed).
+Restart OpenCode. Perun will run on Opus, Zmora on Sonnet, Triglav on Haiku (subscription-routed), Veles on Opus.
 
 ## Where the file lives
 
@@ -64,6 +65,7 @@ Effective configuration when running inside `/my-project`:
 | `perun` | `Perun - Coordinator` (primary) | The coordinator. Delegates work to specialists. | Yes — via `pantheon.json` |
 | `zmora` | `zmora-fe` + `zmora-be` + `zmora-setup` (subagents) | QA tester. Three internal variants (`zmora-fe`, `zmora-be`, `zmora-setup`) share the same model — set once via `zmora`. | Yes — via `pantheon.json` |
 | `triglav` | `triglav` (subagent) | Read-only codebase explorer. Dispatched up to 4× in parallel (and now in the background) — favor fast/cheap models. | Yes — via `pantheon.json` |
+| `veles` | `Veles - Planner` (mode `all`) | Planning specialist. Authors QA test plans (and other work plans) from a diff or request; dispatches read-only helpers. `EXPENSIVE` — inherits the session default model when `agents.veles.model` is unset. | Yes — via `pantheon.json` |
 
 > Internal variants of Zmora (`zmora-fe`, `zmora-be`, `zmora-setup`) are subagents dispatched by Perun. They are not user-facing, but the model you set under `zmora` applies to all three.
 
