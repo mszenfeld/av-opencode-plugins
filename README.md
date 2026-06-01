@@ -17,7 +17,7 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 | Agent     | Description                                                                                                                 |
 | --------- | --------------------------------------------------------------------------------------------------------------------------- |
 | **Perun** | The coordinator. Delegates work to specialists (blocking or in the background so it can overlap exploration with its own work), computes dispatch waves with dependency awareness, and synthesizes results. |
-| **Veles** | Planning specialist (`mode: all` — selectable directly in the `/agents` picker **and** dispatched by Perun when a QA run is requested but no plan exists). Authors QA/work plans from a diff or request; dispatches read-only helpers and returns the saved plan; does not execute the work. `EXPENSIVE`. |
+| **Veles** | Planning specialist. Authors QA/work plans from a diff or request and returns the saved plan; it plans the work rather than executing it. `EXPENSIVE`. |
 
 ## Subagents
 
