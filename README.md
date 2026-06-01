@@ -17,12 +17,12 @@ Pantheon provides a coordinator agent that delegates work to specialists, a QA a
 | Agent     | Description                                                                                                                 |
 | --------- | --------------------------------------------------------------------------------------------------------------------------- |
 | **Perun** | The coordinator. Delegates work to specialists (blocking or in the background so it can overlap exploration with its own work), computes dispatch waves with dependency awareness, and synthesizes results. |
+| **Veles** | Planning specialist (`mode: all` — selectable directly in the `/agents` picker **and** dispatched by Perun when a QA run is requested but no plan exists). Authors QA/work plans from a diff or request; dispatches read-only helpers and returns the saved plan; does not execute the work. `EXPENSIVE`. |
 
 ## Subagents
 
 | Agent       | Description                                                                                                                 |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Veles**   | Planning specialist — authors QA/work plans from a diff or request; dispatches read-only helpers and returns the saved plan; does not execute the work. Dispatched by Perun when a QA run is requested but no plan exists. |
 | **Zmora**   | QA tester. Executes FE and BE test scenarios on demand, dispatched by Perun.                                                |
 | **Triglav** | Read-only codebase explorer. Maps structure and finds definitions/references/patterns; dispatched by Perun before planning. See [`docs/exploration.md`](docs/exploration.md). |
 
@@ -57,15 +57,18 @@ Per-agent model selection lives in `pantheon.json`:
 {
   "agents": {
     "perun":   { "model": "anthropic/claude-opus-4-7" },
+    "veles":   { "model": "anthropic/claude-opus-4-7" },
     "zmora":   { "model": "anthropic/claude-sonnet-4-6" },
     "triglav": { "model": "opencode/claude-haiku-4-5" },
   },
 }
 ```
 
+> The model IDs above are illustrative — see **Recommended models** below for current picks, and run `opencode models` for the exact ID per provider.
+
 ### Recommended models
 
-A sensible starting point per agent. Veles' pick comes from the model evaluation (`docs/eval/`); the rest are matched to each role's job. The provider is up to you — the same model is offered by several (`opencode`, `openrouter`, `anthropic`, …), each with its own ID.
+A sensible starting point per agent. Veles' pick comes from running the model-eval playbook (`docs/eval/playbook.md`; reports aren't committed to the repo); the rest are matched to each role's job. The provider is up to you — the same model is offered by several (`opencode`, `openrouter`, `anthropic`, …), each with its own ID.
 
 | Agent | Recommended model | Why |
 | --- | --- | --- |

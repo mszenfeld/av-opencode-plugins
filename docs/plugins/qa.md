@@ -205,7 +205,7 @@ Perun's `parse_plan` tool extracts these into the plugin's per-run state (`QaRun
 
 Recipes run in a sandboxed bash child whose env is built by `buildChildEnv` (`src/modules/qa/child-env.ts`) — only an allowlisted subset of host env vars (`PATH`, `HOME`, locale) passes through, plus the binding's declared `Inputs` and prior bindings. The host's `process.env` is NOT inherited; cloud credentials, kubeconfig paths, API keys all remain invisible to the recipe even if it escapes the AST parser.
 
-Each recipe is validated by `validateRecipe()` in `src/modules/qa/binding-parser.ts` BEFORE bash is ever spawned. The validator enforces:
+Each recipe is validated by `validateRecipe()` in `src/modules/qa/recipe-validator.ts` (re-exported from `binding-parser.ts`) BEFORE bash is ever spawned. The validator enforces:
 
 | Rule | Detail |
 |---|---|

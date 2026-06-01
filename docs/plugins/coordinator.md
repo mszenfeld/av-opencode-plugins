@@ -126,7 +126,7 @@ opencode agent perun "napraw QA-001, QA-003 z docs/testing/reports/2026-05-18-ex
 - `Read`, `Write`, `Edit`, `Glob`, `Grep`
 - `Bash(mkdir:*)`, `Bash(ls:*)`, `Bash(./scripts/qa-preflight.sh:*)` — no general `Bash(*)`, no `git`
 - `todowrite`, `question`
-- `dispatch_parallel`, `assign_issue_ids`, `compute_waves`
+- `dispatch_parallel`, `dispatch_background`, `poll_background`, `wait_background`, `assign_issue_ids`, `compute_waves`
 - `record_input`, `parse_plan` — Perun-only QA-plugin tools used by the bindings workflow (parsing the plan's `## Setup → **Bindings:**` block and capturing user-pasted inputs during the mid-run dialog). Neither tool is available to any zmora variant; the QA plugin gates them per-agent via `AgentConfig.tools`.
 
 The `Task` tool is **excluded** to force every specialist dispatch through `dispatch_parallel`. There is no fallback.
@@ -146,6 +146,7 @@ If Perun ever observes itself about to perform any of the above, that is a spec 
 
 | Name | Mode | Purpose | When |
 |---|---|---|---|
+| `Veles - Planner` | all | Planning specialist (EXPENSIVE): authors a QA/work plan from a diff or request, dispatches read-only helpers (`triglav`), and returns the saved plan — it does **not** execute the planned work. The one allowlisted `mode: all` dispatch target (`DISPATCHABLE_ALL_AGENTS`); also user-switchable in the `/agents` picker. | Dispatched by Perun when a QA run is requested but no plan exists; or selected directly by the user |
 | `zmora` | subagent | Execute a single QA scenario (FE or BE). Implemented as two registered variants (`zmora-fe` for Playwright scenarios, `zmora-be` for HTTP + DB scenarios); Perun routes by scenario prefix and dispatches one task per scenario. The logical name `zmora` is what appears in the TUI and the report; variants are an internal implementation detail. See [docs/plugins/qa.md](./qa.md) for the variant-split rationale. | Dispatched once per scenario by Perun |
 | `zmora-setup` | subagent | Provision one Binding per dispatch via `execute_recipe` — the ONLY agent in the bundle with `execute_recipe` enabled. Has no Bash access at all (`SETUP_TOOLS = ["Read", "Glob", "Grep", "execute_recipe"]`); the recipe sandbox is its only actuator. Perun synthesises `SETUP-NN` scenarios for each declared binding in Workflow 1 Step 3.6 and dispatches them in Wave 0 ahead of any FE/BE scenarios that depend on the binding. See [docs/plugins/qa.md → Bindings (dynamic credential provisioning)](./qa.md#bindings-dynamic-credential-provisioning). | Dispatched once per binding by Perun before FE/BE scenarios |
 | `fix-auto` | subagent | Auto-fix code issues from reports | User accepts a fix proposal |
@@ -325,7 +326,7 @@ This package is intentionally MVP scope. Known deferrals:
 - **No intent detection.** `@perun` does not classify free-form requests. Workflow selection is driven by the literal cues in the user message (e.g. "uruchom QA", "napraw").
 - **No model routing.** The plugin does not pick a model per specialist; it relies on the harness's defaults for each registered agent.
 - **Polling instead of event-driven.** `dispatch_parallel` polls every 1 s for specialist completion. An event-driven path (subscribing to session updates) is deferred until the upstream SDK exposes a stable hook.
-- **Pre-built specialist set.** `@perun` only knows three logical specialists (`zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — `fix-auto`, and `triglav`). Adding more is done by registering a new agent `*.metadata.ts` entry in the metadata registry — `perun.md`'s specialist table and delegation triggers are then re-rendered from that registry at init (see [How the specialist roster reaches `perun.md`](#how-the-specialist-roster-reaches-perunmd-render-pipeline)). You do not hand-edit `perun.md`'s placeholder regions.
+- **Pre-built specialist set.** `@perun` only knows four logical specialists (`Veles - Planner`, `zmora` — split into `zmora-fe`, `zmora-be`, and `zmora-setup` variants — `fix-auto`, and `triglav`). Adding more is done by registering a new agent `*.metadata.ts` entry in the metadata registry — `perun.md`'s specialist table and delegation triggers are then re-rendered from that registry at init (see [How the specialist roster reaches `perun.md`](#how-the-specialist-roster-reaches-perunmd-render-pipeline)). You do not hand-edit `perun.md`'s placeholder regions.
 - **Polish-first prompts.** The coordinator's user-facing messages (proposals, summaries) are in Polish. English prompts work, but the proposal copy is not localized.
 - **No CI integration.** Reports are local markdown only. CI hooks are not wired up.
 
@@ -360,7 +361,7 @@ src/agents/
                             # See "How the specialist roster reaches perun.md".
 
 src/modules/agent-registry/
-├── agent-metadata.ts       # SpecialistInfo type + the metadata registry (getAgentMetadataRegistry)
+├── agent-metadata.ts       # SpecialistInfo type (the registry + register/getAgentMetadataRegistry live in index.ts)
 ├── perun-prompt-builder.ts # buildPerunPrompt(): fills perun.md placeholders from the registry
 └── fix-auto.metadata.ts    # fix-auto's metadata entry (registered src-side; see index.ts)
 

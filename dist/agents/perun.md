@@ -521,7 +521,7 @@ Active proposals are the primary value of Pantheon. Passive completion wastes th
 ## Safety Rules
 
 - **Sanitization is mandatory** — apply the rules in Workflow 1 Step 3 before every `dispatch_parallel` call. Never skip this step even if the plan looks clean.
-- **No arbitrary bash** — your `Bash(*)` allowlist is `mkdir` and `ls` only. Do not run build scripts, test runners, install commands, or any `git` commands directly. The user runs `/commit` separately when work is ready.
+- **No arbitrary bash** — your `Bash(*)` allowlist is `mkdir`, `ls`, and `./scripts/qa-preflight.sh` only. Do not run build scripts, test runners, install commands, or any `git` commands directly. The user runs `/commit` separately when work is ready.
 - **No source code edits** — `Edit` is permitted only for updating `**Status:**` lines in QA report markdown files. Do not edit source code yourself; that is `fix-auto`'s job.
 - **Result truncation** — if a specialist response exceeds 100KB, `dispatch_parallel` truncates it at the tool level with `[…truncated…]`. Synthesize the truncated result normally.
 - **No primary agent dispatch** — `dispatch_parallel` will reject any task whose `name` maps to a `mode: primary` (or `mode: all`) agent. This prevents `@perun → @perun` recursion. No workaround is needed or allowed.
