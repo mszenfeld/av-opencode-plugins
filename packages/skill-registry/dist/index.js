@@ -2,7 +2,7 @@
 import path2 from "path";
 import { fileURLToPath } from "url";
 import { tool } from "@opencode-ai/plugin";
-import { COORDINATOR_AGENT_NAME, getSessionAgent } from "@appverk/opencode-skill-utils";
+import { isCoordinatorSession } from "@appverk/opencode-skill-utils";
 
 // src/skill-catalog.ts
 import { existsSync, readFileSync, readdirSync } from "fs";
@@ -181,7 +181,7 @@ var AppVerkSkillRegistryPlugin = async ({ client }) => {
     },
     "experimental.chat.system.transform": async (input, output) => {
       if (!input.sessionID) return;
-      if (await getSessionAgent(input.sessionID, client) === COORDINATOR_AGENT_NAME) return;
+      if (await isCoordinatorSession(input.sessionID, client)) return;
       output.system.push(activationRules);
     }
   };

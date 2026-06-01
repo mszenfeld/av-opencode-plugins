@@ -27,15 +27,38 @@ type Client = PluginInput["client"];
  * the sync test in Task 7.
  */
 declare const COORDINATOR_AGENT_NAME = "Perun - Coordinator";
-/** Parent session id, or undefined for a parentless (top/primary) session. Never throws. */
-declare function getSessionParentID(sessionID: string, client: Client): Promise<string | undefined>;
 /** The agent a session runs under, from its first user message. Undefined if unknown. Never throws. */
 declare function getSessionAgent(sessionID: string, client: Client): Promise<string | undefined>;
-/** True only when the session is positively identified as the coordinator. */
+/**
+ * Memoized variant of {@link getSessionAgent}, shared by all consumers (the bash gate
+ * and the skill-registry transform) so the underlying transcript fetch happens at most
+ * once per session.
+ *
+ * IMPORTANT: only RESOLVED (non-undefined) identities are cached. On the coordinator's
+ * very first turn `getSessionAgent` may be unresolvable (messages not yet queryable);
+ * caching that miss would freeze the turn-1 unresolved window and the identity could
+ * never resolve later. So a miss is never cached and a subsequent call re-attempts.
+ */
+declare function getSessionAgentCached(sessionID: string, client: Client): Promise<string | undefined>;
+/**
+ * True only when the session is positively identified as the coordinator.
+ *
+ * Resolves identity through the memoized {@link getSessionAgentCached}, so the shared
+ * production call sites (the per-bash-call gate and the per-turn skill-registry
+ * transform) can route through this predicate without reintroducing a full-transcript
+ * fetch on every invocation.
+ */
 declare function isCoordinatorSession(sessionID: string, client: Client): Promise<boolean>;
 
 /** Parse `Bash(<prog>:*)` programs out of an agent's `allowed-tools` frontmatter line. */
 declare function parseAllowedBashPrograms(frontmatter: string): string[];
+/**
+ * True when the command contains a compound separator/operator/redirect or a
+ * shell wrapper (the same forms `classifyCoordinatorBash` rejects without a
+ * single resolvable program token). Shared so the rejection classifier and the
+ * violation-error subject agree on what "compound" means.
+ */
+declare function isCompoundCommand(command: string): boolean;
 interface BashClassification {
     allowed: boolean;
     program: string | null;
@@ -74,4 +97,4 @@ declare function createSkillLoader(options: CreateSkillLoaderOptions): (name: st
 
 declare function createSkillPlugin(options: CreateSkillPluginOptions): Plugin;
 
-export { type BashClassification, CATEGORY_PREFIX_MAPPING, COORDINATOR_AGENT_NAME, type CreateSkillLoaderOptions, type CreateSkillPluginOptions, VALID_CATEGORIES, VALID_PREFIXES, type ViolationInfo, buildViolationError, classifyCoordinatorBash, createSkillLoader, createSkillPlugin, getSessionAgent, getSessionParentID, isCoordinatorSession, parseAllowedBashPrograms };
+export { type BashClassification, CATEGORY_PREFIX_MAPPING, COORDINATOR_AGENT_NAME, type CreateSkillLoaderOptions, type CreateSkillPluginOptions, VALID_CATEGORIES, VALID_PREFIXES, type ViolationInfo, buildViolationError, classifyCoordinatorBash, createSkillLoader, createSkillPlugin, getSessionAgent, getSessionAgentCached, isCompoundCommand, isCoordinatorSession, parseAllowedBashPrograms };

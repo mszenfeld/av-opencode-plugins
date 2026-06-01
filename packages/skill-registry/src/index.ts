@@ -2,7 +2,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { COORDINATOR_AGENT_NAME, getSessionAgent } from "@appverk/opencode-skill-utils"
+import { isCoordinatorSession } from "@appverk/opencode-skill-utils"
 import { buildSkillCatalog } from "./skill-catalog.js"
 import { createSkillLoader } from "./load-skill.js"
 import { generateActivationRules } from "./prompt-injector.js"
@@ -59,10 +59,11 @@ export const AppVerkSkillRegistryPlugin: Plugin = async ({ client }) => {
       if (!input.sessionID) return
       // Precise positive identification: only the coordinator is suppressed — every other
       // agent (dispatched specialists, developer-as-primary) keeps its rules. On the
-      // coordinator's very first turn getSessionAgent may be unresolvable (messages not yet
+      // coordinator's very first turn the identity may be unresolvable (messages not yet
       // queryable); in that window the rules are injected but harmless, because Perun's
-      // skill-loading tools are already disabled (Task 5 coordinator config).
-      if ((await getSessionAgent(input.sessionID, client)) === COORDINATOR_AGENT_NAME) return
+      // skill-loading tools are already disabled (Task 5 coordinator config). The unresolved
+      // turn-1 miss is not cached, so the identity still resolves on later turns.
+      if (await isCoordinatorSession(input.sessionID, client)) return
       output.system.push(activationRules)
     },
   }

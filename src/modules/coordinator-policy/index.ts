@@ -2,8 +2,7 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin"
 import {
   buildViolationError,
   classifyCoordinatorBash,
-  getSessionAgent,
-  COORDINATOR_AGENT_NAME,
+  isCoordinatorSession,
 } from "@appverk/opencode-skill-utils"
 import { readCoordinatorBashAllowlist } from "./read-allowlist.js"
 
@@ -17,7 +16,7 @@ export function makeBashGate(client: Client, allowed: string[]) {
   ) => {
     if (input.tool !== "bash") return
     // Fail-OPEN: only enforce when positively identified as the coordinator.
-    if ((await getSessionAgent(input.sessionID, client)) !== COORDINATOR_AGENT_NAME) return
+    if (!(await isCoordinatorSession(input.sessionID, client))) return
     const command = String(output.args?.command ?? "")
     const verdict = classifyCoordinatorBash(command, allowed)
     if (!verdict.allowed) throw buildViolationError({ tool: "bash", command, reason: "not-allowlisted" })

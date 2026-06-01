@@ -17,14 +17,6 @@ var VALID_CATEGORIES = Object.keys(CATEGORY_PREFIX_MAPPING);
 
 // src/session-identity.ts
 var COORDINATOR_AGENT_NAME = "Perun - Coordinator";
-async function getSessionParentID(sessionID, client) {
-  try {
-    const res = await client.session.get({ path: { id: sessionID } });
-    return res.data?.parentID;
-  } catch {
-    return void 0;
-  }
-}
 async function getSessionAgent(sessionID, client) {
   try {
     const res = await client.session.messages({ path: { id: sessionID } });
@@ -35,8 +27,16 @@ async function getSessionAgent(sessionID, client) {
     return void 0;
   }
 }
+var sessionAgentCache = /* @__PURE__ */ new Map();
+async function getSessionAgentCached(sessionID, client) {
+  const cached = sessionAgentCache.get(sessionID);
+  if (cached !== void 0) return cached;
+  const agent = await getSessionAgent(sessionID, client);
+  if (agent !== void 0) sessionAgentCache.set(sessionID, agent);
+  return agent;
+}
 async function isCoordinatorSession(sessionID, client) {
-  return await getSessionAgent(sessionID, client) === COORDINATOR_AGENT_NAME;
+  return await getSessionAgentCached(sessionID, client) === COORDINATOR_AGENT_NAME;
 }
 
 // src/coordinator-bash-policy.ts
@@ -50,16 +50,19 @@ function parseAllowedBashPrograms(frontmatter) {
   }
   return out;
 }
-var COMPOUND = /(\|\||&&|;|\||`|\$\(|(?<![\w./-])(?:bash|sh|eval)\b)/;
+var COMPOUND = /(\|\||&&|;|\||&|[\r\n]|`|\$\(|<|>|(?<![\w./-])(?:bash|sh|eval)\b)/;
+function isCompoundCommand(command) {
+  return COMPOUND.test(command.trim());
+}
 function classifyCoordinatorBash(command, allowedPrograms) {
   const trimmed = command.trim();
-  if (COMPOUND.test(trimmed)) return { allowed: false, program: null };
+  if (isCompoundCommand(trimmed)) return { allowed: false, program: null };
   const program = trimmed.split(/\s+/)[0] ?? "";
   return { allowed: allowedPrograms.includes(program), program };
 }
 function buildViolationError(info) {
   const payload = JSON.stringify({ marker: "COORDINATOR_POLICY_VIOLATION", ...info });
-  const subject = info.command ? `\`${info.command.split(/\s+/)[0]}\`` : info.skill ? `skill \`${info.skill}\`` : "that";
+  const subject = info.command ? isCompoundCommand(info.command) ? "a compound command" : `\`${info.command.split(/\s+/)[0]}\`` : info.skill ? `skill \`${info.skill}\`` : "that";
   return new Error(
     `${payload}
 The coordinator may not run ${subject}. Dispatch Veles (planning) or Triglav (exploration) to inspect the repository instead.`
@@ -204,7 +207,8 @@ export {
   createSkillLoader,
   createSkillPlugin,
   getSessionAgent,
-  getSessionParentID,
+  getSessionAgentCached,
+  isCompoundCommand,
   isCoordinatorSession,
   parseAllowedBashPrograms
 };

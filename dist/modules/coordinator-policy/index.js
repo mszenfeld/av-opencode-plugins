@@ -1,14 +1,13 @@
 import {
   buildViolationError,
   classifyCoordinatorBash,
-  getSessionAgent,
-  COORDINATOR_AGENT_NAME
+  isCoordinatorSession
 } from "@appverk/opencode-skill-utils";
 import { readCoordinatorBashAllowlist } from "./read-allowlist.js";
 function makeBashGate(client, allowed) {
   return async (input, output) => {
     if (input.tool !== "bash") return;
-    if (await getSessionAgent(input.sessionID, client) !== COORDINATOR_AGENT_NAME) return;
+    if (!await isCoordinatorSession(input.sessionID, client)) return;
     const command = String(output.args?.command ?? "");
     const verdict = classifyCoordinatorBash(command, allowed);
     if (!verdict.allowed) throw buildViolationError({ tool: "bash", command, reason: "not-allowlisted" });

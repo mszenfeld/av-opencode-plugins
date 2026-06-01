@@ -19,5 +19,6 @@ function readCoordinatorBashAllowlist() {
   }
 }
 export {
+  FALLBACK_ALLOWLIST,
   readCoordinatorBashAllowlist
 };

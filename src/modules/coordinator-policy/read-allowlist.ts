@@ -8,9 +8,9 @@ import { parseAllowedBashPrograms } from "@appverk/opencode-skill-utils"
  * cannot be read/parsed, so a packaging glitch degrades the gate to a known-good
  * allowlist instead of crashing every plugin (the reader runs inside the shared
  * `Promise.all` plugin-init) or silently blocking the coordinator's own `mkdir`/`ls`.
- * The Task-7 sync test guards this constant against frontmatter drift.
+ * `read-allowlist.test.ts` guards this constant against `perun.md` frontmatter drift.
  */
-const FALLBACK_ALLOWLIST = ["mkdir", "ls", "./scripts/qa-preflight.sh"]
+export const FALLBACK_ALLOWLIST = ["mkdir", "ls", "./scripts/qa-preflight.sh"]
 
 /** Read Perun's allowed bash programs from its agent markdown frontmatter (single source of truth). */
 export function readCoordinatorBashAllowlist(): string[] {
